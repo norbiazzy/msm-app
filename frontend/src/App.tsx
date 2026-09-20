@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
+  addClientPayment,
   confirmInvoice,
   createDeal,
   createInvoice,
@@ -9,11 +10,12 @@ import {
   listTasks,
   login,
   requestInvoiceCorrection,
+  updatePaymentStatus,
   updateTaskStatus,
   uploadDealFile,
   type Task,
 } from './api';
-import type { CurrentUser, Deal, Invoice, SellerType } from './types';
+import type { ClientPaymentMethod, CurrentUser, Deal, Invoice, PaymentStatus, SellerType } from './types';
 
 const sellerLabels: Record<SellerType, string> = { ST: 'СТ', MSM: 'МСМ', IP: 'ИП' };
 type View = 'home' | 'new' | 'tasks' | 'deal';
@@ -119,6 +121,7 @@ function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
         <span>Отгрузка: {deal.plannedShipmentAt ? new Date(deal.plannedShipmentAt).toLocaleDateString('ru-RU') : 'не указана'}</span>
         <span>{invoice ? statusLabel(invoice.status) : 'Ожидаем счёт'}</span>
       </div>
+      <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
       {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
       {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
     </button>
@@ -151,7 +154,7 @@ function DealDetail({ dealId, user, onBack }: { dealId: string; user: CurrentUse
   async function confirm() {
     if (!current) return;
     setSaving(true); setError('');
-    try { await confirmInvoice(deal.id, current.id, user.id); await reload(); }
+    try { await confirmInvoice(dealId, current.id, user.id); await reload(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setSaving(false); }
   }
@@ -160,7 +163,7 @@ function DealDetail({ dealId, user, onBack }: { dealId: string; user: CurrentUse
     if (!current || !correction.trim()) return;
     setSaving(true); setError('');
     try {
-      await requestInvoiceCorrection(deal.id, current.id, { actorId: user.id, comment: correction.trim(), urgent });
+      await requestInvoiceCorrection(dealId, current.id, { actorId: user.id, comment: correction.trim(), urgent });
       setCorrection(''); setUrgent(false); setCorrectionOpen(false);
       await reload();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
@@ -195,6 +198,8 @@ function DealDetail({ dealId, user, onBack }: { dealId: string; user: CurrentUse
       <button className="primary wide" disabled={saving || !correction.trim()} onClick={sendCorrection}>Отправить бухгалтерии</button>
     </div>}
 
+    <PaymentBlock deal={deal} user={user} onChanged={reload} />
+
     <div className="infoBox"><strong>Исходный запрос</strong><p>{deal.requestText || 'Не указан'}</p>{deal.accountingComment && <p><b>Комментарий бухгалтерии:</b> {deal.accountingComment}</p>}</div>
 
     {deal.invoices.length > 1 && <div className="infoBox">
@@ -222,6 +227,124 @@ function InvoiceBlock({ invoice, sellerType }: { invoice: Invoice; sellerType: S
 
 function InvoiceVersion({ invoice, sellerType }: { invoice: Invoice; sellerType: SellerType }) {
   return <div className="versionRow"><div><b>Версия {invoice.version}</b><span>{sellerLabels[sellerType]}-{invoice.number} · {statusLabel(invoice.status)}</span></div>{invoice.fileId && <a href={dealFileUrl(invoice.fileId)} target="_blank" rel="noreferrer">Файл</a>}</div>;
+}
+
+function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser; onChanged: () => Promise<void> }) {
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [status, setStatus] = useState<PaymentStatus>(deal.paymentStatus);
+  const [deferralStartAt, setDeferralStartAt] = useState(deal.deferralStartAt?.slice(0, 10) || '');
+  const [deferralEndAt, setDeferralEndAt] = useState(deal.deferralEndAt?.slice(0, 10) || '');
+  const [deferralTerms, setDeferralTerms] = useState(deal.deferralTerms || '');
+  const [amount, setAmount] = useState('');
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState<ClientPaymentMethod>('NONCASH');
+  const [comment, setComment] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setStatus(deal.paymentStatus);
+    setDeferralStartAt(deal.deferralStartAt?.slice(0, 10) || '');
+    setDeferralEndAt(deal.deferralEndAt?.slice(0, 10) || '');
+    setDeferralTerms(deal.deferralTerms || '');
+  }, [deal.paymentStatus, deal.deferralStartAt, deal.deferralEndAt, deal.deferralTerms]);
+
+  const payments = deal.clientPayments || [];
+  const total = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+  async function saveStatus() {
+    setSaving(true); setError('');
+    try {
+      await updatePaymentStatus(deal.id, {
+        status,
+        actorId: user.id,
+        deferralStartAt: status === 'DEFERRED' ? deferralStartAt || undefined : undefined,
+        deferralEndAt: status === 'DEFERRED' ? deferralEndAt || undefined : undefined,
+        deferralTerms: status === 'DEFERRED' ? deferralTerms || undefined : undefined,
+      });
+      setEditingStatus(false);
+      await onChanged();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  async function addPayment() {
+    if (!amount || Number(amount) <= 0) return;
+    setSaving(true); setError('');
+    try {
+      let fileId: string | undefined;
+      if (file) {
+        const uploaded = await uploadDealFile(deal.id, file, 'CLIENT_PAYMENT');
+        fileId = uploaded.id;
+      }
+      await addClientPayment(deal.id, {
+        amount: Number(amount),
+        paidAt,
+        method,
+        comment: comment.trim() || undefined,
+        actorId: user.id,
+        fileId,
+      });
+      setAmount('');
+      setComment('');
+      setFile(null);
+      setAdding(false);
+      await onChanged();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="paymentBox">
+    <div className="paymentHead">
+      <div>
+        <span>Оплата клиента</span>
+        <strong>{paymentStatusLabel(deal.paymentStatus)}</strong>
+      </div>
+      {total > 0 && <b>{money(total)}</b>}
+    </div>
+
+    {deal.paymentStatus === 'DEFERRED' && <div className="deferralSummary">
+      Отсрочка: {deal.deferralStartAt ? new Date(deal.deferralStartAt).toLocaleDateString('ru-RU') : '—'}
+      {' → '}
+      {deal.deferralEndAt ? new Date(deal.deferralEndAt).toLocaleDateString('ru-RU') : '—'}
+      {deal.deferralTerms && <span>{deal.deferralTerms}</span>}
+    </div>}
+
+    <div className="paymentActions">
+      <button className="secondary" type="button" onClick={() => setEditingStatus((v) => !v)}>Статус</button>
+      <button className="primary" type="button" onClick={() => setAdding((v) => !v)}>+ Платёж</button>
+    </div>
+
+    {editingStatus && <div className="paymentForm">
+      <Field title="Статус оплаты">
+        <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)}>
+          <option value="NO_PREPAYMENT">Без предоплаты</option>
+          <option value="WAITING">Ожидаем оплату</option>
+          <option value="ADVANCE">Аванс</option>
+          <option value="PAID">Оплачен</option>
+          <option value="DEFERRED">Отсрочка</option>
+        </select>
+      </Field>
+      {status === 'DEFERRED' && <>
+        <div className="inline"><Field title="Начало"><input type="date" value={deferralStartAt} onChange={(e) => setDeferralStartAt(e.target.value)} /></Field><Field title="Окончание"><input type="date" value={deferralEndAt} onChange={(e) => setDeferralEndAt(e.target.value)} /></Field></div>
+        <Field title="Условия отсрочки"><textarea rows={2} value={deferralTerms} onChange={(e) => setDeferralTerms(e.target.value)} placeholder="Например: 14 календарных дней после отгрузки" /></Field>
+      </>}
+      <button className="primary wide" type="button" disabled={saving} onClick={saveStatus}>Сохранить статус</button>
+    </div>}
+
+    {adding && <div className="paymentForm">
+      <div className="inline"><Field title="Сумма"><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="100000" /></Field><Field title="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field></div>
+      <Field title="Способ"><select value={method} onChange={(e) => setMethod(e.target.value as ClientPaymentMethod)}><option value="NONCASH">Безнал</option><option value="CASH">Наличными</option><option value="CARD">Пластик</option><option value="ADVANCE">Аванс</option></select></Field>
+      <Field title="Комментарий"><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: часть оплаты по счёту" /></Field>
+      <Field title="Подтверждение оплаты"><input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
+      <button className="primary wide" type="button" disabled={saving || !amount || Number(amount) <= 0} onClick={addPayment}>Добавить платёж</button>
+    </div>}
+
+    {payments.length > 0 && <div className="paymentList">{payments.map((payment) => <div className="paymentRow" key={payment.id}><div><b>{money(payment.amount)}</b><span>{new Date(payment.paidAt).toLocaleDateString('ru-RU')} · {paymentMethodLabel(payment.method)}</span>{payment.comment && <em>{payment.comment}</em>}</div>{payment.fileId && <a href={dealFileUrl(payment.fileId)} target="_blank" rel="noreferrer">Файл</a>}</div>)}</div>}
+    {error && <div className="error">{error}</div>}
+  </div>;
 }
 
 function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCancel: () => void; onCreated: () => void }) {
@@ -281,7 +404,9 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 }
 
 function money(value: string | number) { return `${Number(value).toLocaleString('ru-RU')} ₽`; }
-function auditLabel(action: string) { return ({ CREATE: 'Создана сделка', UPLOAD: 'Загружен счёт', CONFIRM: 'Счёт подтверждён', REQUEST_CORRECTION: 'Запрошена корректировка' } as Record<string,string>)[action] || action; }
+function auditLabel(action: string) { return ({ CREATE: 'Создана сделка', UPLOAD: 'Загружен счёт', CONFIRM: 'Счёт подтверждён', REQUEST_CORRECTION: 'Запрошена корректировка', CLIENT_PAYMENT_ADDED: 'Добавлена оплата клиента', PAYMENT_STATUS_CHANGED: 'Изменён статус оплаты' } as Record<string,string>)[action] || action; }
+function paymentStatusLabel(status: PaymentStatus) { return ({ NO_PREPAYMENT: 'Без предоплаты', WAITING: 'Ожидаем оплату', ADVANCE: 'Аванс', PAID: 'Оплачен', DEFERRED: 'Отсрочка' } as Record<PaymentStatus,string>)[status]; }
+function paymentMethodLabel(method: ClientPaymentMethod) { return ({ NONCASH: 'Безнал', CASH: 'Наличные', CARD: 'Пластик', ADVANCE: 'Аванс' } as Record<ClientPaymentMethod,string>)[method]; }
 function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужны данные', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
 function Field({ title, children }: { title: string; children: React.ReactNode }) { return <label className="field"><span>{title}</span>{children}</label>; }
 function ScreenMessage({ children }: { children: React.ReactNode }) { return <div className="screenMessage">{children}</div>; }

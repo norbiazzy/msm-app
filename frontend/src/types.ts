@@ -1,5 +1,7 @@
 export type UserRole = 'MANAGER' | 'ACCOUNTANT' | 'LEADER' | 'ADMIN';
 export type SellerType = 'ST' | 'MSM' | 'IP';
+export type PaymentStatus = 'NO_PREPAYMENT' | 'WAITING' | 'ADVANCE' | 'PAID' | 'DEFERRED';
+export type ClientPaymentMethod = 'NONCASH' | 'CASH' | 'CARD' | 'ADVANCE';
 
 export type CurrentUser = {
   id: string;
@@ -46,6 +48,18 @@ export type AuditEvent = {
   actor?: { firstName: string; lastName?: string };
 };
 
+export type ClientPayment = {
+  id: string;
+  amount: string;
+  paidAt: string;
+  method: ClientPaymentMethod;
+  comment?: string;
+  fileId?: string;
+  file?: StoredFile;
+  actor?: { id: string; firstName: string; lastName?: string };
+  createdAt: string;
+};
+
 export type Deal = {
   id: string;
   internalNumber: number;
@@ -56,9 +70,14 @@ export type Deal = {
   accountingComment?: string;
   requestText?: string;
   status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+  paymentStatus: PaymentStatus;
+  deferralStartAt?: string;
+  deferralEndAt?: string;
+  deferralTerms?: string;
   plannedShipmentAt?: string;
   invoices: Invoice[];
   tasks: DealTask[];
+  clientPayments?: ClientPayment[];
   auditEvents?: AuditEvent[];
 };
 

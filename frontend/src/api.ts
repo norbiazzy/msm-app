@@ -1,4 +1,4 @@
-import type { CurrentUser, Deal, UserRole } from './types';
+import type { ClientPayment, ClientPaymentMethod, CurrentUser, Deal, PaymentStatus, UserRole } from './types';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -82,6 +82,39 @@ export async function requestInvoiceCorrection(
 ) {
   return json(`/deals/${dealId}/invoices/${invoiceId}/correction`, {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function addClientPayment(
+  dealId: string,
+  payload: {
+    amount: number;
+    paidAt: string;
+    method: ClientPaymentMethod;
+    comment?: string;
+    actorId: string;
+    fileId?: string;
+  },
+) {
+  return json<ClientPayment>(`/deals/${dealId}/payments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePaymentStatus(
+  dealId: string,
+  payload: {
+    status: PaymentStatus;
+    actorId: string;
+    deferralStartAt?: string;
+    deferralEndAt?: string;
+    deferralTerms?: string;
+  },
+) {
+  return json<Deal>(`/deals/${dealId}/payments/status`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   });
 }

@@ -78,3 +78,20 @@ h1 { margin: 3px 0 0; font-size: 25px; }
 .historyList b { font-size: 12px; }
 .historyList em { grid-column: 2; font-size: 11px; color: #57534e; font-style: normal; }
 @media (max-width: 520px) { .invoiceBlock { grid-template-columns: 1fr 1fr; } .invoiceBlock > div:last-of-type { grid-column: 1 / -1; } .historyList > div { grid-template-columns: 1fr; } .historyList em { grid-column: 1; } }
+.paymentMini { margin-top: 9px; font-size: 12px; font-weight: 800; color: #44403c; }
+.paymentBox { display: grid; gap: 12px; background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 14px; }
+.paymentHead { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.paymentHead span { display: block; color: #78716c; font-size: 11px; }
+.paymentHead strong { display: block; margin-top: 2px; font-size: 16px; }
+.paymentHead > b { white-space: nowrap; font-size: 16px; }
+.paymentActions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.paymentForm { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid #f0efed; }
+.paymentList { display: grid; gap: 7px; padding-top: 4px; }
+.paymentRow { display: flex; justify-content: space-between; gap: 10px; align-items: center; background: #fafaf9; border-radius: 12px; padding: 10px; }
+.paymentRow b, .paymentRow span, .paymentRow em { display: block; }
+.paymentRow span { margin-top: 2px; color: #78716c; font-size: 11px; }
+.paymentRow em { margin-top: 3px; color: #57534e; font-size: 11px; font-style: normal; }
+.paymentRow a { color: #171717; font-size: 12px; font-weight: 800; }
+.deferralSummary { padding: 9px 10px; background: #fafaf9; border-radius: 12px; font-size: 12px; }
+.deferralSummary span { display: block; margin-top: 4px; color: #57534e; }
+@media (max-width: 520px) { .paymentActions { grid-template-columns: 1fr 1fr; } .paymentHead { align-items: center; } }

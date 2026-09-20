@@ -73,6 +73,7 @@ export class DealsService {
         invoices: { orderBy: { createdAt: 'desc' }, include: { file: true } },
         tasks: { orderBy: [{ urgent: 'desc' }, { createdAt: 'desc' }] },
         files: true,
+        clientPayments: { orderBy: { paidAt: 'desc' }, include: { file: true, actor: { select: { id: true, firstName: true, lastName: true } } } },
         auditEvents: { orderBy: { createdAt: 'desc' }, include: { actor: true } },
       },
     });

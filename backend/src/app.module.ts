@@ -4,11 +4,12 @@ import { AuthModule } from './auth/auth.module';
 import { DealsModule } from './deals/deals.module';
 import { FilesModule } from './files/files.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { ClientPaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { TasksModule } from './tasks/tasks.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, DealsModule, TasksModule, FilesModule, InvoicesModule],
+  imports: [PrismaModule, AuthModule, DealsModule, TasksModule, FilesModule, InvoicesModule, ClientPaymentsModule],
   controllers: [AppController],
 })
 export class AppModule {}

@@ -56,6 +56,21 @@ enum FileProvider {
   EXTERNAL
 }
 
+enum PaymentStatus {
+  NO_PREPAYMENT
+  WAITING
+  ADVANCE
+  PAID
+  DEFERRED
+}
+
+enum ClientPaymentMethod {
+  NONCASH
+  CASH
+  CARD
+  ADVANCE
+}
+
 model User {
   id              String       @id @default(cuid())
   telegramId      BigInt       @unique
@@ -69,6 +84,7 @@ model User {
   createdTasks    Task[]       @relation("TaskCreator")
   assignedTasks   Task[]       @relation("TaskAssignee")
   auditEvents     AuditEvent[]
+  clientPayments  ClientPayment[] @relation("ClientPaymentActor")
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 }
@@ -88,6 +104,10 @@ model Deal {
   marginMode        String?
   marginValue       Decimal?        @db.Decimal(14, 2)
   status            DealStatus      @default(ACTIVE)
+  paymentStatus     PaymentStatus   @default(WAITING)
+  deferralStartAt   DateTime?
+  deferralEndAt     DateTime?
+  deferralTerms     String?
   plannedShipmentAt DateTime?
   managerId         String
   manager           User            @relation("DealManager", fields: [managerId], references: [id])
@@ -97,6 +117,7 @@ model Deal {
   tasks             Task[]
   files             StoredFile[]
   auditEvents       AuditEvent[]
+  clientPayments    ClientPayment[]
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   closedAt          DateTime?
@@ -163,8 +184,26 @@ model StoredFile {
   externalUrl       String?
   createdAt         DateTime     @default(now())
   invoice            ClientInvoice? @relation("InvoiceFile")
+  clientPayment      ClientPayment? @relation("ClientPaymentFile")
 
   @@index([dealId, category])
+}
+
+model ClientPayment {
+  id        String              @id @default(cuid())
+  dealId    String
+  deal      Deal                @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  amount    Decimal             @db.Decimal(14, 2)
+  paidAt    DateTime
+  method    ClientPaymentMethod @default(NONCASH)
+  comment   String?
+  actorId   String
+  actor     User                @relation("ClientPaymentActor", fields: [actorId], references: [id])
+  fileId    String?             @unique
+  file      StoredFile?         @relation("ClientPaymentFile", fields: [fileId], references: [id])
+  createdAt DateTime            @default(now())
+
+  @@index([dealId, paidAt])
 }
 
 model AuditEvent {

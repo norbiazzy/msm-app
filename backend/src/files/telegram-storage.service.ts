@@ -16,7 +16,15 @@ export class TelegramStorageService {
     const form = new FormData();
     form.append('chat_id', chatId);
     if (caption) form.append('caption', caption.slice(0, 1024));
-    form.append('document', new Blob([file.buffer], { type: file.mimetype }), file.originalname);
+
+    const bytes = new Uint8Array(file.buffer.byteLength);
+    bytes.set(file.buffer);
+
+    form.append(
+      'document',
+      new Blob([bytes], { type: file.mimetype }),
+      file.originalname,
+    );
 
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
       method: 'POST',
