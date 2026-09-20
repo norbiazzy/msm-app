@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InvoiceStatus, SellerType, TaskStatus, TaskType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -57,6 +57,86 @@ export class InvoicesService {
       });
 
       return invoice;
+    });
+  }
+
+  async confirm(dealId: string, invoiceId: string, actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
+      if (!invoice.isCurrent) throw new BadRequestException('Подтвердить можно только актуальную версию счёта');
+
+      const updated = await tx.clientInvoice.update({
+        where: { id: invoiceId },
+        data: { status: InvoiceStatus.CONFIRMED },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          dealId,
+          actorId,
+          action: 'CONFIRM',
+          entityType: 'ClientInvoice',
+          entityId: invoiceId,
+          oldValue: { status: invoice.status },
+          newValue: { status: InvoiceStatus.CONFIRMED },
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  async requestCorrection(
+    dealId: string,
+    invoiceId: string,
+    body: { actorId: string; comment: string; urgent?: boolean },
+  ) {
+    const comment = body.comment?.trim();
+    if (!comment) throw new BadRequestException('Укажите, что нужно скорректировать');
+
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
+      if (!invoice.isCurrent) throw new BadRequestException('Корректировать можно только актуальную версию счёта');
+
+      const existing = await tx.task.findFirst({
+        where: {
+          dealId,
+          type: TaskType.CORRECT_CLIENT_INVOICE,
+          status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] },
+        },
+      });
+      if (existing) throw new BadRequestException('По этому счёту уже есть активная задача на корректировку');
+
+      await tx.clientInvoice.update({
+        where: { id: invoiceId },
+        data: { status: InvoiceStatus.CORRECTION_REQUESTED },
+      });
+
+      const task = await tx.task.create({
+        data: {
+          dealId,
+          type: TaskType.CORRECT_CLIENT_INVOICE,
+          title: `Скорректировать счёт ${invoice.number}`,
+          description: comment,
+          urgent: Boolean(body.urgent),
+          createdById: body.actorId,
+        },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          dealId,
+          actorId: body.actorId,
+          action: 'REQUEST_CORRECTION',
+          entityType: 'ClientInvoice',
+          entityId: invoiceId,
+          oldValue: { status: invoice.status },
+          newValue: { status: InvoiceStatus.CORRECTION_REQUESTED, comment, urgent: Boolean(body.urgent) },
+          reason: comment,
+        },
+      });
+
+      return task;
     });
   }
 }

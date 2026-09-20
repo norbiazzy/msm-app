@@ -1,5 +1,6 @@
-import { Controller, Param, Post, UploadedFile, UseInterceptors, Body } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { FilesService } from './files.service';
 
 @Controller('files')
@@ -14,5 +15,13 @@ export class FilesController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.files.upload(dealId, category || 'OTHER', file);
+  }
+
+  @Get(':fileId/download')
+  async download(@Param('fileId') fileId: string, @Res() res: Response) {
+    const file = await this.files.download(fileId);
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
+    res.send(file.buffer);
   }
 }

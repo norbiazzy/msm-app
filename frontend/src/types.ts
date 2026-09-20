@@ -9,6 +9,43 @@ export type CurrentUser = {
   role: UserRole;
 };
 
+export type StoredFile = {
+  id: string;
+  originalName: string;
+  mimeType?: string;
+};
+
+export type Invoice = {
+  id: string;
+  number: string;
+  invoiceDate?: string;
+  amount?: string;
+  status: string;
+  version?: number;
+  isCurrent?: boolean;
+  fileId?: string;
+  file?: StoredFile;
+  createdAt?: string;
+};
+
+export type DealTask = {
+  id: string;
+  title: string;
+  urgent: boolean;
+  status: string;
+  description?: string;
+  type?: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  action: string;
+  entityType: string;
+  reason?: string;
+  createdAt: string;
+  actor?: { firstName: string; lastName?: string };
+};
+
 export type Deal = {
   id: string;
   internalNumber: number;
@@ -20,8 +57,9 @@ export type Deal = {
   requestText?: string;
   status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
   plannedShipmentAt?: string;
-  invoices: Array<{ number: string; amount?: string; status: string }>;
-  tasks: Array<{ id: string; title: string; urgent: boolean; status: string }>;
+  invoices: Invoice[];
+  tasks: DealTask[];
+  auditEvents?: AuditEvent[];
 };
 
 declare global {

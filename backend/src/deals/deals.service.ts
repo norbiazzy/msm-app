@@ -70,7 +70,7 @@ export class DealsService {
       where: { id },
       include: {
         manager: true,
-        invoices: { orderBy: { createdAt: 'desc' } },
+        invoices: { orderBy: { createdAt: 'desc' }, include: { file: true } },
         tasks: { orderBy: [{ urgent: 'desc' }, { createdAt: 'desc' }] },
         files: true,
         auditEvents: { orderBy: { createdAt: 'desc' }, include: { actor: true } },

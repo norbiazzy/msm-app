@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramStorageService } from './telegram-storage.service';
 
@@ -24,5 +24,12 @@ export class FilesService {
         telegramChatId: remote.chatId,
       },
     });
+  }
+
+  async download(fileId: string) {
+    const stored = await this.prisma.storedFile.findUniqueOrThrow({ where: { id: fileId } });
+    if (!stored.telegramFileId) throw new BadRequestException('У файла нет Telegram file_id');
+    const buffer = await this.telegram.download(stored.telegramFileId);
+    return { buffer, fileName: stored.originalName, mimeType: stored.mimeType };
   }
 }

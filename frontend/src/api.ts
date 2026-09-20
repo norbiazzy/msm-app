@@ -25,6 +25,10 @@ export async function listDeals(managerId?: string): Promise<Deal[]> {
   return json(`/deals${q}`);
 }
 
+export async function getDeal(id: string): Promise<Deal> {
+  return json(`/deals/${id}`);
+}
+
 export async function createDeal(payload: Record<string, unknown>) {
   return json<Deal>('/deals', { method: 'POST', body: JSON.stringify(payload) });
 }
@@ -56,6 +60,28 @@ export async function uploadDealFile(dealId: string, file: File, category: strin
   return res.json() as Promise<{ id: string }>;
 }
 
+export function dealFileUrl(fileId: string) {
+  return `${API}/files/${encodeURIComponent(fileId)}/download`;
+}
+
 export async function createInvoice(dealId: string, payload: { number: string; invoiceDate?: string; amount?: number; fileId?: string; actorId: string }) {
   return json(`/deals/${dealId}/invoices`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function confirmInvoice(dealId: string, invoiceId: string, actorId: string) {
+  return json(`/deals/${dealId}/invoices/${invoiceId}/confirm`, {
+    method: 'PATCH',
+    body: JSON.stringify({ actorId }),
+  });
+}
+
+export async function requestInvoiceCorrection(
+  dealId: string,
+  invoiceId: string,
+  payload: { actorId: string; comment: string; urgent?: boolean },
+) {
+  return json(`/deals/${dealId}/invoices/${invoiceId}/correction`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
