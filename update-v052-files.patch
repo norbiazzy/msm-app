@@ -1,0 +1,441 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 6e9610b..25b2f74 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -5,6 +5,7 @@ import {
+ 
+ import {
+   MultiFilePicker,
++  SingleFilePicker,
+ } from './MultiFilePicker';
+ 
+ import {
+@@ -2107,7 +2108,8 @@ function DealDetail({
+       </div>
+ 
+ 
+-      {currentCustomerInvoice && (
++      {currentCustomerInvoice &&
++        invoiceRequestTask?.status !== 'NEED_DATA' && (
+ 
+         <div className="customerInvoiceBox">
+ 
+@@ -2378,36 +2380,60 @@ function DealDetail({
+                 </Field>
+ 
+ 
++                <div className="requestPreviousIncoming">
++
++                  <span>
++                    Входящий счёт, который уже был отправлен бухгалтерии
++                  </span>
++
++                  {currentCustomerInvoice ? (
++
++                    <div className="versionRow">
++
++                      <div>
++                        <b>
++                          {currentCustomerInvoice.originalName}
++                        </b>
++
++                        <span>
++                          Текущий исходный документ
++                        </span>
++                      </div>
++
++                      <a
++                        href={
++                          dealFileUrl(
++                            currentCustomerInvoice.id
++                          )
++                        }
++                        target="_blank"
++                        rel="noreferrer"
++                      >
++                        Открыть
++                      </a>
++
++                    </div>
++
++                  ) : (
++
++                    <div className="requestPreviousIncomingEmpty">
++                      Входящий счёт ранее не прикладывался
++                    </div>
++
++                  )}
++
++                </div>
++
++
+                 <Field title="Новый входящий счёт, если нужен">
+-                  <input
+-                    type="file"
++                  <SingleFilePicker
++                    file={requestIncomingInvoice}
++                    onChange={setRequestIncomingInvoice}
++                    title="+ Прикрепить новый входящий счёт"
+                     accept="application/pdf,image/*"
+-                    onChange={(e) =>
+-                      setRequestIncomingInvoice(
+-                        e.target.files?.[0] ||
+-                        null
+-                      )
+-                    }
+                   />
+                 </Field>
+ 
+-                {requestIncomingInvoice && (
+-                  <div className="selectedRequestFile">
+-                    <b>
+-                      {requestIncomingInvoice.name}
+-                    </b>
+-                    <button
+-                      type="button"
+-                      className="secondary compactButton"
+-                      onClick={() =>
+-                        setRequestIncomingInvoice(null)
+-                      }
+-                    >
+-                      Убрать
+-                    </button>
+-                  </div>
+-                )}
+-
+ 
+                 <Field title="Дополнительные документы / реквизиты">
+                   <MultiFilePicker
+@@ -2848,69 +2874,16 @@ function DealDetail({
+ 
+           <Field title="Основной входящий счёт">
+ 
+-            <div className="primaryCorrectionFile">
+-
+-              {correctionPrimaryFile ? (
+-
+-                <div className="versionRow correctionPrimarySelected">
+-
+-                  <div>
+-
+-                    <b>
+-                      {
+-                        correctionPrimaryFile.name
+-                      }
+-                    </b>
+-
+-                    <span>
+-                      Бухгалтеру ориентироваться по этому файлу
+-                    </span>
+-
+-                  </div>
+-
+-
+-                  <button
+-                    type="button"
+-                    className="secondary compactButton"
+-
+-                    onClick={() =>
+-                      setCorrectionPrimaryFile(
+-                        null
+-                      )
+-                    }
+-                  >
+-                    Удалить
+-                  </button>
+-
+-                </div>
+-
+-              ) : (
+-
+-                <label className="fileButton">
+-
+-                  + Выбрать основной счёт
+-
+-                  <input
+-                    type="file"
+-                    hidden
+-
+-                    onChange={(e) => {
+-
+-                      setCorrectionPrimaryFile(
+-                        e.target.files?.[0] ||
+-                        null
+-                      );
+-
+-                      e.currentTarget.value =
+-                        '';
+-                    }}
+-                  />
+-
+-                </label>
+-
+-              )}
++            <SingleFilePicker
++              file={correctionPrimaryFile}
++              onChange={setCorrectionPrimaryFile}
++              title="+ Выбрать основной счёт"
++              accept="application/pdf,image/*"
++            />
+ 
+-            </div>
++            <span className="fieldHint">
++              Бухгалтеру ориентироваться по этому файлу
++            </span>
+ 
+           </Field>
+ 
+@@ -3517,7 +3490,14 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
+       <div className="inline"><Field title="Сумма"><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="100000" /></Field><Field title="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field></div>
+       <Field title="Способ"><select value={method} onChange={(e) => setMethod(e.target.value as ClientPaymentMethod)}><option value="NONCASH">Безнал</option><option value="CASH">Наличными</option><option value="CARD">Пластик</option><option value="ADVANCE">Аванс</option></select></Field>
+       <Field title="Комментарий"><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: часть оплаты по счёту" /></Field>
+-      <Field title="Подтверждение оплаты"><input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
++      <Field title="Подтверждение оплаты">
++        <SingleFilePicker
++          file={file}
++          onChange={setFile}
++          title="+ Прикрепить подтверждение оплаты"
++          accept="application/pdf,image/*"
++        />
++      </Field>
+       <button className="primary wide" type="button" disabled={saving} onClick={addPayment}>Добавить платёж</button>
+     </div>}
+ 
+@@ -3966,57 +3946,12 @@ async function submit(
+ 
+       <Field title="Входящий счёт заказчика · если есть">
+ 
+-        <div className="primaryIncomingPicker">
+-
+-          {incomingInvoice ? (
+-
+-            <div className="versionRow primaryIncomingSelected">
+-
+-              <div>
+-                <b>
+-                  {incomingInvoice.name}
+-                </b>
+-
+-                <span>
+-                  Будет сохранён как входящий счёт сделки
+-                </span>
+-              </div>
+-
+-              <button
+-                type="button"
+-                className="secondary compactButton"
+-                onClick={() =>
+-                  setIncomingInvoice(null)
+-                }
+-              >
+-                Удалить
+-              </button>
+-
+-            </div>
+-
+-          ) : (
+-
+-            <label className="fileButton">
+-              + Прикрепить входящий счёт
+-
+-              <input
+-                type="file"
+-                hidden
+-                onChange={(e) => {
+-                  setIncomingInvoice(
+-                    e.target.files?.[0] ||
+-                    null
+-                  );
+-
+-                  e.currentTarget.value =
+-                    '';
+-                }}
+-              />
+-            </label>
+-
+-          )}
+-
+-        </div>
++        <SingleFilePicker
++          file={incomingInvoice}
++          onChange={setIncomingInvoice}
++          title="+ Прикрепить входящий счёт"
++          accept="application/pdf,image/*"
++        />
+ 
+       </Field>
+ 
+diff --git a/frontend/src/MultiFilePicker.tsx b/frontend/src/MultiFilePicker.tsx
+index 5e2add9..fa4c1af 100644
+--- a/frontend/src/MultiFilePicker.tsx
++++ b/frontend/src/MultiFilePicker.tsx
+@@ -171,3 +171,107 @@ export function MultiFilePicker({
+     </div>
+   );
+ }
++
++export function SingleFilePicker({
++  file,
++  onChange,
++  title = '+ Прикрепить файл',
++  accept,
++}: {
++  file: File | null;
++  onChange: (file: File | null) => void;
++  title?: string;
++  accept?: string;
++}) {
++
++  const inputRef =
++    useRef<HTMLInputElement | null>(
++      null
++    );
++
++
++  return (
++
++    <div className="multiFilePicker">
++
++      <button
++        type="button"
++        className="fileButton"
++
++        onClick={() =>
++          inputRef.current
++            ?.click()
++        }
++      >
++        {
++          file
++            ? 'Заменить файл'
++            : title
++        }
++      </button>
++
++
++      <input
++        ref={inputRef}
++        type="file"
++        hidden
++        accept={accept}
++
++        onChange={(event) => {
++
++          onChange(
++            event.target.files?.[0] ||
++            null
++          );
++
++          event.currentTarget.value =
++            '';
++        }}
++      />
++
++
++      {file && (
++
++        <div className="versionList">
++
++          <div className="versionRow">
++
++            <div>
++
++              <b>
++                {file.name}
++              </b>
++
++              <span>
++                {
++                  (
++                    file.size /
++                    1024 /
++                    1024
++                  ).toFixed(2)
++                } МБ
++              </span>
++
++            </div>
++
++
++            <button
++              type="button"
++              className="secondary compactButton"
++
++              onClick={() =>
++                onChange(null)
++              }
++            >
++              Удалить
++            </button>
++
++          </div>
++
++        </div>
++
++      )}
++
++    </div>
++  );
++}
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 8576545..e32c7f4 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3060,3 +3060,57 @@ html[data-theme='dark']
+ .dealCardActionBox p {
+   color: #d6d3d1;
+ }
++
++/* MSM file pickers + returned request context v0.5.2 */
++
++.fieldHint {
++  display: block;
++  margin-top: -2px;
++  color: #78716c;
++  font-size: 11px;
++  font-weight: 500;
++  line-height: 1.4;
++}
++
++.requestPreviousIncoming {
++  display: grid;
++  gap: 8px;
++  padding: 12px;
++  border: 1px solid #e7e5e4;
++  border-radius: 14px;
++  background: #fafaf9;
++}
++
++.requestPreviousIncoming > span {
++  color: #57534e;
++  font-size: 12px;
++  font-weight: 800;
++}
++
++.requestPreviousIncoming .versionRow {
++  margin: 0;
++  background: #fff;
++}
++
++.requestPreviousIncomingEmpty {
++  padding: 10px 12px;
++  border-radius: 11px;
++  background: #fff;
++  color: #78716c;
++  font-size: 12px;
++}
++
++html[data-theme='dark'] .requestPreviousIncoming {
++  background: #242426;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .requestPreviousIncoming .versionRow,
++html[data-theme='dark'] .requestPreviousIncomingEmpty {
++  background: #1d1d1f;
++}
++
++html[data-theme='dark'] .requestPreviousIncoming > span,
++html[data-theme='dark'] .fieldHint {
++  color: #a8a29e;
++}

@@ -1,0 +1,2321 @@
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index 0a63d2a..17400b8 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -307,6 +307,13 @@ export class DealsService {
+           files: true,
+ 
+ 
++          supplierPurchases: {
++            orderBy: {
++              createdAt: 'asc',
++            },
++          },
++
++
+           clientPayments: {
+ 
+             orderBy: {
+diff --git a/backend/src/invoices/invoices.controller.ts b/backend/src/invoices/invoices.controller.ts
+index 0549b6b..6f3f63a 100644
+--- a/backend/src/invoices/invoices.controller.ts
++++ b/backend/src/invoices/invoices.controller.ts
+@@ -50,7 +50,7 @@ export class InvoicesController {
+   requestCorrection(
+     @Param('dealId') dealId: string,
+     @Param('invoiceId') invoiceId: string,
+-    @Body() body: { actorId: string; comment: string; urgent?: boolean },
++    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
+   ) {
+     return this.invoices.requestCorrection(dealId, invoiceId, body);
+   }
+diff --git a/backend/src/invoices/invoices.service.ts b/backend/src/invoices/invoices.service.ts
+index cde727a..fe26600 100644
+--- a/backend/src/invoices/invoices.service.ts
++++ b/backend/src/invoices/invoices.service.ts
+@@ -183,7 +183,7 @@ export class InvoicesService {
+   async requestCorrection(
+     dealId: string,
+     invoiceId: string,
+-    body: { actorId: string; comment: string; urgent?: boolean },
++    body: { actorId: string; comment: string; urgent?: boolean; sellerType?: SellerType },
+   ) {
+     const comment = body.comment?.trim();
+     if (!comment) throw new BadRequestException('Укажите, что нужно скорректировать');
+@@ -192,6 +192,31 @@ export class InvoicesService {
+       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
+       if (!invoice.isCurrent) throw new BadRequestException('Корректировать можно только актуальную версию счёта');
+ 
++      const deal = await tx.deal.findUniqueOrThrow({ where: { id: dealId } });
++
++      if (
++        body.sellerType &&
++        body.sellerType !== deal.sellerType
++      ) {
++        await tx.deal.update({
++          where: { id: dealId },
++          data: { sellerType: body.sellerType },
++        });
++
++        await tx.auditEvent.create({
++          data: {
++            dealId,
++            actorId: body.actorId,
++            action: 'DEAL_SELLER_CHANGED',
++            entityType: 'Deal',
++            entityId: dealId,
++            oldValue: { sellerType: deal.sellerType },
++            newValue: { sellerType: body.sellerType },
++            reason: 'Изменено при отправке счёта на корректировку',
++          },
++        });
++      }
++
+       const existing = await tx.task.findFirst({
+         where: {
+           dealId,
+diff --git a/backend/src/purchases/purchases.service.ts b/backend/src/purchases/purchases.service.ts
+index 8c914e0..aa5894b 100644
+--- a/backend/src/purchases/purchases.service.ts
++++ b/backend/src/purchases/purchases.service.ts
+@@ -72,74 +72,121 @@ export class PurchasesService {
+     body: any,
+   ) {
+ 
+-    const purchase =
+-      await this.prisma
+-        .supplierPurchase
+-        .create({
+-
+-          data: {
++    return this.prisma
++      .$transaction(
++        async (tx) => {
+ 
+-            dealId,
++          const purchase =
++            await tx.supplierPurchase
++              .create({
+ 
+-            supplierName:
+-              body.supplierName
+-                ?.trim() ||
+-              'Тестовый поставщик',
++                data: {
+ 
+-            incomingInvoiceNumber:
+-              body
+-                .incomingInvoiceNumber
+-                ?.trim() ||
+-              undefined,
++                  dealId,
+ 
+-            incomingInvoiceAmount:
+-              body
+-                .incomingInvoiceAmount,
++                  supplierName:
++                    body.supplierName
++                      ?.trim() ||
++                    'Тестовый поставщик',
+ 
+-            comment:
+-              body.comment
+-                ?.trim() ||
+-              undefined,
++                  incomingInvoiceNumber:
++                    body
++                      .incomingInvoiceNumber
++                      ?.trim() ||
++                    undefined,
+ 
+-            createdById:
+-              body.createdById,
+-          },
++                  incomingInvoiceAmount:
++                    body
++                      .incomingInvoiceAmount,
+ 
+-          include: {
+-            payments: true,
+-          },
+-        });
++                  comment:
++                    body.comment
++                      ?.trim() ||
++                    undefined,
+ 
++                  createdById:
++                    body.createdById,
++                },
+ 
+-    await this.prisma
+-      .auditEvent
+-      .create({
++                include: {
++                  payments: true,
++                },
++              });
+ 
+-        data: {
+ 
+-          dealId,
++          if (body.sourceFileId) {
+ 
+-          actorId:
+-            body.createdById,
++            const source =
++              await tx.storedFile
++                .findFirst({
++                  where: {
++                    id:
++                      body.sourceFileId,
++                    dealId,
++                  },
++                });
++
++
++            if (source) {
++
++              await tx.storedFile
++                .create({
++                  data: {
++                    dealId,
++                    provider:
++                      source.provider,
++                    category:
++                      'SUPPLIER_INVOICE_' +
++                      purchase.id,
++                    originalName:
++                      source.originalName,
++                    mimeType:
++                      source.mimeType,
++                    size:
++                      source.size,
++                    telegramFileId:
++                      source.telegramFileId,
++                    telegramUniqueId:
++                      source.telegramUniqueId,
++                    telegramMessageId:
++                      source.telegramMessageId,
++                    telegramChatId:
++                      source.telegramChatId,
++                    externalUrl:
++                      source.externalUrl,
++                  },
++                });
++            }
++          }
+ 
+-          action:
+-            'SUPPLIER_PURCHASE_CREATED',
+ 
+-          entityType:
+-            'SupplierPurchase',
++          await tx.auditEvent.create({
++            data: {
++              dealId,
++              actorId:
++                body.createdById,
++              action:
++                'SUPPLIER_PURCHASE_CREATED',
++              entityType:
++                'SupplierPurchase',
++              entityId:
++                purchase.id,
++              newValue: {
++                supplierName:
++                  purchase.supplierName,
++                amount:
++                  purchase
++                    .incomingInvoiceAmount
++                    ?.toString() ??
++                  null,
++              },
++            },
++          });
+ 
+-          entityId:
+-            purchase.id,
+ 
+-          newValue: {
+-            supplierName:
+-              purchase.supplierName,
+-          },
++          return purchase;
+         },
+-      });
+-
+-
+-    return purchase;
++      );
+   }
+ 
+ 
+@@ -149,35 +196,89 @@ export class PurchasesService {
+     body: any,
+   ) {
+ 
+-    return this.prisma
+-      .supplierPurchase
+-      .update({
++    const current =
++      await this.prisma
++        .supplierPurchase
++        .findFirstOrThrow({
++          where: {
++            id: purchaseId,
++            dealId,
++          },
++        });
+ 
+-        where: {
+-          id: purchaseId,
+-        },
+ 
+-        data: {
++    const updated =
++      await this.prisma
++        .supplierPurchase
++        .update({
+ 
+-          supplierName:
+-            body.supplierName,
++          where: {
++            id: purchaseId,
++          },
+ 
+-          incomingInvoiceNumber:
+-            body
+-              .incomingInvoiceNumber,
++          data: {
+ 
+-          incomingInvoiceAmount:
+-            body
+-              .incomingInvoiceAmount,
++            supplierName:
++              body.supplierName !== undefined
++                ? body.supplierName
++                : current.supplierName,
+ 
+-          comment:
+-            body.comment,
+-        },
++            incomingInvoiceNumber:
++              body.incomingInvoiceNumber !== undefined
++                ? body.incomingInvoiceNumber
++                : current.incomingInvoiceNumber,
+ 
+-        include: {
+-          payments: true,
++            incomingInvoiceAmount:
++              body.incomingInvoiceAmount !== undefined
++                ? body.incomingInvoiceAmount
++                : current.incomingInvoiceAmount,
++
++            comment:
++              body.comment !== undefined
++                ? body.comment
++                : current.comment,
++          },
++
++          include: {
++            payments: true,
++          },
++        });
++
++
++    if (
++      body.actorId &&
++      body.incomingInvoiceAmount !== undefined &&
++      Number(current.incomingInvoiceAmount || 0) !==
++        Number(updated.incomingInvoiceAmount || 0)
++    ) {
++      await this.prisma.auditEvent.create({
++        data: {
++          dealId,
++          actorId: body.actorId,
++          action:
++            'SUPPLIER_PURCHASE_UPDATED',
++          entityType:
++            'SupplierPurchase',
++          entityId:
++            purchaseId,
++          oldValue: {
++            amount:
++              current.incomingInvoiceAmount
++                ?.toString() ?? null,
++          },
++          newValue: {
++            amount:
++              updated.incomingInvoiceAmount
++                ?.toString() ?? null,
++            supplierName:
++              updated.supplierName,
++          },
+         },
+       });
++    }
++
++
++    return updated;
+   }
+ 
+ 
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index b16523c..b840fe6 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,6 +1,7 @@
+ import {
+   updateDealInfo,
+   updateShipmentDate,
++  updateSupplierPurchase,
+ } from './api';
+ 
+ import {
+@@ -562,6 +563,26 @@ function DealDetail({
+   const [urgent, setUrgent] =
+     useState(false);
+ 
++  const [
++    correctionSellerType,
++    setCorrectionSellerType,
++  ] = useState<SellerType>('MSM');
++
++  const [
++    quickEdit,
++    setQuickEdit,
++  ] = useState<
++    'invoiceAmount' |
++    'incomingAmount' |
++    'shipmentDate' |
++    null
++  >(null);
++
++  const [
++    incomingAmountDraft,
++    setIncomingAmountDraft,
++  ] = useState('');
++
+   const [saving, setSaving] =
+     useState(false);
+ 
+@@ -590,6 +611,11 @@ function DealDetail({
+     setPhoneMenuOpen,
+   ] = useState(false);
+ 
++  const [
++    editClientName,
++    setEditClientName,
++  ] = useState('');
++
+   const [
+     editContactName,
+     setEditContactName,
+@@ -728,8 +754,10 @@ function DealDetail({
+ 
+       setManagerAmount(
+         currentInvoice?.amount
+-          ? String(
+-              currentInvoice.amount
++          ? formatMoneyInput(
++              String(
++                currentInvoice.amount
++              )
+             )
+           : ''
+       );
+@@ -755,9 +783,39 @@ function DealDetail({
+   );
+ 
+ 
++  useEffect(
++    () => {
++      const purchases =
++        deal?.supplierPurchases || [];
++
++      if (purchases.length === 1) {
++        setIncomingAmountDraft(
++          purchases[0]
++            .incomingInvoiceAmount
++            ? formatMoneyInput(
++                String(
++                  purchases[0]
++                    .incomingInvoiceAmount
++                )
++              )
++            : ''
++        );
++      } else {
++        setIncomingAmountDraft('');
++      }
++    },
++    [deal?.supplierPurchases],
++  );
++
++
+   useEffect(
+     () => {
+ 
++      setEditClientName(
++        deal?.clientName ||
++        ''
++      );
++
+       setEditContactName(
+         deal?.contactName ||
+         ''
+@@ -791,6 +849,11 @@ function DealDetail({
+         'MSM'
+       );
+ 
++      setCorrectionSellerType(
++        deal?.sellerType ||
++        'MSM'
++      );
++
+       setRequestMarginMode(
+         deal?.marginMode ||
+         'TOTAL_PLUS'
+@@ -949,6 +1012,43 @@ function DealDetail({
+     );
+ 
+ 
++  const supplierPurchases =
++    deal.supplierPurchases || [];
++
++
++  const incomingTotal =
++    supplierPurchases.reduce(
++      (sum, purchase) =>
++        sum +
++        Number(
++          purchase.incomingInvoiceAmount ||
++          0
++        ),
++      0,
++    );
++
++
++  const supplierNames =
++    supplierPurchases
++      .map(
++        (purchase) =>
++          purchase.supplierName
++      )
++      .filter(Boolean);
++
++
++  const supplierSummary =
++    supplierNames.length > 0
++      ? supplierNames.join(', ')
++      : 'Не указан';
++
++
++  const editableIncomingPurchase =
++    supplierPurchases.length === 1
++      ? supplierPurchases[0]
++      : undefined;
++
++
+   const canManageDeal =
+     [
+       'MANAGER',
+@@ -978,6 +1078,159 @@ function DealDetail({
+   }
+ 
+ 
++  function copyDealValue(
++    value: string,
++  ) {
++    void navigator.clipboard
++      ?.writeText(value)
++      .catch(
++        () => undefined
++      );
++  }
++
++
++  async function saveQuickInvoiceAmount() {
++
++    if (!current) {
++      return;
++    }
++
++    const parsed =
++      parsedManagerAmount();
++
++    if (
++      managerAmount.trim() &&
++      parsed === undefined
++    ) {
++      setError(
++        'Проверьте сумму счёта'
++      );
++      return;
++    }
++
++    setSaving(true);
++    setError('');
++
++    try {
++      await updateInvoiceAmount(
++        dealId,
++        current.id,
++        {
++          amount: parsed,
++          actorId: user.id,
++        },
++      );
++
++      setQuickEdit(null);
++      await reload(false);
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  async function saveQuickShipmentDate() {
++
++    setSaving(true);
++    setError('');
++
++    try {
++      await updateShipmentDate(
++        dealId,
++        {
++          plannedShipmentAt:
++            shipmentDate ||
++            undefined,
++          actorId: user.id,
++        },
++      );
++
++      setQuickEdit(null);
++      await reload(false);
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  async function saveQuickIncomingAmount() {
++
++    if (!editableIncomingPurchase) {
++      return;
++    }
++
++    const parsed =
++      parseMoneyInput(
++        incomingAmountDraft
++      );
++
++    if (
++      incomingAmountDraft.trim() &&
++      parsed === undefined
++    ) {
++      setError(
++        'Проверьте входящую сумму'
++      );
++      return;
++    }
++
++    setSaving(true);
++    setError('');
++
++    try {
++      await updateSupplierPurchase(
++        dealId,
++        editableIncomingPurchase.id,
++        {
++          incomingInvoiceAmount:
++            parsed,
++          actorId: user.id,
++        },
++      );
++
++      setQuickEdit(null);
++      await reload(false);
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  function openCorrectionEditor() {
++    const activeDeal = deal;
++
++    if (!activeDeal) {
++      return;
++    }
++
++    setCorrectionSellerType(
++      activeDeal.sellerType
++    );
++    setCorrectionOpen(true);
++  }
++
++
+   function normalizedPhone() {
+ 
+     let digits =
+@@ -1011,6 +1264,11 @@ function DealDetail({
+       await updateDealInfo(
+         dealId,
+         {
++          clientName:
++            editClientName
++              .trim() ||
++            undefined,
++
+           contactName:
+             editContactName
+               .trim() ||
+@@ -1661,6 +1919,9 @@ function DealDetail({
+               correctionText,
+ 
+             urgent,
++
++            sellerType:
++              correctionSellerType,
+           },
+         );
+ 
+@@ -1799,120 +2060,416 @@ function DealDetail({
+       </button>
+ 
+ 
+-      <div className="detailHero">
+-
+-        <div className="eyebrow">
+-          ЗК-{deal.internalNumber}
+-        </div>
+-
+-
+-        <h2>
+-
+-          {
+-            current
+-              ? sellerLabels[
+-                  deal.sellerType
+-                ] +
+-                '-' +
+-                current.number
+-
+-              : 'ЗК-' +
+-                deal.internalNumber
+-          }
+-
+-        </h2>
++      <div className="dealOverview">
+ 
++        <div className="dealOverviewHead">
+ 
+-        <p>
+-          {deal.clientName}
+-        </p>
++          <div>
++            <div className="dealOverviewMeta">
++              <span>
++                ЗК-{deal.internalNumber}
++              </span>
+ 
++              <span>
++                {
++                  deal.createdAt
++                    ? 'Создан ' +
++                      new Date(
++                        deal.createdAt
++                      ).toLocaleString(
++                        'ru-RU',
++                        {
++                          day: '2-digit',
++                          month: '2-digit',
++                          year: 'numeric',
++                          hour: '2-digit',
++                          minute: '2-digit',
++                        }
++                      )
++                    : 'Дата создания не указана'
++                }
++              </span>
++            </div>
+ 
+-        <div className="statusPill">
++            <h2>
++              {
++                current
++                  ? sellerLabels[
++                      current.sellerType ||
++                      deal.sellerType
++                    ] +
++                    '-' +
++                    current.number
++                  : 'Счёт готовится'
++              }
++            </h2>
++          </div>
+ 
+-          {
+-            current
+-              ? statusLabel(
+-                  current.status
+-                )
+-              : 'Ожидаем счёт'
+-          }
++          <div className="dealOverviewInvoiceStatus">
++            <span>
++              Статус счёта
++            </span>
++            <b>
++              {
++                current
++                  ? statusLabel(
++                      current.status
++                    )
++                  : invoiceRequestTask?.status ===
++                      'NEED_DATA'
++                    ? 'Нужны данные'
++                    : 'Ожидаем счёт'
++              }
++            </b>
++          </div>
+ 
+         </div>
+ 
+-      </div>
+-
+-      <div className="dealDates">
+ 
+-        <div>
++        <div className="dealOverviewGrid">
+ 
+-          <span>
+-            Дата создания
+-          </span>
++          <button
++            type="button"
++            className="dealMetric dealMetricButton"
++            disabled={!current || !canManageDeal}
++            onClick={() =>
++              setQuickEdit(
++                quickEdit === 'invoiceAmount'
++                  ? null
++                  : 'invoiceAmount'
++              )
++            }
++          >
++            <span>Сумма счёта</span>
++            <b>
++              {
++                current?.amount
++                  ? money(
++                      current.amount
++                    )
++                  : 'Не указана'
++              }
++            </b>
++            {current && canManageDeal && (
++              <em>Изменить / скопировать</em>
++            )}
++          </button>
+ 
+-          <b>
+ 
+-            {
+-              deal.createdAt
++          <button
++            type="button"
++            className="dealMetric dealMetricButton"
++            disabled={
++              supplierPurchases.length === 0 ||
++              !canManageDeal
++            }
++            onClick={() =>
++              setQuickEdit(
++                quickEdit === 'incomingAmount'
++                  ? null
++                  : 'incomingAmount'
++              )
++            }
++          >
++            <span>Входящая сумма</span>
++            <b>
++              {
++                incomingTotal > 0
++                  ? money(incomingTotal)
++                  : 'Не указана'
++              }
++            </b>
++            {supplierPurchases.length > 0 &&
++              canManageDeal && (
++              <em>Изменить / скопировать</em>
++            )}
++          </button>
+ 
+-                ? new Date(
+-                    deal.createdAt
+-                  )
+-                    .toLocaleString(
+-                      'ru-RU',
+-                      {
+-                        day:
+-                          '2-digit',
+ 
+-                        month:
+-                          '2-digit',
++          <button
++            type="button"
++            className="dealMetric dealMetricButton"
++            disabled={!canManageDeal}
++            onClick={() =>
++              setQuickEdit(
++                quickEdit === 'shipmentDate'
++                  ? null
++                  : 'shipmentDate'
++              )
++            }
++          >
++            <span>Дата доставки</span>
++            <b>
++              {
++                deal.plannedShipmentAt
++                  ? new Date(
++                      deal.plannedShipmentAt
++                    ).toLocaleDateString(
++                      'ru-RU'
++                    )
++                  : 'Не указана'
++              }
++            </b>
++            {canManageDeal && (
++              <em>Изменить / скопировать</em>
++            )}
++          </button>
+ 
+-                        year:
+-                          'numeric',
+ 
+-                        hour:
+-                          '2-digit',
++          <div className="dealMetric">
++            <span>Поставщик</span>
++            <b>{supplierSummary}</b>
++          </div>
+ 
+-                        minute:
+-                          '2-digit',
+-                      }
+-                    )
+ 
+-                : '—'
+-            }
++          <div className="dealMetric">
++            <span>Статус оплаты</span>
++            <b>
++              {
++                paymentStatusLabel(
++                  deal.paymentStatus
++                )
++              }
++            </b>
++          </div>
+ 
+-          </b>
++
++          <div className="dealMetric dealMetricMuted">
++            <span>От кого выставлен</span>
++            <b>
++              {
++                sellerLabels[
++                  current?.sellerType ||
++                  deal.sellerType
++                ]
++              }
++            </b>
++          </div>
+ 
+         </div>
+ 
+ 
+-        <div>
++        {quickEdit === 'invoiceAmount' &&
++          current && (
+ 
+-          <span>
+-            Дата отгрузки
+-          </span>
++          <div className="dealQuickEditor">
+ 
+-          <b>
++            <Field title="Сумма счёта">
++              <input
++                inputMode="decimal"
++                value={managerAmount}
++                onChange={(e) =>
++                  setManagerAmount(
++                    formatMoneyInput(
++                      e.target.value
++                    )
++                  )
++                }
++                placeholder="215 000"
++              />
++            </Field>
+ 
+-            {
+-              deal?.plannedShipmentAt
++            <div className="dealQuickActions">
++              <button
++                type="button"
++                className="secondary"
++                onClick={() =>
++                  copyDealValue(
++                    current.amount
++                      ? money(current.amount)
++                      : ''
++                  )
++                }
++              >
++                Скопировать
++              </button>
++
++              <button
++                type="button"
++                className="primary"
++                disabled={saving}
++                onClick={saveQuickInvoiceAmount}
++              >
++                {saving ? 'Сохраняем…' : 'Сохранить'}
++              </button>
++
++              <button
++                type="button"
++                className="dealQuickClose"
++                onClick={() =>
++                  setQuickEdit(null)
++                }
++              >
++                ×
++              </button>
++            </div>
++
++          </div>
+ 
+-                ? new Date(
+-                    deal?.plannedShipmentAt
++        )}
++
++
++        {quickEdit === 'incomingAmount' && (
++
++          <div className="dealQuickEditor">
++
++            {editableIncomingPurchase ? (
++              <>
++                <Field title="Входящая сумма">
++                  <input
++                    inputMode="decimal"
++                    value={incomingAmountDraft}
++                    onChange={(e) =>
++                      setIncomingAmountDraft(
++                        formatMoneyInput(
++                          e.target.value
++                        )
++                      )
++                    }
++                    placeholder="180 000"
++                  />
++                </Field>
++
++                <div className="dealQuickActions">
++                  <button
++                    type="button"
++                    className="secondary"
++                    onClick={() =>
++                      copyDealValue(
++                        incomingTotal > 0
++                          ? money(incomingTotal)
++                          : ''
++                      )
++                    }
++                  >
++                    Скопировать
++                  </button>
++
++                  <button
++                    type="button"
++                    className="primary"
++                    disabled={saving}
++                    onClick={saveQuickIncomingAmount}
++                  >
++                    {saving ? 'Сохраняем…' : 'Сохранить'}
++                  </button>
++
++                  <button
++                    type="button"
++                    className="dealQuickClose"
++                    onClick={() =>
++                      setQuickEdit(null)
++                    }
++                  >
++                    ×
++                  </button>
++                </div>
++              </>
++            ) : (
++              <>
++                <div className="dealQuickMessage">
++                  {
++                    supplierPurchases.length > 1
++                      ? 'Сумма рассчитана по нескольким поставщикам. Измените нужную закупку в блоке «Поставщики».'
++                      : 'Сначала добавьте поставщика и сумму закупки.'
++                  }
++                </div>
++
++                <div className="dealQuickActions">
++                  <button
++                    type="button"
++                    className="secondary"
++                    disabled={incomingTotal <= 0}
++                    onClick={() =>
++                      copyDealValue(
++                        incomingTotal > 0
++                          ? money(incomingTotal)
++                          : ''
++                      )
++                    }
++                  >
++                    Скопировать
++                  </button>
++
++                  <button
++                    type="button"
++                    className="dealQuickClose"
++                    onClick={() =>
++                      setQuickEdit(null)
++                    }
++                  >
++                    ×
++                  </button>
++                </div>
++              </>
++            )}
++
++          </div>
++
++        )}
++
++
++        {quickEdit === 'shipmentDate' && (
++
++          <div className="dealQuickEditor">
++
++            <Field title="Дата доставки">
++              <input
++                type="date"
++                value={shipmentDate}
++                onChange={(e) =>
++                  setShipmentDate(
++                    e.target.value
+                   )
+-                    .toLocaleDateString(
+-                      'ru-RU'
+-                    )
++                }
++              />
++            </Field>
+ 
+-                : 'Не указана'
+-            }
++            <div className="dealQuickActions">
++              <button
++                type="button"
++                className="secondary"
++                disabled={!deal.plannedShipmentAt}
++                onClick={() =>
++                  copyDealValue(
++                    deal.plannedShipmentAt
++                      ? new Date(
++                          deal.plannedShipmentAt
++                        ).toLocaleDateString(
++                          'ru-RU'
++                        )
++                      : ''
++                  )
++                }
++              >
++                Скопировать
++              </button>
+ 
+-          </b>
++              <button
++                type="button"
++                className="primary"
++                disabled={saving}
++                onClick={saveQuickShipmentDate}
++              >
++                {saving ? 'Сохраняем…' : 'Сохранить'}
++              </button>
+ 
+-        </div>
++              <button
++                type="button"
++                className="dealQuickClose"
++                onClick={() =>
++                  setQuickEdit(null)
++                }
++              >
++                ×
++              </button>
++            </div>
+ 
+-      </div>
++          </div>
+ 
++        )}
++
++      </div>
+ 
+ 
+       <div className="dealInfoBox">
+@@ -1920,7 +2477,7 @@ function DealDetail({
+         <div className="dealInfoHead">
+ 
+           <strong>
+-            Информация о сделке
++            Клиент
+           </strong>
+ 
+ 
+@@ -1929,6 +2486,8 @@ function DealDetail({
+             <button
+               type="button"
+               className="dealInfoEditButton"
++              aria-label="Редактировать клиента"
++              title="Редактировать клиента"
+ 
+               onClick={() =>
+                 setDealInfoOpen(
+@@ -1937,11 +2496,7 @@ function DealDetail({
+                 )
+               }
+             >
+-              {
+-                dealInfoOpen
+-                  ? 'Закрыть'
+-                  : 'Изменить'
+-              }
++              {dealInfoOpen ? '×' : '•••'}
+             </button>
+ 
+           )}
+@@ -1953,6 +2508,19 @@ function DealDetail({
+ 
+           <div className="dealInfoView">
+ 
++            <div className="dealInfoRow dealInfoCompany">
++
++              <span>
++                Компания
++              </span>
++
++              <b>
++                {deal.clientName}
++              </b>
++
++            </div>
++
++
+             <div className="dealInfoRow">
+ 
+               <span>
+@@ -2113,7 +2681,7 @@ function DealDetail({
+             </div>
+ 
+ 
+-            <div className="dealInfoRow">
++            <div className="dealInfoRow dealInfoAddress">
+ 
+               <span>
+                 Адреса доставки
+@@ -2162,6 +2730,21 @@ function DealDetail({
+ 
+           <div className="dealInfoForm">
+ 
++            <Field title="Компания">
++
++              <input
++                value={editClientName}
++                onChange={(e) =>
++                  setEditClientName(
++                    e.target.value
++                  )
++                }
++                placeholder="ООО «Главолснаб»"
++              />
++
++            </Field>
++
++
+             <Field title="Контактное лицо">
+ 
+               <input
+@@ -2289,172 +2872,52 @@ function DealDetail({
+                       );
+                     }}
+ 
+-                    placeholder="Адрес доставки"
+-                  />
+-
+-
+-                  <button
+-                    type="button"
+-                    className="deliveryAddressRemove"
+-
+-                    onClick={() =>
+-                      removeDeliveryAddress(
+-                        index
+-                      )
+-                    }
+-                  >
+-                    ×
+-                  </button>
+-
+-                </div>
+-
+-              ))}
+-
+-            </div>
+-
+-
+-            <button
+-              type="button"
+-              className="primary wide"
+-
+-              disabled={saving}
+-
+-              onClick={
+-                saveDealInfo
+-              }
+-            >
+-              {
+-                saving
+-                  ? 'Сохраняем…'
+-                  : 'Сохранить информацию'
+-              }
+-            </button>
+-
+-          </div>
+-
+-        )}
+-
+-      </div>
+-
+-
+-      {currentCustomerInvoice &&
+-        current && (
+-
+-        <div className="customerInvoiceBox">
+-
+-          <div className="customerInvoiceHead">
+-
+-            <div>
+-              <span>
+-                Входящий счёт заказчика
+-              </span>
+-
+-              <strong>
+-                {
+-                  currentCustomerInvoice
+-                    .originalName
+-                }
+-              </strong>
+-            </div>
+-
+-            <b>Актуальный</b>
+-
+-          </div>
+-
+-
+-          <div className="customerInvoiceCurrent">
+-
+-            <span>
+-              {
+-                currentCustomerInvoice
+-                  .createdAt
+-                  ? new Date(
+-                      currentCustomerInvoice
+-                        .createdAt
+-                    ).toLocaleString(
+-                      'ru-RU',
+-                      {
+-                        day: '2-digit',
+-                        month: '2-digit',
+-                        year: 'numeric',
+-                        hour: '2-digit',
+-                        minute: '2-digit',
+-                      }
+-                    )
+-                  : 'Дата не указана'
+-              }
+-            </span>
+-
+-            <a
+-              href={
+-                dealFileUrl(
+-                  currentCustomerInvoice.id
+-                )
+-              }
+-              target="_blank"
+-              rel="noreferrer"
+-            >
+-              Открыть
+-            </a>
+-
+-          </div>
+-
+-
+-          {previousCustomerInvoices.length > 0 && (
+-
+-            <div className="customerInvoiceHistory">
++                    placeholder="Адрес доставки"
++                  />
+ 
+-              <span className="customerInvoiceHistoryTitle">
+-                История входящих счетов
+-              </span>
+ 
+-              {[...previousCustomerInvoices]
+-                .reverse()
+-                .map(
+-                  (file, index) => (
++                  <button
++                    type="button"
++                    className="deliveryAddressRemove"
+ 
+-                  <div
+-                    className="customerInvoiceHistoryRow"
+-                    key={file.id}
++                    onClick={() =>
++                      removeDeliveryAddress(
++                        index
++                      )
++                    }
+                   >
++                    ×
++                  </button>
+ 
+-                    <div>
+-                      <b>
+-                        Версия {
+-                          customerInvoiceHistory.length -
+-                          index -
+-                          1
+-                        }
+-                      </b>
++                </div>
+ 
+-                      <span>
+-                        {file.originalName}
+-                      </span>
+-                    </div>
++              ))}
+ 
+-                    <a
+-                      href={
+-                        dealFileUrl(
+-                          file.id
+-                        )
+-                      }
+-                      target="_blank"
+-                      rel="noreferrer"
+-                    >
+-                      Открыть
+-                    </a>
++            </div>
+ 
+-                  </div>
+ 
+-                ))}
++            <button
++              type="button"
++              className="primary wide"
+ 
+-            </div>
++              disabled={saving}
+ 
+-          )}
++              onClick={
++                saveDealInfo
++              }
++            >
++              {
++                saving
++                  ? 'Сохраняем…'
++                  : 'Сохранить информацию'
++              }
++            </button>
+ 
+-        </div>
++          </div>
+ 
+-      )}
++        )}
++
++      </div>
+ 
+ 
+       {current ? (
+@@ -2462,20 +2925,9 @@ function DealDetail({
+         <InvoiceBlock
+           invoice={current}
+           sellerType={
++            current.sellerType ||
+             deal.sellerType
+           }
+-
+-          onManage={
+-            canManageInvoice
+-
+-              ? () =>
+-                  setInvoiceMenuOpen(
+-                    (value) =>
+-                      !value
+-                  )
+-
+-              : undefined
+-          }
+         />
+ 
+       ) : (
+@@ -3119,147 +3571,37 @@ function DealDetail({
+       )}
+ 
+ 
+-      {invoiceMenuOpen &&
++      {current &&
+         canManageInvoice &&
+-        current && (
+-
+-        <div className="invoiceManageMenu">
+-
+-          <div className="invoiceManageTitle">
+-
+-            <div>
+-
+-              <strong>
+-                Данные счёта
+-              </strong>
+-
+-              <span>
+-                Эти поля можно изменить без возврата бухгалтерии
+-              </span>
+-
+-            </div>
+-
+-
+-            <button
+-              type="button"
+-              className="invoiceMenuClose"
+-
+-              onClick={() =>
+-                setInvoiceMenuOpen(
+-                  false
+-                )
+-              }
+-            >
+-              ×
+-            </button>
+-
+-          </div>
+-
+-
+-          <div className="invoiceManageFields">
+-
+-            <Field title="Сумма счёта">
+-
+-              <input
+-                inputMode="decimal"
+-
+-                value={
+-                  managerAmount
+-                }
+-
+-                onChange={(e) =>
+-                  setManagerAmount(
+-                    e.target.value
+-                  )
+-                }
+-
+-                placeholder="Например: 210 000"
+-              />
+-
+-            </Field>
+-
+-
+-            <Field title="Дата отгрузки">
+-
+-              <input
+-                type="date"
+-
+-                value={
+-                  shipmentDate
+-                }
+-
+-                onChange={(e) =>
+-                  setShipmentDate(
+-                    e.target.value
+-                  )
+-                }
+-              />
+-
+-            </Field>
+-
+-          </div>
++        current.status !== 'CORRECTION_REQUESTED' && (
+ 
++        <div
++          className={
++            'invoiceDecisionBar' +
++            (!canConfirm
++              ? ' invoiceDecisionBarSingle'
++              : '')
++          }
++        >
+ 
+           <button
+             type="button"
+-            className="primary wide"
+-
++            className="secondary"
+             disabled={saving}
+-
+-            onClick={
+-              saveInvoiceData
+-            }
++            onClick={openCorrectionEditor}
+           >
+-            {
+-              saving
+-                ? 'Сохраняем…'
+-                : 'Сохранить данные'
+-            }
++            Скорректировать
+           </button>
+ 
+-
+-          <div className="invoiceManageDivider" />
+-
+-
+-          {
+-            current.status !==
+-              'CORRECTION_REQUESTED' && (
+-
+-            <div className="invoiceAccountingCorrection">
+-
+-              <div>
+-
+-                <strong>
+-                  Нужно изменить сам счёт?
+-                </strong>
+-
+-                <span>
+-                  PDF, позиции, количество или другие данные, которые должна изменить бухгалтерия.
+-                </span>
+-
+-              </div>
+-
+-
+-              <button
+-                type="button"
+-                className="secondary wide"
+-
+-                onClick={() => {
+-
+-                  setInvoiceMenuOpen(
+-                    false
+-                  );
+-
+-                  setCorrectionOpen(
+-                    true
+-                  );
+-                }}
+-              >
+-                Отправить на корректировку
+-              </button>
+-
+-            </div>
+-
++          {canConfirm && (
++            <button
++              type="button"
++              className="primary"
++              disabled={saving}
++              onClick={confirm}
++            >
++              {saving ? 'Сохраняем…' : 'Всё верно'}
++            </button>
+           )}
+ 
+         </div>
+@@ -3267,50 +3609,6 @@ function DealDetail({
+       )}
+ 
+ 
+-      {canConfirm &&
+-        current && (
+-
+-        <div className="reviewBox">
+-
+-          <strong>
+-            Проверьте готовый счёт
+-          </strong>
+-
+-
+-          <p>
+-
+-            {
+-              current.amount
+-
+-                ? 'Проверьте счёт и сумму. Если всё правильно — подтвердите.'
+-
+-                : 'Бухгалтерия не указала сумму. Откройте меню ••• у счёта, укажите сумму и затем подтвердите.'
+-            }
+-
+-          </p>
+-
+-
+-          <button
+-            className="primary wide"
+-
+-            disabled={saving}
+-
+-            onClick={confirm}
+-          >
+-
+-            {
+-              saving
+-                ? 'Сохраняем…'
+-                : 'Всё верно'
+-            }
+-
+-          </button>
+-
+-        </div>
+-
+-      )}
+-
+-
+       {current?.status ===
+         'CORRECTION_REQUESTED' && (
+ 
+@@ -3346,7 +3644,7 @@ function DealDetail({
+               </strong>
+ 
+               <span>
+-                Бухгалтерия будет исправлять текущую версию {sellerLabels[deal.sellerType]}-{current.number}.
++                Текущий счёт {sellerLabels[current.sellerType || deal.sellerType]}-{current.number}. Новую версию выставить от {sellerLabels[correctionSellerType]}.
+               </span>
+ 
+             </div>
+@@ -3368,6 +3666,31 @@ function DealDetail({
+           </div>
+ 
+ 
++          <Field title="От кого выставляем">
++
++            <div className="segmented">
++              {(['ST', 'MSM', 'IP'] as SellerType[]).map(
++                (type) => (
++                <button
++                  type="button"
++                  key={type}
++                  className={
++                    correctionSellerType === type
++                      ? 'selected'
++                      : ''
++                  }
++                  onClick={() =>
++                    setCorrectionSellerType(type)
++                  }
++                >
++                  {sellerLabels[type]}
++                </button>
++              ))}
++            </div>
++
++          </Field>
++
++
+           <Field title="Что нужно изменить">
+ 
+             <textarea
+@@ -3455,7 +3778,7 @@ function DealDetail({
+             {
+               saving
+                 ? 'Отправляем…'
+-                : 'Отправить бухгалтерии'
++                : 'Отправить на корректировку'
+             }
+ 
+           </button>
+@@ -3543,6 +3866,7 @@ function DealDetail({
+                   key={invoice.id}
+                   invoice={invoice}
+                   sellerType={
++                    invoice.sellerType ||
+                     deal.sellerType
+                   }
+                 />
+@@ -3634,31 +3958,14 @@ function DealDetail({
+ function InvoiceBlock({
+   invoice,
+   sellerType,
+-  onManage,
+ }: {
+   invoice: Invoice;
+   sellerType: SellerType;
+-  onManage?: () => void;
+ }) {
+ 
+   return (
+ 
+-    <div className="invoiceBlock invoiceBlockWithMenu">
+-
+-      {onManage && (
+-
+-        <button
+-          type="button"
+-          className="invoiceMenuButton"
+-
+-          onClick={onManage}
+-
+-          aria-label="Действия со счётом"
+-        >
+-          •••
+-        </button>
+-
+-      )}
++    <div className="invoiceBlock">
+ 
+ 
+       <div className="currentVersionLabel">
+@@ -3947,7 +4254,7 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
+         fileId = uploaded.id;
+       }
+       await addClientPayment(deal.id, {
+-        amount: amount ? Number(amount) : 0,
++        amount: parseMoneyInput(amount) || 0,
+         paidAt,
+         method,
+         comment: comment.trim() || undefined,
+@@ -4002,7 +4309,7 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
+     </div>}
+ 
+     {adding && <div className="paymentForm">
+-      <div className="inline"><Field title="Сумма"><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="100000" /></Field><Field title="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field></div>
++      <div className="inline"><Field title="Сумма"><input inputMode="decimal" value={amount} onChange={(e) => setAmount(formatMoneyInput(e.target.value))} placeholder="100 000" /></Field><Field title="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field></div>
+       <Field title="Способ"><select value={method} onChange={(e) => setMethod(e.target.value as ClientPaymentMethod)}><option value="NONCASH">Безнал</option><option value="CASH">Наличными</option><option value="CARD">Пластик</option><option value="ADVANCE">Аванс</option></select></Field>
+       <Field title="Комментарий"><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: часть оплаты по счёту" /></Field>
+       <Field title="Подтверждение оплаты">
+@@ -6586,11 +6893,13 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+               onChange={(e) =>
+                 setAmount(
+-                  e.target.value
++                  formatMoneyInput(
++                    e.target.value
++                  )
+                 )
+               }
+ 
+-              placeholder="420000"
++              placeholder="420 000"
+             />
+ 
+           </Field>
+@@ -6767,6 +7076,58 @@ function todayLocalDate() {
+ }
+ 
+ 
++function formatMoneyInput(
++  value: string,
++) {
++
++  const normalized =
++    value
++      .replace(/\s+/g, '')
++      .replace(',', '.')
++      .replace(/[^0-9.]/g, '');
++
++
++  if (!normalized) {
++    return '';
++  }
++
++
++  const firstDot =
++    normalized.indexOf('.');
++
++
++  const integerPart =
++    (
++      firstDot >= 0
++        ? normalized.slice(0, firstDot)
++        : normalized
++    ) || '0';
++
++
++  const decimalPart =
++    firstDot >= 0
++      ? normalized
++          .slice(firstDot + 1)
++          .replace(/\./g, '')
++          .slice(0, 2)
++      : null;
++
++
++  const formattedInteger =
++    integerPart
++      .replace(/^0+(?=\d)/, '')
++      .replace(
++        /\B(?=(\d{3})+(?!\d))/g,
++        ' '
++      );
++
++
++  return decimalPart !== null
++    ? formattedInteger + ',' + decimalPart
++    : formattedInteger;
++}
++
++
+ function parseMoneyInput(
+   value: string,
+ ) {
+diff --git a/frontend/src/PurchasesBlock.tsx b/frontend/src/PurchasesBlock.tsx
+index f7d17cb..e0d89c8 100644
+--- a/frontend/src/PurchasesBlock.tsx
++++ b/frontend/src/PurchasesBlock.tsx
+@@ -79,6 +79,52 @@ function parseMoney(
+ }
+ 
+ 
++function formatMoneyInput(
++  value: string,
++) {
++
++  const normalized =
++    value
++      .replace(/\s+/g, '')
++      .replace(',', '.')
++      .replace(/[^0-9.]/g, '');
++
++  if (!normalized) {
++    return '';
++  }
++
++  const firstDot =
++    normalized.indexOf('.');
++
++  const integerPart =
++    (
++      firstDot >= 0
++        ? normalized.slice(0, firstDot)
++        : normalized
++    ) || '0';
++
++  const decimalPart =
++    firstDot >= 0
++      ? normalized
++          .slice(firstDot + 1)
++          .replace(/\./g, '')
++          .slice(0, 2)
++      : null;
++
++  const formattedInteger =
++    integerPart
++      .replace(/^0+(?=\d)/, '')
++      .replace(
++        /\B(?=(\d{3})+(?!\d))/g,
++        ' '
++      );
++
++  return decimalPart !== null
++    ? formattedInteger + ',' + decimalPart
++    : formattedInteger;
++}
++
++
+ function statusLabel(
+   status:
+     SupplierPurchaseStatus,
+@@ -251,6 +297,11 @@ export function PurchasesBlock({
+   const [files, setFiles] =
+     useState<File[]>([]);
+ 
++  const [
++    selectedExistingFileId,
++    setSelectedExistingFileId,
++  ] = useState('');
++
+   const [urgent, setUrgent] =
+     useState(false);
+ 
+@@ -266,14 +317,34 @@ export function PurchasesBlock({
+     'ACCOUNTANT';
+ 
+ 
+-  const dealIncomingFiles =
++  const customerIncomingFiles =
+     (
+       deal.files || []
+-    ).filter(
+-      (file) =>
+-        file.category ===
+-        'MANAGER_ATTACHMENT'
+-    );
++    )
++      .filter(
++        (file) =>
++          file.category ===
++            'CUSTOMER_INVOICE_PRIMARY' ||
++          file.category
++            ?.startsWith(
++              'CORRECTION_PRIMARY_'
++            )
++      )
++      .sort(
++        (a, b) =>
++          new Date(
++            a.createdAt || 0
++          ).getTime() -
++          new Date(
++            b.createdAt || 0
++          ).getTime()
++      );
++
++
++  const defaultIncomingFileId =
++    customerIncomingFiles[
++      customerIncomingFiles.length - 1
++    ]?.id || '';
+ 
+ 
+   async function reload() {
+@@ -295,6 +366,16 @@ export function PurchasesBlock({
+   ]);
+ 
+ 
++  useEffect(() => {
++    setSelectedExistingFileId(
++      defaultIncomingFileId
++    );
++  }, [
++    deal.id,
++    defaultIncomingFileId,
++  ]);
++
++
+   async function refreshAll() {
+ 
+     await reload();
+@@ -308,6 +389,9 @@ export function PurchasesBlock({
+     setInvoiceAmount('');
+     setComment('');
+     setFiles([]);
++    setSelectedExistingFileId(
++      defaultIncomingFileId
++    );
+     setUrgent(false);
+     setAdding(false);
+   }
+@@ -372,6 +456,10 @@ export function PurchasesBlock({
+               comment.trim() ||
+               undefined,
+ 
++            sourceFileId:
++              selectedExistingFileId ||
++              undefined,
++
+             createdById:
+               user.id,
+           }
+@@ -580,7 +668,9 @@ export function PurchasesBlock({
+ 
+                 onChange={(e) =>
+                   setInvoiceAmount(
+-                    e.target.value
++                    formatMoneyInput(
++                      e.target.value
++                    )
+                   )
+                 }
+ 
+@@ -592,41 +682,64 @@ export function PurchasesBlock({
+           </div>
+ 
+ 
++          {customerIncomingFiles.length > 0 && (
++
++            <label className="field purchaseExistingInvoiceField">
++
++              <span>
++                Входящий счёт из сделки
++              </span>
++
++              <select
++                value={selectedExistingFileId}
++                onChange={(e) =>
++                  setSelectedExistingFileId(
++                    e.target.value
++                  )
++                }
++              >
++                <option value="">
++                  Не использовать
++                </option>
++
++                {[...customerIncomingFiles]
++                  .reverse()
++                  .map(
++                    (file, index) => (
++                    <option
++                      key={file.id}
++                      value={file.id}
++                    >
++                      {index === 0 ? 'Актуальный · ' : ''}
++                      {file.originalName}
++                    </option>
++                  ))}
++              </select>
++
++              <small>
++                Выбранный счёт будет прикреплён к этому поставщику.
++              </small>
++
++            </label>
++
++          )}
++
++
+           <label className="field purchaseFileField">
+ 
+             <span>
+-              Входящий счёт
++              Другой входящий счёт / документы
+             </span>
+ 
+             <MultiFilePicker
+               files={files}
+               onChange={setFiles}
+-              title="+ Прикрепить счёт"
++              title="+ Прикрепить другой счёт"
+             />
+ 
+           </label>
+ 
+ 
+-          {
+-            files.length === 0 &&
+-            dealIncomingFiles.length >
+-              0 && (
+-
+-            <div className="purchaseAutoFiles">
+-
+-              <strong>
+-                Документы сделки уже есть
+-              </strong>
+-
+-              <span>
+-                Если отдельный счёт поставщика не прикреплять, бухгалтер увидит входящие документы сделки — {dealIncomingFiles.length}.
+-              </span>
+-
+-            </div>
+-
+-          )}
+-
+-
+           <label className="field">
+ 
+             <span>
+@@ -1287,8 +1400,13 @@ export function SupplierPaymentTask({
+ 
+   const [amount, setAmount] =
+     useState(
+-      purchase.requestedAmount ||
+-      ''
++      purchase.requestedAmount
++        ? formatMoneyInput(
++            String(
++              purchase.requestedAmount
++            )
++          )
++        : ''
+     );
+ 
+ 
+@@ -1469,9 +1587,7 @@ export function SupplierPaymentTask({
+ 
+ 
+     const paymentAmount =
+-      amount
+-        ? Number(amount)
+-        : 0;
++      parseMoney(amount) || 0;
+ 
+ 
+     const filesToUpload =
+@@ -1922,7 +2038,9 @@ export function SupplierPaymentTask({
+ 
+               onChange={(e) =>
+                 setAmount(
+-                  e.target.value
++                  formatMoneyInput(
++                    e.target.value
++                  )
+                 )
+               }
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 416e4b0..282f9b4 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -242,7 +242,7 @@ export async function confirmInvoice(dealId: string, invoiceId: string, actorId:
+ export async function requestInvoiceCorrection(
+   dealId: string,
+   invoiceId: string,
+-  payload: { actorId: string; comment: string; urgent?: boolean },
++  payload: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
+ ) {
+   return json(`/deals/${dealId}/invoices/${invoiceId}/correction`, {
+     method: 'POST',
+@@ -303,6 +303,7 @@ export async function createSupplierPurchase(
+     incomingInvoiceNumber?: string;
+     incomingInvoiceAmount?: number;
+     comment?: string;
++    sourceFileId?: string;
+     createdById: string;
+   },
+ ) {
+@@ -317,6 +318,26 @@ export async function createSupplierPurchase(
+ }
+ 
+ 
++export async function updateSupplierPurchase(
++  dealId: string,
++  purchaseId: string,
++  payload: {
++    supplierName?: string;
++    incomingInvoiceAmount?: number;
++    comment?: string;
++    actorId?: string;
++  },
++) {
++  return json<SupplierPurchase>(
++    `/deals/${dealId}/suppliers/${purchaseId}`,
++    {
++      method: 'PATCH',
++      body: JSON.stringify(payload),
++    },
++  );
++}
++
++
+ export async function requestSupplierPayment(
+   dealId: string,
+   purchaseId: string,
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 88276e1..b6b880c 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3353,3 +3353,46 @@ html[data-theme='dark'] .dealUpload-error {
+     width: auto;
+   }
+ }
++
++/* MSM deal layout v0.5.5 */
++.dealOverview { display:grid; gap:14px; padding:16px; border:1px solid #e7e5e4; border-radius:20px; background:#fff; }
++.dealOverviewHead { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
++.dealOverviewHead h2 { margin:5px 0 0; font-size:26px; }
++.dealOverviewMeta { display:flex; gap:9px; flex-wrap:wrap; color:#a8a29e; font-size:11px; }
++.dealOverviewInvoiceStatus { text-align:right; }
++.dealOverviewInvoiceStatus span,.dealOverviewInvoiceStatus b { display:block; }
++.dealOverviewInvoiceStatus span { color:#a8a29e; font-size:10px; }
++.dealOverviewInvoiceStatus b { margin-top:3px; font-size:12px; }
++.dealOverviewGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
++.dealMetric { min-width:0; min-height:78px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; gap:4px; padding:11px 12px; border:1px solid #eceae7; border-radius:14px; background:#fafaf9; text-align:left; color:#171717; }
++.dealMetric span { color:#78716c; font-size:10px; }
++.dealMetric b { max-width:100%; font-size:14px; overflow-wrap:anywhere; }
++.dealMetric em { color:#a8a29e; font-size:9px; font-style:normal; }
++.dealMetricButton { cursor:pointer; transition:transform .16s ease, background .16s ease, border-color .16s ease; }
++.dealMetricButton:not(:disabled):hover { background:#f5f5f4; border-color:#d6d3d1; }
++.dealMetricButton:not(:disabled):active { transform:scale(.985); }
++.dealMetricButton:disabled { cursor:default; opacity:1; }
++.dealMetricMuted { background:#fff; }
++.dealQuickEditor { display:grid; gap:10px; padding:12px; border:1px solid #d6d3d1; border-radius:14px; background:#fafaf9; animation:msmFadeUp 160ms ease-out both; }
++.dealQuickActions { display:grid; grid-template-columns:auto 1fr 36px; gap:8px; }
++.dealQuickClose { border:0; border-radius:10px; background:#e7e5e4; font-size:20px; }
++.dealQuickMessage { color:#57534e; font-size:12px; line-height:1.45; }
++.dealInfoView { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
++.dealInfoRow { min-width:0; padding:10px 11px; border-radius:12px; background:#fafaf9; }
++.dealInfoRow span,.dealInfoRow b { display:block; }
++.dealInfoRow span { color:#78716c; font-size:10px; }
++.dealInfoRow b { margin-top:3px; overflow-wrap:anywhere; }
++.dealInfoCompany { order:1; }
++.dealInfoView > .dealInfoRow:nth-of-type(2) { order:2; }
++.dealInfoView > .dealInfoRow:nth-of-type(3) { order:3; }
++.dealInfoAddress { order:4; grid-column:1/-1; }
++.dealInfoComment { order:5; grid-column:1/-1; }
++.dealInfoEditButton { min-width:40px; font-size:16px; letter-spacing:1px; }
++.invoiceDecisionBar { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
++.invoiceDecisionBarSingle { grid-template-columns:1fr; }
++.purchaseExistingInvoiceField small { color:#78716c; font-size:10px; font-weight:500; line-height:1.35; }
++html[data-theme='dark'] .dealOverview,html[data-theme='dark'] .dealQuickEditor { background:#1d1d1f; border-color:#343437; }
++html[data-theme='dark'] .dealMetric,html[data-theme='dark'] .dealInfoRow { background:#242426; border-color:#343437; color:#f5f5f4; }
++html[data-theme='dark'] .dealMetricMuted { background:#1d1d1f; }
++html[data-theme='dark'] .dealQuickClose { background:#303033; color:#f5f5f4; }
++@media (max-width:520px){ .dealOverviewGrid{grid-template-columns:1fr 1fr;} .dealOverviewHead{align-items:flex-start;} .dealOverviewHead h2{font-size:23px;} .dealOverviewInvoiceStatus{max-width:42%;} .dealInfoView{grid-template-columns:1fr 1fr;} .dealQuickActions{grid-template-columns:1fr 1fr 36px;} }
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index 86d937b..0efd42d 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -22,6 +22,7 @@ export type StoredFile = {
+ 
+ export type Invoice = {
+   id: string;
++  sellerType?: SellerType;
+   number: string;
+   invoiceDate?: string;
+   amount?: string;
+@@ -120,6 +121,7 @@ export type Deal = {
+   files?: StoredFile[];
+   clientPayments?: ClientPayment[];
+   auditEvents?: AuditEvent[];
++  supplierPurchases?: SupplierPurchase[];
+ };
+ 
+ declare global {

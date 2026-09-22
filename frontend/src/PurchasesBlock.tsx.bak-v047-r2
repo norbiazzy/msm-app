@@ -1,0 +1,2160 @@
+import {
+  startBackgroundUploadJob,
+} from './backgroundUploads';
+
+import {
+  useEffect,
+  useState,
+} from 'react';
+
+import {
+  addSupplierPayment,
+  cancelSupplierPurchase,
+  markSupplierPaymentStamped,
+  createSupplierPurchase,
+  dealFileUrl,
+  listSupplierPurchases,
+  requestSupplierPayment,
+  updateTaskStatus,
+  type Task,
+} from './api';
+
+import type {
+  CurrentUser,
+  Deal,
+  SupplierPurchase,
+  SupplierPurchaseStatus,
+} from './types';
+
+import {
+  MultiFilePicker,
+} from './MultiFilePicker';
+
+
+function money(
+  value?: string | number,
+) {
+
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return '—';
+  }
+
+
+  return (
+    Number(value)
+      .toLocaleString(
+        'ru-RU'
+      ) +
+    ' ₽'
+  );
+}
+
+
+function parseMoney(
+  value: string,
+) {
+
+  const normalized =
+    value
+      .replace(/\s+/g, '')
+      .replace(',', '.');
+
+
+  if (!normalized) {
+    return undefined;
+  }
+
+
+  const parsed =
+    Number(normalized);
+
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : undefined;
+}
+
+
+function statusLabel(
+  status:
+    SupplierPurchaseStatus,
+) {
+
+  const map:
+    Record<
+      SupplierPurchaseStatus,
+      string
+    > = {
+
+    DRAFT:
+      'Сохранён',
+
+    PAYMENT_REQUESTED:
+      'Передано бухгалтерии',
+
+    PARTIALLY_PAID:
+      'Частично оплачен',
+
+    PAID:
+      'Оплачен',
+
+    CANCELLED:
+      'Отменён',
+  };
+
+
+  return map[status];
+}
+
+
+function waitingForStampedDocument(
+  purchase: SupplierPurchase,
+) {
+
+  const paid =
+    purchase.payments.reduce(
+      (
+        sum,
+        payment,
+      ) =>
+        sum +
+        Number(
+          payment.amount
+        ),
+      0,
+    );
+
+
+  const target =
+    purchase.requestedAmount
+      ? Number(
+          purchase
+            .requestedAmount
+        )
+
+      : purchase
+          .incomingInvoiceAmount
+        ? Number(
+            purchase
+              .incomingInvoiceAmount
+          )
+
+        : null;
+
+
+  const financiallyPaid =
+    target === null
+      ? paid > 0
+      : paid >= target;
+
+
+  return (
+    financiallyPaid &&
+    purchase.payments.some(
+      (payment) =>
+        !payment
+          .paymentOrderStamped
+    )
+  );
+}
+
+
+function purchaseDisplayStatus(
+  purchase: SupplierPurchase,
+) {
+
+  if (
+    waitingForStampedDocument(
+      purchase
+    )
+  ) {
+
+    return 'Оплачено · ждём платёжку с печатью';
+  }
+
+
+  return statusLabel(
+    purchase.status
+  );
+}
+
+
+function todayLocalDate() {
+
+  const now =
+    new Date();
+
+
+  const local =
+    new Date(
+
+      now.getTime() -
+
+      now.getTimezoneOffset() *
+        60000
+    );
+
+
+  return local
+    .toISOString()
+    .slice(0, 10);
+}
+
+
+// ======================================================
+// BLOCK IN DEAL
+// ======================================================
+
+export function PurchasesBlock({
+  deal,
+  user,
+  onChanged,
+}: {
+  deal: Deal;
+  user: CurrentUser;
+  onChanged:
+    () =>
+      void |
+      Promise<void>;
+}) {
+
+  const [
+    purchases,
+    setPurchases,
+  ] = useState<
+    SupplierPurchase[]
+  >([]);
+
+
+  const [adding, setAdding] =
+    useState(false);
+
+  const [
+    supplierName,
+    setSupplierName,
+  ] = useState('');
+
+  const [
+    invoiceAmount,
+    setInvoiceAmount,
+  ] = useState('');
+
+  const [comment, setComment] =
+    useState('');
+
+  const [files, setFiles] =
+    useState<File[]>([]);
+
+  const [urgent, setUrgent] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+
+  const canManage =
+    user.role !==
+    'ACCOUNTANT';
+
+
+  const dealIncomingFiles =
+    (
+      deal.files || []
+    ).filter(
+      (file) =>
+        file.category ===
+        'MANAGER_ATTACHMENT'
+    );
+
+
+  async function reload() {
+
+    setPurchases(
+      await listSupplierPurchases(
+        deal.id
+      )
+    );
+  }
+
+
+  useEffect(() => {
+
+    void reload();
+
+  }, [
+    deal.id,
+  ]);
+
+
+  async function refreshAll() {
+
+    await reload();
+    await onChanged();
+  }
+
+
+  function resetForm() {
+
+    setSupplierName('');
+    setInvoiceAmount('');
+    setComment('');
+    setFiles([]);
+    setUrgent(false);
+    setAdding(false);
+  }
+
+
+  async function submit(
+    mode:
+      'SAVE' |
+      'PAY',
+  ) {
+
+    const supplier =
+      supplierName.trim();
+
+
+    const amount =
+      parseMoney(
+        invoiceAmount
+      );
+
+
+    if (!supplier) {
+
+      setError(
+        'Укажите поставщика.'
+      );
+
+      return;
+    }
+
+
+    if (
+      amount === undefined
+    ) {
+
+      setError(
+        'Укажите сумму закупки.'
+      );
+
+      return;
+    }
+
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      const purchase =
+        await createSupplierPurchase(
+          deal.id,
+          {
+
+            supplierName:
+              supplier,
+
+            incomingInvoiceAmount:
+              amount,
+
+            comment:
+              comment.trim() ||
+              undefined,
+
+            createdById:
+              user.id,
+          }
+        );
+
+
+      const filesToUpload =
+        [...files];
+
+
+      const commentToSend =
+        comment.trim() ||
+        undefined;
+
+
+      const urgentToSend =
+        urgent;
+
+
+      resetForm();
+
+
+      if (
+        filesToUpload.length > 0 ||
+        mode === 'PAY'
+      ) {
+
+        startBackgroundUploadJob({
+
+          title:
+            mode === 'PAY'
+              ? 'Передаём оплату бухгалтерии'
+              : 'Сохраняем документы закупки',
+
+          subtitle:
+            supplier,
+
+          files:
+            filesToUpload,
+
+
+          run:
+            async ({
+              upload,
+              setProgress,
+            }) => {
+
+              for (
+                let index = 0;
+                index <
+                  filesToUpload.length;
+                index++
+              ) {
+
+                await upload(
+                  deal.id,
+
+                  filesToUpload[
+                    index
+                  ],
+
+                  'SUPPLIER_INVOICE_' +
+                  purchase.id,
+
+                  index,
+
+                  filesToUpload.length,
+                );
+              }
+
+
+              if (
+                mode === 'PAY'
+              ) {
+
+                setProgress(94);
+
+
+                await requestSupplierPayment(
+                  deal.id,
+                  purchase.id,
+                  {
+
+                    amount,
+
+                    comment:
+                      commentToSend,
+
+                    urgent:
+                      urgentToSend,
+
+                    actorId:
+                      user.id,
+                  }
+                );
+              }
+
+
+              setProgress(99);
+
+              await refreshAll();
+            },
+        });
+
+
+        await reload();
+        await onChanged();
+
+      } else {
+
+        await refreshAll();
+      }
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  const showForm =
+    canManage &&
+    (
+      purchases.length === 0 ||
+      adding
+    );
+
+
+  return (
+
+    <div className="purchaseBox purchaseBoxSimple">
+
+      <div className="purchaseHead">
+
+        <div>
+
+          <span>
+            Закупка
+          </span>
+
+          <strong>
+            Поставщики
+          </strong>
+
+        </div>
+
+
+        <b>
+          {purchases.length}
+        </b>
+
+      </div>
+
+
+      {showForm && (
+
+        <div className="purchaseQuickForm">
+
+          <div className="purchaseQuickMain">
+
+            <label className="field">
+
+              <span>
+                Поставщик
+              </span>
+
+              <input
+                value={
+                  supplierName
+                }
+
+                onChange={(e) =>
+                  setSupplierName(
+                    e.target.value
+                  )
+                }
+
+                placeholder="Например: Bonolit"
+              />
+
+            </label>
+
+
+            <label className="field">
+
+              <span>
+                Сумма
+              </span>
+
+              <input
+                inputMode="decimal"
+
+                value={
+                  invoiceAmount
+                }
+
+                onChange={(e) =>
+                  setInvoiceAmount(
+                    e.target.value
+                  )
+                }
+
+                placeholder="215 000"
+              />
+
+            </label>
+
+          </div>
+
+
+          <label className="field purchaseFileField">
+
+            <span>
+              Входящий счёт
+            </span>
+
+            <MultiFilePicker
+              files={files}
+              onChange={setFiles}
+              title="+ Прикрепить счёт"
+            />
+
+          </label>
+
+
+          {
+            files.length === 0 &&
+            dealIncomingFiles.length >
+              0 && (
+
+            <div className="purchaseAutoFiles">
+
+              <strong>
+                Документы сделки уже есть
+              </strong>
+
+              <span>
+                Если отдельный счёт поставщика не прикреплять, бухгалтер увидит входящие документы сделки — {dealIncomingFiles.length}.
+              </span>
+
+            </div>
+
+          )}
+
+
+          <label className="field">
+
+            <span>
+              Комментарий
+              <small>
+                необязательно
+              </small>
+            </span>
+
+            <textarea
+              rows={2}
+
+              value={comment}
+
+              onChange={(e) =>
+                setComment(
+                  e.target.value
+                )
+              }
+
+              placeholder="Например: ДЗГИ, можно не оплачивать сразу"
+            />
+
+          </label>
+
+
+          <label className="urgentToggle purchaseUrgent">
+
+            <input
+              type="checkbox"
+
+              checked={urgent}
+
+              onChange={(e) =>
+                setUrgent(
+                  e.target.checked
+                )
+              }
+            />
+
+            <span>
+              Срочно
+            </span>
+
+          </label>
+
+
+          <div className="purchaseQuickActions">
+
+            {
+              purchases.length > 0 && (
+
+              <button
+                type="button"
+                className="secondary"
+
+                disabled={saving}
+
+                onClick={() => {
+
+                  resetForm();
+                }}
+              >
+                Отмена
+              </button>
+
+            )}
+
+
+            <button
+              type="button"
+              className="secondary"
+
+              disabled={saving}
+
+              onClick={() =>
+                void submit(
+                  'SAVE'
+                )
+              }
+            >
+              Сохранить
+            </button>
+
+
+            <button
+              type="button"
+              className="primary"
+
+              disabled={saving}
+
+              onClick={() =>
+                void submit(
+                  'PAY'
+                )
+              }
+            >
+              {
+                saving
+                  ? 'Отправляем…'
+                  : 'Отправить в оплату'
+              }
+            </button>
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {purchases.length > 0 && (
+
+        <div className="purchaseList">
+
+          {purchases.map(
+            (purchase) => (
+
+            <PurchaseCard
+              key={purchase.id}
+              deal={deal}
+              purchase={purchase}
+              user={user}
+              canManage={canManage}
+              onChanged={refreshAll}
+            />
+
+          ))}
+
+        </div>
+
+      )}
+
+
+      {canManage &&
+        purchases.length > 0 &&
+        !adding && (
+
+        <button
+          type="button"
+          className="purchaseAddAnother"
+
+          onClick={() =>
+            setAdding(true)
+          }
+        >
+          + Добавить ещё поставщика
+        </button>
+
+      )}
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+    </div>
+  );
+}
+
+
+// ======================================================
+// PURCHASE CARD
+// ======================================================
+
+function PurchaseCard({
+  deal,
+  purchase,
+  user,
+  canManage,
+  onChanged,
+}: {
+  deal: Deal;
+  purchase: SupplierPurchase;
+  user: CurrentUser;
+  canManage: boolean;
+  onChanged:
+    () =>
+      void |
+      Promise<void>;
+}) {
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const [
+    cancelConfirmOpen,
+    setCancelConfirmOpen,
+  ] = useState(false);
+
+
+  const paid =
+    purchase.payments
+      .reduce(
+        (
+          sum,
+          payment,
+        ) =>
+          sum +
+          Number(
+            payment.amount
+          ),
+        0,
+      );
+
+
+  const purchaseFiles =
+    (
+      deal.files || []
+    ).filter(
+      (file) =>
+        file.category ===
+        'SUPPLIER_INVOICE_' +
+        purchase.id
+    );
+
+
+  const fallbackFiles =
+    purchaseFiles.length === 0
+
+      ? (
+          deal.files || []
+        ).filter(
+          (file) =>
+            file.category ===
+            'MANAGER_ATTACHMENT'
+        )
+
+      : [];
+
+
+  const visibleIncomingFiles =
+    purchaseFiles.length > 0
+      ? purchaseFiles
+      : fallbackFiles;
+
+
+  async function cancelPurchase() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await cancelSupplierPurchase(
+        deal.id,
+        purchase.id,
+      );
+
+
+      setCancelConfirmOpen(
+        false
+      );
+
+
+      await onChanged();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  function requestPayment() {
+
+    setError('');
+
+
+    const amount =
+      purchase.incomingInvoiceAmount
+        ? Number(
+            purchase
+              .incomingInvoiceAmount
+          )
+
+        : undefined;
+
+
+    if (
+      amount === undefined ||
+      !Number.isFinite(amount)
+    ) {
+
+      setError(
+        'Для отправки в оплату укажите сумму закупки.'
+      );
+
+      return;
+    }
+
+
+    startBackgroundUploadJob({
+
+      title:
+        'Передаём оплату бухгалтерии',
+
+      subtitle:
+        purchase.supplierName,
+
+      files: [],
+
+
+      run:
+        async ({
+          setProgress,
+        }) => {
+
+          setProgress(70);
+
+
+          await requestSupplierPayment(
+            deal.id,
+            purchase.id,
+            {
+
+              amount,
+
+              comment:
+                purchase.comment ||
+                undefined,
+
+              urgent:
+                false,
+
+              actorId:
+                user.id,
+            }
+          );
+
+
+          setProgress(99);
+
+          await onChanged();
+        },
+    });
+  }
+
+
+  return (
+
+    <div className="purchaseCard purchaseCardCompact">
+
+      <div className="purchaseCardTop">
+
+        <div>
+
+          <strong>
+            {purchase.supplierName}
+          </strong>
+
+          <b className="purchaseAmountMain">
+            {
+              money(
+                purchase
+                  .incomingInvoiceAmount
+              )
+            }
+          </b>
+
+        </div>
+
+
+        <span
+          className={
+            'purchaseStatus ' +
+            'purchaseStatus-' +
+            purchase.status
+              .toLowerCase()
+          }
+        >
+
+          {
+            purchaseDisplayStatus(
+              purchase
+            )
+          }
+
+        </span>
+
+      </div>
+
+
+      {purchase.comment && (
+
+        <div className="purchaseComment">
+          {purchase.comment}
+        </div>
+
+      )}
+
+
+      {visibleIncomingFiles.length >
+        0 && (
+
+        <div className="purchaseFiles purchaseFilesCompact">
+
+          <span>
+            {
+              purchaseFiles.length >
+                0
+                ? 'Входящий счёт'
+                : 'Документы сделки'
+            }
+          </span>
+
+
+          {visibleIncomingFiles
+            .slice(0, 3)
+            .map(
+              (file) => (
+
+              <a
+                key={file.id}
+
+                href={
+                  dealFileUrl(
+                    file.id
+                  )
+                }
+
+                target="_blank"
+                rel="noreferrer"
+              >
+                {file.originalName}
+              </a>
+
+            ))}
+
+        </div>
+
+      )}
+
+
+      {paid > 0 && (
+
+        <div className="purchasePaidMini">
+
+          <span>
+            Оплачено
+          </span>
+
+          <b>
+            {money(paid)}
+          </b>
+
+        </div>
+
+      )}
+
+
+      {canManage &&
+        purchase.status ===
+          'DRAFT' && (
+
+        <div className="purchaseCardActions">
+
+          <button
+            type="button"
+            className="primary"
+
+            onClick={
+              requestPayment
+            }
+          >
+            Отправить в оплату
+          </button>
+
+
+          <button
+            type="button"
+            className="purchaseDeleteMini"
+
+            onClick={() =>
+              setCancelConfirmOpen(
+                true
+              )
+            }
+          >
+            Удалить
+          </button>
+
+        </div>
+
+      )}
+
+
+      {canManage &&
+        purchase.status ===
+          'PAYMENT_REQUESTED' && (
+
+        <button
+          type="button"
+          className="purchaseCancelButton purchaseCancelCompact"
+
+          disabled={saving}
+
+          onClick={() =>
+            setCancelConfirmOpen(
+              true
+            )
+          }
+        >
+          Отменить запрос оплаты
+        </button>
+
+      )}
+
+
+      {cancelConfirmOpen && (
+
+        <div
+          className="appModalBackdrop"
+
+          onClick={() =>
+            setCancelConfirmOpen(
+              false
+            )
+          }
+        >
+
+          <div
+            className="appModal"
+
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+
+            <strong>
+
+              {
+                purchase.status ===
+                  'PAYMENT_REQUESTED'
+
+                  ? 'Отменить запрос оплаты?'
+                  : 'Удалить закупку?'
+              }
+
+            </strong>
+
+
+            <p>
+
+              {
+                purchase.status ===
+                  'PAYMENT_REQUESTED'
+
+                  ? 'Если бухгалтер ещё не взял задачу в работу, запрос и закупка будут удалены.'
+
+                  : 'Закупка ещё не передана бухгалтерии и будет удалена без записи в историю.'
+              }
+
+            </p>
+
+
+            <div className="appModalActions">
+
+              <button
+                type="button"
+                className="secondary"
+
+                disabled={saving}
+
+                onClick={() =>
+                  setCancelConfirmOpen(
+                    false
+                  )
+                }
+              >
+                Не удалять
+              </button>
+
+
+              <button
+                type="button"
+                className="dangerButton"
+
+                disabled={saving}
+
+                onClick={
+                  cancelPurchase
+                }
+              >
+
+                {
+                  saving
+                    ? 'Удаляем…'
+                    : purchase.status ===
+                        'PAYMENT_REQUESTED'
+                      ? 'Отменить запрос'
+                      : 'Удалить'
+                }
+
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+    </div>
+  );
+}
+
+
+// ======================================================
+// ACCOUNTANT TASK
+// ======================================================
+
+export function SupplierPaymentTask({
+  task,
+  user,
+  onBack,
+}: {
+  task: Task;
+  user: CurrentUser;
+  onBack: () => void;
+}) {
+
+  const purchase =
+    task.supplierPurchase!;
+
+
+  const [status, setStatus] =
+    useState(task.status);
+
+
+  const [amount, setAmount] =
+    useState(
+      purchase.requestedAmount ||
+      ''
+    );
+
+
+  const [comment, setComment] =
+    useState('');
+
+
+  const [stamped, setStamped] =
+    useState(false);
+
+
+  const [files, setFiles] =
+    useState<File[]>([]);
+
+
+  const [
+    payments,
+    setPayments,
+  ] = useState(
+    purchase.payments || []
+  );
+
+
+  const [
+    stampPaymentId,
+    setStampPaymentId,
+  ] = useState<
+    string | null
+  >(null);
+
+
+  const [
+    stampFiles,
+    setStampFiles,
+  ] = useState<File[]>([]);
+
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+
+  const purchaseIncomingFiles =
+    (
+      task.deal.files || []
+    ).filter(
+      (file) =>
+
+        file.category ===
+        'SUPPLIER_INVOICE_' +
+        purchase.id
+    );
+
+
+  const incomingFiles =
+    purchaseIncomingFiles.length > 0
+
+      ? purchaseIncomingFiles
+
+      : (
+          task.deal.files || []
+        ).filter(
+          (file) =>
+            file.category ===
+            'MANAGER_ATTACHMENT'
+        );
+
+
+  const paidAlready =
+    payments.reduce(
+      (
+        sum,
+        payment,
+      ) =>
+        sum +
+        Number(
+          payment.amount
+        ),
+      0,
+    );
+
+
+  const target =
+    purchase.requestedAmount
+      ? Number(
+          purchase
+            .requestedAmount
+        )
+
+      : purchase
+          .incomingInvoiceAmount
+        ? Number(
+            purchase
+              .incomingInvoiceAmount
+          )
+
+        : null;
+
+
+  const financiallyPaid =
+    target === null
+      ? paidAlready > 0
+      : paidAlready >= target;
+
+
+  const waitingStamp =
+    financiallyPaid &&
+    payments.some(
+      (payment) =>
+        !payment
+          .paymentOrderStamped
+    );
+
+
+  async function take() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await updateTaskStatus(
+        task.id,
+        'IN_PROGRESS',
+        user.id
+      );
+
+
+      setStatus(
+        'IN_PROGRESS'
+      );
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  function savePayment() {
+
+    setError('');
+
+
+    if (
+      stamped &&
+      files.length === 0
+    ) {
+
+      setError(
+        'Если ставите «с печатью», прикрепите платёжку.'
+      );
+
+      return;
+    }
+
+
+    const paymentAmount =
+      amount
+        ? Number(amount)
+        : 0;
+
+
+    const filesToUpload =
+      [...files];
+
+
+    const commentToSave =
+      comment.trim() ||
+      undefined;
+
+
+    const stampedValue =
+      stamped;
+
+
+    setFiles([]);
+    setAmount('');
+    setComment('');
+    setStamped(false);
+
+
+    startBackgroundUploadJob({
+
+      taskId:
+        task.id,
+
+      title:
+        'Отправляем оплату',
+
+      subtitle:
+        purchase.supplierName,
+
+      files:
+        filesToUpload,
+
+
+      run:
+        async ({
+          upload,
+          setProgress,
+        }) => {
+
+          for (
+            let index = 0;
+            index <
+              filesToUpload.length;
+            index++
+          ) {
+
+            await upload(
+              task.deal.id,
+
+              filesToUpload[
+                index
+              ],
+
+              'SUPPLIER_PAYMENT_' +
+              purchase.id,
+
+              index,
+
+              filesToUpload.length,
+            );
+          }
+
+
+          setProgress(94);
+
+
+          await addSupplierPayment(
+            task.deal.id,
+            purchase.id,
+            {
+
+              amount:
+                paymentAmount,
+
+              paidAt:
+                todayLocalDate(),
+
+              paymentOrderStamped:
+                stampedValue,
+
+              comment:
+                commentToSave,
+
+              actorId:
+                user.id,
+            }
+          );
+
+
+          setProgress(99);
+        },
+    });
+
+
+    onBack();
+  }
+
+
+  function sendStampedDocument(
+    paymentId: string,
+  ) {
+
+    setError('');
+
+
+    if (
+      stampFiles.length === 0
+    ) {
+
+      setError(
+        'Прикрепите платёжку с печатью.'
+      );
+
+      return;
+    }
+
+
+    const filesToUpload =
+      [...stampFiles];
+
+
+    setStampFiles([]);
+    setStampPaymentId(null);
+
+
+    startBackgroundUploadJob({
+
+      taskId:
+        task.id,
+
+      title:
+        'Загружаем платёжку с печатью',
+
+      subtitle:
+        purchase.supplierName,
+
+      files:
+        filesToUpload,
+
+
+      run:
+        async ({
+          upload,
+          setProgress,
+        }) => {
+
+          for (
+            let index = 0;
+            index <
+              filesToUpload.length;
+            index++
+          ) {
+
+            await upload(
+              task.deal.id,
+
+              filesToUpload[
+                index
+              ],
+
+              'SUPPLIER_PAYMENT_STAMP_' +
+              paymentId,
+
+              index,
+
+              filesToUpload.length,
+            );
+          }
+
+
+          setProgress(94);
+
+
+          await markSupplierPaymentStamped(
+            task.deal.id,
+            purchase.id,
+            paymentId,
+            user.id,
+          );
+
+
+          setProgress(99);
+        },
+    });
+
+
+    onBack();
+  }
+
+
+  return (
+
+    <section className="content form">
+
+      <button
+        className="backLink"
+        onClick={onBack}
+      >
+        ← К задачам
+      </button>
+
+
+      <div className="detailHero">
+
+        <div className="eyebrow">
+          ЗК-
+          {task.deal.internalNumber}
+        </div>
+
+
+        <h2>
+          Оплатить поставщику
+        </h2>
+
+
+        <p>
+          {purchase.supplierName}
+        </p>
+
+
+        <div className="statusPill">
+
+          {
+            waitingStamp
+              ? 'Оплачено · ждём документ'
+
+              : status === 'NEW'
+                ? 'Новая'
+
+                : status ===
+                    'IN_PROGRESS'
+                  ? 'В работе'
+
+                  : status
+          }
+
+        </div>
+
+
+        {task.urgent && (
+
+          <b className="urgent">
+            СРОЧНО
+          </b>
+
+        )}
+
+      </div>
+
+
+      <div className="infoBox">
+
+        <strong>
+          Данные закупки
+        </strong>
+
+
+        <div className="supplierTaskNumbers">
+
+          <div>
+
+            <span>
+              Входящий счёт
+            </span>
+
+            <b>
+              {
+                purchase
+                  .incomingInvoiceNumber ||
+                '—'
+              }
+            </b>
+
+          </div>
+
+
+          <div>
+
+            <span>
+              Нужно оплатить
+            </span>
+
+            <b>
+              {
+                money(
+                  purchase
+                    .requestedAmount
+                )
+              }
+            </b>
+
+          </div>
+
+
+          <div>
+
+            <span>
+              Уже оплачено
+            </span>
+
+            <b>
+              {money(paidAlready)}
+            </b>
+
+          </div>
+
+
+          <div>
+
+            <span>
+              Документы
+            </span>
+
+            <b>
+              {
+                waitingStamp
+                  ? 'Ждём печать'
+                  : financiallyPaid
+                    ? 'Готово'
+                    : 'Оплата'
+              }
+            </b>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      {task.description && (
+
+        <div className="infoBox">
+
+          <strong>
+            Комментарий менеджера
+          </strong>
+
+          <p>
+            {task.description}
+          </p>
+
+        </div>
+
+      )}
+
+
+      {incomingFiles.length > 0 && (
+
+        <div className="infoBox">
+
+          <strong>
+            {
+              purchaseIncomingFiles.length > 0
+                ? 'Входящий счёт поставщика'
+                : 'Входящие документы сделки'
+            }
+          </strong>
+
+          <div className="versionList">
+
+            {incomingFiles.map(
+              (file) => (
+
+              <div
+                className="versionRow"
+                key={file.id}
+              >
+
+                <div>
+                  <b>
+                    {file.originalName}
+                  </b>
+                </div>
+
+                <a
+                  href={
+                    dealFileUrl(
+                      file.id
+                    )
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Открыть
+                </a>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {status === 'NEW' && (
+
+        <button
+          className="primary wide"
+          disabled={saving}
+          onClick={take}
+        >
+
+          {
+            saving
+              ? 'Сохраняем…'
+              : 'В работу'
+          }
+
+        </button>
+
+      )}
+
+
+      {status ===
+        'IN_PROGRESS' &&
+        !financiallyPaid && (
+
+        <>
+
+          <label className="field">
+
+            <span>
+              Сумма этой оплаты
+            </span>
+
+            <input
+              inputMode="decimal"
+              value={amount}
+
+              onChange={(e) =>
+                setAmount(
+                  e.target.value
+                )
+              }
+
+              placeholder="Сумма"
+            />
+
+          </label>
+
+
+          <label className="field">
+
+            <span>
+              Платёжные документы
+            </span>
+
+            <MultiFilePicker
+              files={files}
+              onChange={setFiles}
+              title="+ Прикрепить платёжки"
+            />
+
+          </label>
+
+
+          <label className="field">
+
+            <span>
+              Комментарий
+            </span>
+
+            <textarea
+              rows={2}
+              value={comment}
+
+              onChange={(e) =>
+                setComment(
+                  e.target.value
+                )
+              }
+            />
+
+          </label>
+
+
+          <label className="stampToggle">
+
+            <input
+              type="checkbox"
+              checked={stamped}
+
+              onChange={(e) =>
+                setStamped(
+                  e.target.checked
+                )
+              }
+            />
+
+
+            <div>
+
+              <strong>
+                Платёжка с печатью
+              </strong>
+
+              <span>
+                Если печати пока нет —
+                не отмечайте.
+                Её можно добавить позже.
+              </span>
+
+            </div>
+
+          </label>
+
+
+          <button
+            type="button"
+            className="primary wide"
+
+            onClick={savePayment}
+          >
+            Отправить оплату
+          </button>
+
+        </>
+
+      )}
+
+
+      {payments.length > 0 && (
+
+        <div className="infoBox">
+
+          <strong>
+            История оплат
+          </strong>
+
+
+          <div className="supplierPaymentHistory">
+
+            {payments.map(
+              (payment) => (
+
+              <div
+                key={payment.id}
+                className={
+                  payment
+                    .paymentOrderStamped
+                    ? 'supplierPaymentStamped'
+                    : 'supplierPaymentNoStamp'
+                }
+              >
+
+                <b>
+                  {
+                    money(
+                      payment.amount
+                    )
+                  }
+                </b>
+
+
+                <span>
+
+                  {
+                    new Date(
+                      payment.paidAt
+                    )
+                      .toLocaleDateString(
+                        'ru-RU'
+                      )
+                  }
+
+                  {' · '}
+
+                  {
+                    payment
+                      .paymentOrderStamped
+
+                      ? '✓ Платёжка с печатью'
+                      : '● Платёжка без печати'
+                  }
+
+                </span>
+
+
+                {payment.comment && (
+
+                  <em>
+                    {payment.comment}
+                  </em>
+
+                )}
+
+
+                {!payment
+                  .paymentOrderStamped && (
+
+                  <button
+                    type="button"
+                    className="stampAddButton"
+
+                    onClick={() => {
+
+                      setStampPaymentId(
+                        stampPaymentId ===
+                          payment.id
+                          ? null
+                          : payment.id
+                      );
+
+                      setStampFiles([]);
+                    }}
+                  >
+
+                    + Добавить с печатью
+
+                  </button>
+
+                )}
+
+
+                {stampPaymentId ===
+                  payment.id && (
+
+                  <div className="stampUploadBox">
+
+                    <MultiFilePicker
+                      files={stampFiles}
+                      onChange={setStampFiles}
+                      title="+ Выбрать платёжку с печатью"
+                    />
+
+
+                    <button
+                      type="button"
+                      className="primary wide"
+
+                      disabled={
+                        stampFiles.length ===
+                        0
+                      }
+
+                      onClick={() =>
+                        sendStampedDocument(
+                          payment.id
+                        )
+                      }
+                    >
+                      Отправить документ
+                    </button>
+
+                  </div>
+
+                )}
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {waitingStamp && (
+
+        <div className="waitingStampBox">
+
+          <strong>
+            Оплата проведена
+          </strong>
+
+          <span>
+            Осталось прикрепить
+            платёжку с печатью.
+            Задача пока остаётся
+            в работе.
+          </span>
+
+        </div>
+
+      )}
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+    </section>
+  );
+}

@@ -1,0 +1,476 @@
+
+import {
+  useEffect,
+  useState,
+} from 'react';
+
+import {
+  listRecentActivity,
+  type RecentActivity,
+} from './api';
+
+
+const sellerLabels = {
+  ST: 'СТ',
+  MSM: 'МСМ',
+  IP: 'ИП',
+};
+
+
+function activityMoney(
+  value: unknown,
+) {
+
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return 'не указана';
+  }
+
+
+  const number =
+    Number(value);
+
+
+  return Number.isFinite(
+    number
+  )
+    ? number.toLocaleString(
+        'ru-RU'
+      ) +
+      ' ₽'
+
+    : String(value);
+}
+
+
+function activityDate(
+  value: unknown,
+) {
+
+  if (!value) {
+    return 'не указана';
+  }
+
+
+  const parts =
+    String(value)
+      .split('-');
+
+
+  return parts.length === 3
+
+    ? parts[2] +
+      '.' +
+      parts[1] +
+      '.' +
+      parts[0]
+
+    : String(value);
+}
+
+
+function activitySeller(
+  value: unknown,
+) {
+
+  const key =
+    String(value || '');
+
+
+  return (
+    sellerLabels[
+      key as keyof typeof sellerLabels
+    ] ||
+    key ||
+    '—'
+  );
+}
+
+
+function actionLabel(
+  event: RecentActivity,
+) {
+
+  if (
+    event.action ===
+    'INVOICE_AMOUNT_CHANGED'
+  ) {
+
+    return (
+      'Сумма счёта: ' +
+      activityMoney(
+        event.oldValue
+          ?.amount
+      ) +
+      ' → ' +
+      activityMoney(
+        event.newValue
+          ?.amount
+      )
+    );
+  }
+
+
+  if (
+    event.action ===
+    'DEAL_SELLER_CHANGED'
+  ) {
+
+    return (
+      'От кого выставляем: ' +
+      activitySeller(
+        event.oldValue
+          ?.sellerType
+      ) +
+      ' → ' +
+      activitySeller(
+        event.newValue
+          ?.sellerType
+      )
+    );
+  }
+
+
+  if (
+    event.action ===
+    'SHIPMENT_DATE_CHANGED'
+  ) {
+
+    return (
+      'Дата отгрузки: ' +
+      activityDate(
+        event.oldValue
+          ?.plannedShipmentAt
+      ) +
+      ' → ' +
+      activityDate(
+        event.newValue
+          ?.plannedShipmentAt
+      )
+    );
+  }
+
+
+  if (
+    event.action ===
+    'DEAL_PHONE_CHANGED'
+  ) {
+
+    return (
+      'Телефон: ' +
+      String(
+        event.oldValue
+          ?.clientPhone ||
+        'не указан'
+      ) +
+      ' → ' +
+      String(
+        event.newValue
+          ?.clientPhone ||
+        'не указан'
+      )
+    );
+  }
+
+
+  const supplier =
+    event.newValue
+      ?.supplierName;
+
+
+  const amount =
+    event.newValue
+      ?.amount;
+
+
+  const paidFromBalance =
+    Boolean(
+      event.newValue
+        ?.paidFromBalance
+    );
+
+
+  if (
+    event.action ===
+    'SUPPLIER_PAYMENT_ADDED'
+  ) {
+
+    return supplier
+
+      ? (
+          paidFromBalance
+            ? 'Оплата с остатка поставщику '
+            : 'Оплата поставщику '
+        ) +
+        supplier +
+        (
+          amount
+            ? ' · ' +
+              Number(amount)
+                .toLocaleString(
+                  'ru-RU'
+                ) +
+              ' ₽'
+            : ''
+        )
+
+      : 'Добавлена оплата поставщику';
+  }
+
+
+  const labels:
+    Record<string, string> = {
+
+    CREATE:
+      'Создал сделку',
+
+    UPLOAD:
+      'Загрузил счёт',
+
+    CONFIRM:
+      'Подтвердил счёт',
+
+    REQUEST_CORRECTION:
+      'Отправил счёт на корректировку',
+
+    INVOICE_REQUEST_SUBMITTED:
+      'Отправил запрос на счёт',
+
+    INVOICE_REQUEST_RESUBMITTED:
+      'Повторно отправил запрос на счёт',
+
+    INVOICE_REQUEST_RETURNED:
+      'Вернул запрос менеджеру',
+
+    INVOICE_REQUEST_WITHDRAWN:
+      'Отозвал запрос на счёт',
+
+    CLIENT_PAYMENT_ADDED:
+      'Добавил оплату клиента',
+
+    PAYMENT_STATUS_CHANGED:
+      'Изменил статус оплаты',
+
+    SUPPLIER_PURCHASE_CREATED:
+      'Добавил закупку',
+
+    SUPPLIER_PURCHASE_UPDATED:
+      'Изменил закупку',
+
+    SUPPLIER_PAYMENT_REQUESTED:
+      'Запросил оплату поставщику',
+
+    SUPPLIER_PAYMENT_STAMPED:
+      'Добавил платёжку с печатью',
+
+    MANAGER_COMMENT_CHANGED:
+      'Изменил комментарий менеджера',
+
+    DELIVERY_ADDRESSES_CHANGED:
+      'Изменил адреса доставки',
+  };
+
+
+  return (
+    labels[event.action] ||
+    'Изменил сделку'
+  );
+}
+
+
+function dealLabel(
+  event: RecentActivity,
+) {
+
+  const invoice =
+    event.deal
+      .invoices?.[0];
+
+
+  if (invoice) {
+
+    return (
+      sellerLabels[
+        event.deal.sellerType
+      ] +
+      '-' +
+      invoice.number
+    );
+  }
+
+
+  return (
+    'ЗК-' +
+    event.deal.internalNumber
+  );
+}
+
+
+export function RecentActivityPanel() {
+
+  const [
+    events,
+    setEvents,
+  ] = useState<
+    RecentActivity[]
+  >([]);
+
+
+  async function reload() {
+
+    try {
+
+      setEvents(
+        await listRecentActivity()
+      );
+
+    } catch {
+      // sidebar should not break deals
+    }
+  }
+
+
+  useEffect(() => {
+
+    void reload();
+
+
+    const timer =
+      window.setInterval(
+        () => {
+          void reload();
+        },
+        15000
+      );
+
+
+    return () =>
+      window.clearInterval(
+        timer
+      );
+
+  }, []);
+
+
+  return (
+
+    <aside className="recentActivity">
+
+      <div className="recentActivityHead">
+
+        <strong>
+          Недавние изменения
+        </strong>
+
+        <span>
+          {events.length}
+        </span>
+
+      </div>
+
+
+      {events.length === 0 ? (
+
+        <div className="recentActivityEmpty">
+          Пока нет событий
+        </div>
+
+      ) : (
+
+        <div className="recentActivityList">
+
+          {events.slice(0, 15)
+            .map(
+              (event) => {
+
+              const actor =
+                event.actor
+
+                  ? [
+                      event.actor
+                        .firstName,
+
+                      event.actor
+                        .lastName,
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+
+                  : 'Система';
+
+
+              return (
+
+                <div
+                  className="recentActivityRow"
+                  key={event.id}
+                >
+
+                  <div className="recentActivityTop">
+
+                    <b>
+                      {dealLabel(event)}
+                    </b>
+
+                    <span>
+                      {
+                        new Date(
+                          event.createdAt
+                        )
+                          .toLocaleTimeString(
+                            'ru-RU',
+                            {
+                              hour:
+                                '2-digit',
+                              minute:
+                                '2-digit',
+                            }
+                          )
+                      }
+                    </span>
+
+                  </div>
+
+
+                  <strong>
+                    {actionLabel(event)}
+                  </strong>
+
+
+                  <div className="recentActivityWho">
+
+                    {actor}
+
+                    {' · '}
+
+                    {
+                      event.deal
+                        .clientName
+                    }
+
+                  </div>
+
+
+                  {event.reason && (
+
+                    <em>
+                      {event.reason}
+                    </em>
+
+                  )}
+
+                </div>
+
+              );
+            })}
+
+        </div>
+
+      )}
+
+    </aside>
+  );
+}

@@ -1,0 +1,43 @@
+import { Body, Controller, Patch, Get, Param, Post, Query } from '@nestjs/common';
+import { CreateDealDto } from './dto';
+import { DealsService } from './deals.service';
+
+@Controller('deals')
+export class DealsController {
+  constructor(private readonly deals: DealsService) {}
+
+  @Post()
+  create(@Body() dto: CreateDealDto) {
+    return this.deals.create(dto);
+  }
+
+  @Get()
+  list(@Query('managerId') managerId?: string) {
+    return this.deals.list(managerId);
+  }
+
+  @Patch(':id/shipment-date')
+  updateShipmentDate(
+    @Param('id')
+    id: string,
+
+    @Body()
+    body: {
+      plannedShipmentAt?: string;
+      actorId: string;
+    },
+  ) {
+
+    return this.deals
+      .updateShipmentDate(
+        id,
+        body,
+      );
+  }
+
+
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.deals.get(id);
+  }
+}

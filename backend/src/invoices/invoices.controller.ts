@@ -13,6 +13,30 @@ export class InvoicesController {
     return this.invoices.create(dealId, body);
   }
 
+  @Patch(':invoiceId/amount')
+  updateAmount(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('invoiceId')
+    invoiceId: string,
+
+    @Body()
+    body: {
+      amount?: number;
+      actorId: string;
+    },
+  ) {
+
+    return this.invoices
+      .updateAmount(
+        dealId,
+        invoiceId,
+        body,
+      );
+  }
+
+
   @Patch(':invoiceId/confirm')
   confirm(
     @Param('dealId') dealId: string,
@@ -26,7 +50,7 @@ export class InvoicesController {
   requestCorrection(
     @Param('dealId') dealId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { actorId: string; comment: string; urgent?: boolean },
+    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
   ) {
     return this.invoices.requestCorrection(dealId, invoiceId, body);
   }

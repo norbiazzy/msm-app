@@ -1,0 +1,2542 @@
+import {
+  PurchasesBlock,
+  SupplierPaymentTask,
+} from './PurchasesBlock';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  addClientPayment,
+  confirmInvoice,
+  createDeal,
+  createInvoice,
+  dealFileUrl,
+  getDeal,
+  listDeals,
+  listTasks,
+  login,
+  requestInvoiceCorrection,
+  updatePaymentStatus,
+  updateTaskStatus,
+  uploadDealFile,
+  type Task,
+} from './api';
+import type { ClientPaymentMethod, CurrentUser, Deal, Invoice, PaymentStatus, SellerType } from './types';
+
+const sellerLabels: Record<SellerType, string> = { ST: 'СТ', MSM: 'МСМ', IP: 'ИП' };
+type View = 'home' | 'new' | 'tasks' | 'deal';
+
+function readRoute(): { view: View; dealId?: string } {
+  const hash = window.location.hash.replace(/^#/, '');
+
+  if (hash === 'new') {
+    return { view: 'new' };
+  }
+
+  if (hash === 'tasks' || hash.startsWith('tasks/')) {
+    return { view: 'tasks' };
+  }
+
+  if (hash.startsWith('deal/')) {
+    return {
+      view: 'deal',
+      dealId: decodeURIComponent(
+        hash.slice('deal/'.length)
+      ),
+    };
+  }
+
+  return { view: 'home' };
+}
+
+function routeHash(
+  view: View,
+  dealId?: string
+) {
+  if (view === 'deal' && dealId) {
+    return '#deal/' + encodeURIComponent(dealId);
+  }
+
+  return '#' + view;
+}
+
+function App() {
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [view, setView] = useState<View>(
+    () => readRoute().view
+  );
+  const [selectedDealId, setSelectedDealId] =
+    useState<string | null>(
+      () => readRoute().dealId ?? null
+    );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function reload(currentUser = user) {
+    if (!currentUser) return;
+    const data = await listDeals(currentUser.role === 'MANAGER' ? currentUser.id : undefined);
+    setDeals(data);
+  }
+
+  function navigate(
+    nextView: View,
+    dealId?: string
+  ) {
+    const nextHash = routeHash(
+      nextView,
+      dealId
+    );
+
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+      return;
+    }
+
+    setView(nextView);
+    setSelectedDealId(dealId ?? null);
+  }
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const route = readRoute();
+
+      setView(route.view);
+      setSelectedDealId(
+        route.dealId ?? null
+      );
+    };
+
+    if (!window.location.hash) {
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname +
+          window.location.search +
+          '#home'
+      );
+    }
+
+    syncRoute();
+
+    window.addEventListener(
+      'hashchange',
+      syncRoute
+    );
+
+    return () => {
+      window.removeEventListener(
+        'hashchange',
+        syncRoute
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const currentUser = await login();
+        setUser(currentUser);
+        await reload(currentUser);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Ошибка запуска');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!user) return;
+
+    const timer = window.setInterval(
+      () => {
+        void reload(user);
+      },
+      2000
+    );
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [user?.id, user?.role]);
+
+
+  if (loading) return <ScreenMessage>Загрузка…</ScreenMessage>;
+  if (error || !user) return <ScreenMessage>Не удалось запустить приложение: {error}</ScreenMessage>;
+
+  const title = view === 'new' ? 'Новый запрос на счёт' : view === 'tasks' ? 'Задачи' : view === 'deal' ? 'Сделка' : 'Мои сделки';
+
+  return (
+    <main className="shell">
+      <header className="topbar">
+        <div><div className="eyebrow">МСМ · Telegram Mini App</div><h1>{title}</h1></div>
+        <div className="userBadge">{user.firstName}<span>{roleName(user.role)}</span></div>
+      </header>
+
+      {view === 'home' ? (
+        <Home
+          deals={deals}
+          onNew={() => navigate('new')}
+          onOpen={(id) => navigate('deal', id)}
+        />
+      ) : view === 'tasks' ? (
+        <TasksView user={user} onChanged={() => reload()} />
+      ) : view === 'deal' && selectedDealId ? (
+        <DealDetail
+          dealId={selectedDealId}
+          user={user}
+          onBack={async () => {
+            await reload();
+            navigate('home');
+          }}
+        />
+      ) : (
+        <NewDealForm
+          user={user}
+          onCancel={() => navigate('home')}
+          onCreated={async () => {
+            await reload();
+            navigate('home');
+          }}
+        />
+      )}
+
+      <nav className="bottomNav">
+        <button className={view === 'home' || view === 'deal' ? 'active' : ''} onClick={() => navigate('home')}>Сделки</button>
+        <button className={view === 'tasks' ? 'active' : ''} onClick={() => navigate('tasks')}>Задачи</button>
+        <button disabled>Месяц</button>
+      </nav>
+    </main>
+  );
+}
+
+function Home({ deals, onNew, onOpen }: { deals: Deal[]; onNew: () => void; onOpen: (id: string) => void }) {
+  const active = useMemo(() => deals.filter((d) => d.status !== 'CLOSED'), [deals]);
+  return (
+    <section className="content">
+      <button className="primary wide" onClick={onNew}>+ Новый счёт</button>
+      <div className="sectionHead"><h2>Активные сделки</h2><span>{active.length}</span></div>
+      <div className="dealList">
+        {active.length === 0 && <div className="empty">Пока нет активных сделок.</div>}
+        {active.map((deal) => <DealCard key={deal.id} deal={deal} onOpen={() => onOpen(deal.id)} />)}
+      </div>
+    </section>
+  );
+}
+
+function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
+  const invoice = deal.invoices[0];
+  const urgent = deal.tasks.some((t) => t.urgent);
+  return (
+    <button className="dealCard clickable" onClick={onOpen}>
+      <div className="dealTop">
+        <div>
+          <strong>{invoice ? `${sellerLabels[deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
+          <span>{deal.clientName}</span>
+        </div>
+        {urgent && <b className="urgent">СРОЧНО</b>}
+      </div>
+      <div className="dealMeta">
+        <span>Отгрузка: {deal.plannedShipmentAt ? new Date(deal.plannedShipmentAt).toLocaleDateString('ru-RU') : 'не указана'}</span>
+        <span>{invoice ? statusLabel(invoice.status) : 'Ожидаем счёт'}</span>
+      </div>
+      <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
+      {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
+      {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
+    </button>
+  );
+}
+
+function DealDetail({ dealId, user, onBack }: { dealId: string; user: CurrentUser; onBack: () => void }) {
+  const [deal, setDeal] = useState<Deal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correction, setCorrection] = useState('');
+  const [urgent, setUrgent] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function reload(
+    showLoading = true
+  ) {
+    if (showLoading) {
+      setLoading(true);
+    }
+
+    try {
+      setDeal(
+        await getDeal(dealId)
+      );
+
+      setError('');
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    void reload(true);
+
+    const timer = window.setInterval(
+      () => {
+        void reload(false);
+      },
+      2000
+    );
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [dealId]);
+
+  if (loading) return <section className="content"><div className="empty">Загрузка сделки…</div></section>;
+  if (!deal) return <section className="content"><div className="error">{error || 'Сделка не найдена'}</div></section>;
+
+  const current = deal.invoices.find((i) => i.isCurrent) ?? deal.invoices[0];
+  const canReview = current && current.status === 'WAITING_MANAGER_REVIEW' && ['MANAGER','LEADER','ADMIN'].includes(user.role);
+
+  async function confirm() {
+    if (!current) return;
+    setSaving(true); setError('');
+    try { await confirmInvoice(dealId, current.id, user.id); await reload(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  async function sendCorrection() {
+    if (!current) return;
+    setSaving(true); setError('');
+    try {
+      await requestInvoiceCorrection(dealId, current.id, { actorId: user.id, comment: correction.trim() || 'Тестовая корректировка', urgent });
+      setCorrection(''); setUrgent(false); setCorrectionOpen(false);
+      await reload();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  return <section className="content form">
+    <button className="backLink" onClick={onBack}>← К сделкам</button>
+    <div className="detailHero">
+      <div className="eyebrow">ЗК-{deal.internalNumber}</div>
+      <h2>{current ? `${sellerLabels[deal.sellerType]}-${current.number}` : `ЗК-${deal.internalNumber}`}</h2>
+      <p>{deal.clientName}</p>
+      <div className="statusPill">{current ? statusLabel(current.status) : 'Ожидаем счёт'}</div>
+    </div>
+
+    {current ? <InvoiceBlock invoice={current} sellerType={deal.sellerType} /> : <div className="infoBox"><strong>Счёт ещё не готов</strong><p>Бухгалтерия пока не загрузила клиентский счёт.</p></div>}\n
+    {(deal.files || []).filter(
+      (storedFile) =>
+        storedFile.category ===
+        'CLIENT_INVOICE_ATTACHMENT'
+    ).length > 0 && (
+
+      <div className="infoBox">
+
+        <strong>
+          Файлы бухгалтерии
+        </strong>
+
+        <div className="versionList">
+
+          {(deal.files || [])
+            .filter(
+              (storedFile) =>
+                storedFile.category ===
+                'CLIENT_INVOICE_ATTACHMENT'
+            )
+            .map(
+              (storedFile) => (
+
+              <div
+                className="versionRow"
+                key={
+                  storedFile.id
+                }
+              >
+
+                <div>
+
+                  <b>
+                    {
+                      storedFile
+                        .originalName
+                    }
+                  </b>
+
+                  <span>
+                    Файл готового счёта
+                  </span>
+
+                </div>
+
+
+                <a
+                  href={
+                    dealFileUrl(
+                      storedFile.id
+                    )
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Открыть
+                </a>
+
+              </div>
+
+            ))}
+
+        </div>
+
+      </div>
+
+    )}
+
+
+    {canReview && <div className="reviewBox">
+      <strong>Проверьте готовый счёт</strong>
+      <p>Если всё правильно — подтвердите. Если нужна правка — отправьте комментарий бухгалтерии.</p>
+      <div className="actions">
+        <button className="secondary" disabled={saving} onClick={() => setCorrectionOpen((v) => !v)}>Скорректировать</button>
+        <button className="primary" disabled={saving} onClick={confirm}>{saving ? 'Сохраняем…' : 'Всё верно'}</button>
+      </div>
+    </div>}
+
+    {correctionOpen && <div className="correctionBox">
+      <Field title="Что нужно изменить">
+        <textarea rows={4} value={correction} onChange={(e) => setCorrection(e.target.value)} placeholder="Например: убрать доставку 23 000 ₽ и изменить количество…" />
+      </Field>
+      <label className="urgentToggle"><input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} /><span>Срочная корректировка</span></label>
+      <button className="primary wide" disabled={saving} onClick={sendCorrection}>Отправить бухгалтерии</button>
+    </div>}
+
+    <PaymentBlock deal={deal} user={user} onChanged={reload} />
+
+    <PurchasesBlock
+      deal={deal}
+      user={user}
+      onChanged={() =>
+        reload(false)
+      }
+    />
+
+    <div className="infoBox"><strong>Исходный запрос</strong><p>{deal.requestText || 'Не указан'}</p>{deal.accountingComment && <p><b>Комментарий бухгалтерии:</b> {deal.accountingComment}</p>}</div>
+
+    {deal.invoices.length > 1 && <div className="infoBox">
+      <strong>История версий счёта</strong>
+      <div className="versionList">{deal.invoices.map((invoice) => <InvoiceVersion key={invoice.id} invoice={invoice} sellerType={deal.sellerType} />)}</div>
+    </div>}
+
+    {deal.auditEvents && deal.auditEvents.length > 0 && <div className="infoBox">
+      <strong>Последние события</strong>
+      <div className="historyList">{deal.auditEvents.slice(0, 8).map((event) => <div key={event.id}><span>{new Date(event.createdAt).toLocaleString('ru-RU')}</span><b>{auditLabel(event.action)}</b>{event.reason && <em>{event.reason}</em>}</div>)}</div>
+    </div>}
+
+    {error && <div className="error">{error}</div>}
+  </section>;
+}
+
+function InvoiceBlock({ invoice, sellerType }: { invoice: Invoice; sellerType: SellerType }) {
+  return <div className="invoiceBlock">
+    <div><span>Счёт</span><strong>{sellerLabels[sellerType]}-{invoice.number}</strong></div>
+    <div><span>Сумма</span><strong>{invoice.amount ? money(invoice.amount) : 'не указана'}</strong></div>
+    <div><span>Дата</span><strong>{invoice.invoiceDate ? new Date(invoice.invoiceDate).toLocaleDateString('ru-RU') : 'не указана'}</strong></div>
+    {invoice.fileId && <a className="fileButton" href={dealFileUrl(invoice.fileId)} target="_blank" rel="noreferrer">Открыть PDF</a>}
+  </div>;
+}
+
+function InvoiceVersion({ invoice, sellerType }: { invoice: Invoice; sellerType: SellerType }) {
+  return <div className="versionRow"><div><b>Версия {invoice.version}</b><span>{sellerLabels[sellerType]}-{invoice.number} · {statusLabel(invoice.status)}</span></div>{invoice.fileId && <a href={dealFileUrl(invoice.fileId)} target="_blank" rel="noreferrer">Файл</a>}</div>;
+}
+
+function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser; onChanged: () => Promise<void> }) {
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [status, setStatus] = useState<PaymentStatus>(deal.paymentStatus);
+  const [deferralStartAt, setDeferralStartAt] = useState(deal.deferralStartAt?.slice(0, 10) || '');
+  const [deferralEndAt, setDeferralEndAt] = useState(deal.deferralEndAt?.slice(0, 10) || '');
+  const [deferralTerms, setDeferralTerms] = useState(deal.deferralTerms || '');
+  const [amount, setAmount] = useState('');
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState<ClientPaymentMethod>('NONCASH');
+  const [comment, setComment] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setStatus(deal.paymentStatus);
+    setDeferralStartAt(deal.deferralStartAt?.slice(0, 10) || '');
+    setDeferralEndAt(deal.deferralEndAt?.slice(0, 10) || '');
+    setDeferralTerms(deal.deferralTerms || '');
+  }, [deal.paymentStatus, deal.deferralStartAt, deal.deferralEndAt, deal.deferralTerms]);
+
+  const payments = deal.clientPayments || [];
+  const total = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+  async function saveStatus() {
+    setSaving(true); setError('');
+    try {
+      await updatePaymentStatus(deal.id, {
+        status,
+        actorId: user.id,
+        deferralStartAt: status === 'DEFERRED' ? deferralStartAt || undefined : undefined,
+        deferralEndAt: status === 'DEFERRED' ? deferralEndAt || undefined : undefined,
+        deferralTerms: status === 'DEFERRED' ? deferralTerms || undefined : undefined,
+      });
+      setEditingStatus(false);
+      await onChanged();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  async function addPayment() {
+    
+    setSaving(true); setError('');
+    try {
+      let fileId: string | undefined;
+      if (file) {
+        const uploaded = await uploadDealFile(deal.id, file, 'CLIENT_PAYMENT');
+        fileId = uploaded.id;
+      }
+      await addClientPayment(deal.id, {
+        amount: amount ? Number(amount) : 0,
+        paidAt,
+        method,
+        comment: comment.trim() || undefined,
+        actorId: user.id,
+        fileId,
+      });
+      setAmount('');
+      setComment('');
+      setFile(null);
+      setAdding(false);
+      await onChanged();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="paymentBox">
+    <div className="paymentHead">
+      <div>
+        <span>Оплата клиента</span>
+        <strong>{paymentStatusLabel(deal.paymentStatus)}</strong>
+      </div>
+      {total > 0 && <b>{money(total)}</b>}
+    </div>
+
+    {deal.paymentStatus === 'DEFERRED' && <div className="deferralSummary">
+      Отсрочка: {deal.deferralStartAt ? new Date(deal.deferralStartAt).toLocaleDateString('ru-RU') : '—'}
+      {' → '}
+      {deal.deferralEndAt ? new Date(deal.deferralEndAt).toLocaleDateString('ru-RU') : '—'}
+      {deal.deferralTerms && <span>{deal.deferralTerms}</span>}
+    </div>}
+
+    <div className="paymentActions">
+      <button className="secondary" type="button" onClick={() => setEditingStatus((v) => !v)}>Статус</button>
+      <button className="primary" type="button" onClick={() => setAdding((v) => !v)}>+ Платёж</button>
+    </div>
+
+    {editingStatus && <div className="paymentForm">
+      <Field title="Статус оплаты">
+        <select value={status} onChange={(e) => setStatus(e.target.value as PaymentStatus)}>
+          <option value="NO_PREPAYMENT">Без предоплаты</option>
+          <option value="WAITING">Ожидаем оплату</option>
+          <option value="ADVANCE">Аванс</option>
+          <option value="PAID">Оплачен</option>
+          <option value="DEFERRED">Отсрочка</option>
+        </select>
+      </Field>
+      {status === 'DEFERRED' && <>
+        <div className="inline"><Field title="Начало"><input type="date" value={deferralStartAt} onChange={(e) => setDeferralStartAt(e.target.value)} /></Field><Field title="Окончание"><input type="date" value={deferralEndAt} onChange={(e) => setDeferralEndAt(e.target.value)} /></Field></div>
+        <Field title="Условия отсрочки"><textarea rows={2} value={deferralTerms} onChange={(e) => setDeferralTerms(e.target.value)} placeholder="Например: 14 календарных дней после отгрузки" /></Field>
+      </>}
+      <button className="primary wide" type="button" disabled={saving} onClick={saveStatus}>Сохранить статус</button>
+    </div>}
+
+    {adding && <div className="paymentForm">
+      <div className="inline"><Field title="Сумма"><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="100000" /></Field><Field title="Дата"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field></div>
+      <Field title="Способ"><select value={method} onChange={(e) => setMethod(e.target.value as ClientPaymentMethod)}><option value="NONCASH">Безнал</option><option value="CASH">Наличными</option><option value="CARD">Пластик</option><option value="ADVANCE">Аванс</option></select></Field>
+      <Field title="Комментарий"><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: часть оплаты по счёту" /></Field>
+      <Field title="Подтверждение оплаты"><input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
+      <button className="primary wide" type="button" disabled={saving} onClick={addPayment}>Добавить платёж</button>
+    </div>}
+
+    {payments.length > 0 && <div className="paymentList">{payments.map((payment) => <div className="paymentRow" key={payment.id}><div><b>{money(payment.amount)}</b><span>{new Date(payment.paidAt).toLocaleDateString('ru-RU')} · {paymentMethodLabel(payment.method)}</span>{payment.comment && <em>{payment.comment}</em>}</div>{payment.fileId && <a href={dealFileUrl(payment.fileId)} target="_blank" rel="noreferrer">Файл</a>}</div>)}</div>}
+    {error && <div className="error">{error}</div>}
+  </div>;
+}
+
+function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCancel: () => void; onCreated: () => void }) {
+
+  const [sellerType, setSellerType] =
+    useState<SellerType>('MSM');
+
+  const [requestMode, setRequestMode] =
+    useState<
+      'TEXT' |
+      'INCOMING_INVOICE'
+    >('TEXT');
+
+  const [clientName, setClientName] =
+    useState('');
+
+  const [clientPhone, setClientPhone] =
+    useState('');
+
+  const [requestText, setRequestText] =
+    useState('');
+
+  const [marginMode, setMarginMode] =
+    useState('TOTAL_PLUS');
+
+  const [marginValue, setMarginValue] =
+    useState('');
+
+  const [
+    accountingComment,
+    setAccountingComment,
+  ] = useState('');
+
+  const [
+    managerComment,
+    setManagerComment,
+  ] = useState('');
+
+  const [
+    attachments,
+    setAttachments,
+  ] = useState<File[]>([]);
+
+  const [uploadStatus, setUploadStatus] =
+    useState('');
+
+  const [urgent, setUrgent] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+
+  function addAttachments(
+    files:
+      FileList | null,
+  ) {
+
+    if (!files) return;
+
+
+    const newFiles =
+      Array.from(files);
+
+
+    setAttachments(
+      (current) => {
+
+        const combined = [
+          ...current,
+          ...newFiles,
+        ];
+
+
+        return combined.filter(
+          (
+            file,
+            index,
+            all,
+          ) =>
+
+            all.findIndex(
+              (candidate) =>
+
+                candidate.name ===
+                  file.name &&
+
+                candidate.size ===
+                  file.size &&
+
+                candidate.lastModified ===
+                  file.lastModified
+
+            ) === index
+        );
+      }
+    );
+  }
+
+
+  function removeAttachment(
+    index: number,
+  ) {
+
+    setAttachments(
+      (current) =>
+
+        current.filter(
+          (_, fileIndex) =>
+            fileIndex !==
+            index
+        )
+    );
+  }
+
+
+  async function submit(
+    e: FormEvent,
+  ) {
+
+    e.preventDefault();
+
+    setError('');
+    setUploadStatus('');
+    setSaving(true);
+
+
+    try {
+
+      const deal =
+        await createDeal({
+
+          sellerType,
+
+          clientName:
+            clientName.trim() ||
+            'Тестовый клиент',
+
+          clientPhone:
+            clientPhone.trim() ||
+            undefined,
+
+          requestMode,
+
+          requestText:
+            requestText.trim() ||
+            undefined,
+
+          marginMode,
+
+          marginValue:
+            marginValue
+              ? Number(
+                  marginValue
+                )
+              : undefined,
+
+          accountingComment:
+            accountingComment
+              .trim() ||
+            undefined,
+
+          managerComment:
+            managerComment
+              .trim() ||
+            undefined,
+
+          urgent,
+
+          managerId:
+            user.id,
+
+          createdById:
+            user.id,
+        });
+
+
+      const category =
+        requestMode ===
+        'INCOMING_INVOICE'
+          ? 'INCOMING_SUPPLIER_INVOICE'
+          : 'MANAGER_ATTACHMENT';
+
+
+      for (
+        let i = 0;
+        i < attachments.length;
+        i++
+      ) {
+
+        const attachment =
+          attachments[i];
+
+
+        setUploadStatus(
+          'Загрузка файла ' +
+          (i + 1) +
+          ' из ' +
+          attachments.length +
+          ': ' +
+          attachment.name
+        );
+
+
+        await uploadDealFile(
+          deal.id,
+          attachment,
+          category,
+        );
+      }
+
+
+      setUploadStatus('');
+
+      onCreated();
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Не удалось создать заявку'
+      );
+
+    } finally {
+
+      setSaving(false);
+
+    }
+  }
+
+
+  return (
+
+    <form
+      className="content form"
+      onSubmit={submit}
+    >
+
+
+      <Field title="От кого выставляем">
+
+        <div className="segmented">
+
+          {(['ST', 'MSM', 'IP'] as SellerType[]).map(
+            (type) => (
+
+              <button
+                type="button"
+                key={type}
+
+                className={
+                  sellerType === type
+                    ? 'selected'
+                    : ''
+                }
+
+                onClick={() =>
+                  setSellerType(
+                    type
+                  )
+                }
+              >
+                {
+                  sellerLabels[
+                    type
+                  ]
+                }
+              </button>
+
+            )
+          )}
+
+        </div>
+
+      </Field>
+
+
+      <Field title="Кому продаём">
+
+        <input
+          value={clientName}
+
+          onChange={(e) =>
+            setClientName(
+              e.target.value
+            )
+          }
+
+          placeholder="ООО «Главолснаб»"
+        />
+
+      </Field>
+
+
+      <Field title="Телефон">
+
+        <input
+          value={clientPhone}
+
+          onChange={(e) =>
+            setClientPhone(
+              e.target.value
+            )
+          }
+
+          placeholder="+7…"
+        />
+
+      </Field>
+
+
+      <Field title="Как передаём данные">
+
+        <div className="segmented two">
+
+          <button
+            type="button"
+
+            className={
+              requestMode ===
+              'TEXT'
+                ? 'selected'
+                : ''
+            }
+
+            onClick={() =>
+              setRequestMode(
+                'TEXT'
+              )
+            }
+          >
+            Позиции текстом
+          </button>
+
+
+          <button
+            type="button"
+
+            className={
+              requestMode ===
+              'INCOMING_INVOICE'
+                ? 'selected'
+                : ''
+            }
+
+            onClick={() =>
+              setRequestMode(
+                'INCOMING_INVOICE'
+              )
+            }
+          >
+            По входящему
+          </button>
+
+        </div>
+
+      </Field>
+
+
+      <Field
+        title={
+          requestMode ===
+          'INCOMING_INVOICE'
+            ? 'Входящие счета и вложения'
+            : 'Вложения'
+        }
+      >
+
+        <div>
+
+          <label className="fileButton">
+
+            {
+              attachments.length
+                ? '+ Прикрепить ещё'
+                : '+ Прикрепить файлы'
+            }
+
+
+            <input
+              type="file"
+              multiple
+
+              style={{
+                display: 'none',
+              }}
+
+              onChange={(e) => {
+
+                addAttachments(
+                  e.target.files
+                );
+
+                e.currentTarget.value =
+                  '';
+              }}
+            />
+
+          </label>
+
+
+          {
+            attachments.length >
+              0 && (
+
+            <div className="versionList">
+
+              {attachments.map(
+                (
+                  attachment,
+                  index,
+                ) => (
+
+                <div
+                  className="versionRow"
+
+                  key={
+                    attachment.name +
+                    attachment.size +
+                    attachment.lastModified
+                  }
+                >
+
+                  <div>
+
+                    <b>
+                      {
+                        attachment.name
+                      }
+                    </b>
+
+                    <span>
+                      {
+                        (
+                          attachment.size /
+                          1024 /
+                          1024
+                        ).toFixed(2)
+                      } МБ
+                    </span>
+
+                  </div>
+
+
+                  <button
+                    type="button"
+                    className="secondary"
+
+                    onClick={() =>
+                      removeAttachment(
+                        index
+                      )
+                    }
+                  >
+                    Удалить
+                  </button>
+
+                </div>
+
+              ))}
+
+            </div>
+
+          )}
+
+
+          <div className="microcopy">
+
+            Можно выбрать несколько
+            файлов любого типа.
+
+            До отправки любой файл
+            можно удалить или
+            прикрепить ещё.
+
+          </div>
+
+        </div>
+
+      </Field>
+
+
+      <Field
+        title={
+          requestMode === 'TEXT'
+            ? 'Позиции и стоимость'
+            : 'Описание входящего счёта'
+        }
+      >
+
+        <textarea
+          rows={5}
+
+          value={requestText}
+
+          onChange={(e) =>
+            setRequestText(
+              e.target.value
+            )
+          }
+
+          placeholder="Bonolit D500 — 32,4 м³ × 5 600 ₽…"
+        />
+
+      </Field>
+
+
+      <Field title="Наценка / цена">
+
+        <div className="inline">
+
+          <select
+            value={marginMode}
+
+            onChange={(e) =>
+              setMarginMode(
+                e.target.value
+              )
+            }
+          >
+
+            <option value="TOTAL_PLUS">
+              + к сумме
+            </option>
+
+            <option value="UNIT_PLUS">
+              + за единицу
+            </option>
+
+            <option value="PERCENT">
+              + %
+            </option>
+
+            <option value="FINAL">
+              Итоговая цена
+            </option>
+
+          </select>
+
+
+          <input
+            inputMode="decimal"
+
+            value={marginValue}
+
+            onChange={(e) =>
+              setMarginValue(
+                e.target.value
+              )
+            }
+
+            placeholder="0"
+          />
+
+        </div>
+
+      </Field>
+
+
+      <Field title="Комментарий бухгалтерии">
+
+        <textarea
+          rows={3}
+
+          value={
+            accountingComment
+          }
+
+          onChange={(e) =>
+            setAccountingComment(
+              e.target.value
+            )
+          }
+
+          placeholder="Доставку выделить отдельной строкой…"
+        />
+
+      </Field>
+
+
+      <Field title="Мой комментарий">
+
+        <textarea
+          rows={3}
+
+          value={managerComment}
+
+          onChange={(e) =>
+            setManagerComment(
+              e.target.value
+            )
+          }
+
+          placeholder="Позвонить клиенту после 14:00…"
+        />
+
+      </Field>
+
+
+      <label className="urgentToggle">
+
+        <input
+          type="checkbox"
+
+          checked={urgent}
+
+          onChange={(e) =>
+            setUrgent(
+              e.target.checked
+            )
+          }
+        />
+
+        <span>
+          Срочное
+        </span>
+
+      </label>
+
+
+      {uploadStatus && (
+
+        <div className="infoBox">
+          {uploadStatus}
+        </div>
+
+      )}
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+
+      <div className="actions">
+
+        <button
+          type="button"
+          className="secondary"
+          onClick={onCancel}
+          disabled={saving}
+        >
+          Отмена
+        </button>
+
+
+        <button
+          className="primary"
+          disabled={saving}
+        >
+
+          {
+            saving
+              ? 'Отправляем…'
+              : 'Отправить бухгалтерии'
+          }
+
+        </button>
+
+      </div>
+
+    </form>
+  );
+}
+
+function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => void }) {
+
+  const [tasks, setTasks] =
+    useState<Task[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [selected, setSelected] =
+    useState<Task | null>(null);
+
+  const [
+    showCompleted,
+    setShowCompleted,
+  ] = useState(false);
+
+
+  async function reloadTasks(
+    showLoading = true
+  ) {
+
+    if (showLoading) {
+      setLoading(true);
+    }
+
+    try {
+
+      setTasks(
+        await listTasks()
+      );
+
+    } finally {
+
+      if (showLoading) {
+        setLoading(false);
+      }
+
+    }
+  }
+
+
+  useEffect(() => {
+
+    void reloadTasks(true);
+
+    const timer =
+      window.setInterval(
+        () => {
+          void reloadTasks(false);
+        },
+        2000
+      );
+
+    return () => {
+      window.clearInterval(timer);
+    };
+
+  }, []);
+
+
+  useEffect(() => {
+
+    const syncSelectedTask = () => {
+
+      const hash =
+        window.location.hash
+          .replace(
+            /^#/,
+            ''
+          );
+
+
+      if (
+        !hash.startsWith(
+          'tasks/'
+        )
+      ) {
+
+        setSelected(null);
+        return;
+      }
+
+
+      const taskId =
+        decodeURIComponent(
+          hash.slice(
+            'tasks/'.length
+          )
+        );
+
+
+      const found =
+        tasks.find(
+          (item) =>
+            item.id === taskId
+        );
+
+
+      if (found) {
+        setSelected(found);
+      }
+    };
+
+
+    syncSelectedTask();
+
+
+    window.addEventListener(
+      'hashchange',
+      syncSelectedTask
+    );
+
+
+    return () => {
+
+      window.removeEventListener(
+        'hashchange',
+        syncSelectedTask
+      );
+
+    };
+
+  }, [tasks]);
+
+
+  function taskTime(
+    task: Task
+  ) {
+
+    if (!task.createdAt) {
+      return 0;
+    }
+
+
+    const value =
+      new Date(
+        task.createdAt
+      ).getTime();
+
+
+    return Number.isFinite(value)
+      ? value
+      : 0;
+  }
+
+
+  function sortActive(
+    items: Task[]
+  ) {
+
+    return [...items].sort(
+      (a, b) => {
+
+        // Срочные первыми
+        // только внутри своей группы.
+        if (
+          a.urgent !==
+          b.urgent
+        ) {
+
+          return a.urgent
+            ? -1
+            : 1;
+        }
+
+
+        // Старые выше новых.
+        return (
+          taskTime(a) -
+          taskTime(b)
+        );
+      }
+    );
+  }
+
+
+  const inProgress =
+    useMemo(
+      () =>
+        sortActive(
+          tasks.filter(
+            (task) =>
+              task.status ===
+              'IN_PROGRESS'
+          )
+        ),
+      [tasks]
+    );
+
+
+  const newTasks =
+    useMemo(
+      () =>
+        sortActive(
+          tasks.filter(
+            (task) =>
+              task.status ===
+              'NEW'
+          )
+        ),
+      [tasks]
+    );
+
+
+  const needData =
+    useMemo(
+      () =>
+        sortActive(
+          tasks.filter(
+            (task) =>
+              task.status ===
+              'NEED_DATA'
+          )
+        ),
+      [tasks]
+    );
+
+
+  const otherActive =
+    useMemo(
+      () =>
+        sortActive(
+          tasks.filter(
+            (task) =>
+              ![
+                'IN_PROGRESS',
+                'NEW',
+                'NEED_DATA',
+                'DONE',
+                'CANCELLED',
+              ].includes(
+                task.status
+              )
+          )
+        ),
+      [tasks]
+    );
+
+
+  const completed =
+    useMemo(
+      () =>
+        [...tasks]
+          .filter(
+            (task) =>
+              [
+                'DONE',
+                'CANCELLED',
+              ].includes(
+                task.status
+              )
+          )
+          .sort(
+            (a, b) =>
+              taskTime(b) -
+              taskTime(a)
+          ),
+      [tasks]
+    );
+
+
+  const activeCount =
+    inProgress.length +
+    newTasks.length +
+    needData.length +
+    otherActive.length;
+
+
+  function openTask(
+    task: Task
+  ) {
+
+    window.location.hash =
+      '#tasks/' +
+      encodeURIComponent(
+        task.id
+      );
+
+    setSelected(task);
+  }
+
+
+  function renderTask(
+    task: Task,
+    completedTask = false
+  ) {
+
+    const statusClass =
+      task.status
+        .toLowerCase()
+        .replace(
+          /_/g,
+          '-'
+        );
+
+
+    return (
+
+      <button
+        key={task.id}
+
+        className={
+          'taskCard taskCardStatus-' +
+          statusClass +
+          (
+            task.urgent &&
+            !completedTask
+              ? ' taskCardUrgent'
+              : ''
+          ) +
+          (
+            completedTask
+              ? ' taskCardCompleted'
+              : ''
+          )
+        }
+
+        onClick={() =>
+          openTask(task)
+        }
+      >
+
+        <div className="taskCardMain">
+
+          <div className="taskCardTitle">
+
+            <strong>
+              {task.title}
+            </strong>
+
+
+            {task.urgent &&
+              !completedTask && (
+
+              <b className="urgent">
+                СРОЧНО
+              </b>
+
+            )}
+
+          </div>
+
+
+          <span className="taskClient">
+
+            {task.deal.clientName}
+
+            {' · '}
+
+            ЗК-
+            {task.deal.internalNumber}
+
+          </span>
+
+
+          {task.createdAt && (
+
+            <span className="taskCreated">
+
+              Создана{' '}
+
+              {
+                new Date(
+                  task.createdAt
+                ).toLocaleString(
+                  'ru-RU',
+                  {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }
+                )
+              }
+
+            </span>
+
+          )}
+
+        </div>
+
+
+        <div className="taskState">
+
+          <span
+            className={
+              'taskStatusBadge taskStatus-' +
+              statusClass
+            }
+          >
+
+            {
+              taskStatus(
+                task.status
+              )
+            }
+
+          </span>
+
+        </div>
+
+      </button>
+
+    );
+  }
+
+
+  function renderGroup(
+    title: string,
+    items: Task[],
+    className: string
+  ) {
+
+    if (
+      items.length === 0
+    ) {
+      return null;
+    }
+
+
+    return (
+
+      <div
+        className={
+          'taskGroup ' +
+          className
+        }
+      >
+
+        <div className="taskGroupHead">
+
+          <strong>
+            {title}
+          </strong>
+
+          <span>
+            {items.length}
+          </span>
+
+        </div>
+
+
+        <div className="dealList">
+
+          {items.map(
+            (task) =>
+              renderTask(task)
+          )}
+
+        </div>
+
+      </div>
+
+    );
+  }
+
+
+  if (selected) {
+
+    return selected.type === 'PAY_SUPPLIER' &&
+      selected.supplierPurchase ? (
+
+      <SupplierPaymentTask
+        task={selected}
+        user={user}
+
+        onBack={() => {
+
+          window.location.hash =
+            '#tasks';
+
+          setSelected(null);
+
+          void reloadTasks(
+            false
+          );
+
+          onChanged();
+        }}
+      />
+
+    ) : (
+
+      <TaskDetail
+        task={selected}
+        user={user}
+
+        onBack={() => {
+
+          window.location.hash =
+            '#tasks';
+
+          setSelected(null);
+
+          void reloadTasks(
+            false
+          );
+
+          onChanged();
+        }}
+      />
+
+    );
+  }
+
+  return (
+
+    <section className="content">
+
+      <div className="sectionHead">
+
+        <div>
+
+          <h2>
+            Задачи бухгалтерии
+          </h2>
+
+          <div className="taskQueueCaption">
+            Активных задач: {activeCount}
+          </div>
+
+        </div>
+
+
+        <span>
+          {activeCount}
+        </span>
+
+      </div>
+
+
+      {loading ? (
+
+        <div className="empty">
+          Загрузка…
+        </div>
+
+      ) : activeCount === 0 ? (
+
+        <div className="empty">
+          Активных задач нет
+        </div>
+
+      ) : (
+
+        <div className="taskQueue">
+
+          {renderGroup(
+            'В работе',
+            inProgress,
+            'taskGroupWorking'
+          )}
+
+
+          {renderGroup(
+            'Новые',
+            newTasks,
+            'taskGroupNew'
+          )}
+
+
+          {renderGroup(
+            'Нужны данные',
+            needData,
+            'taskGroupNeedData'
+          )}
+
+
+          {renderGroup(
+            'Остальные',
+            otherActive,
+            'taskGroupOther'
+          )}
+
+        </div>
+
+      )}
+
+
+      {completed.length > 0 && (
+
+        <div className="completedTasksBlock">
+
+          <button
+            type="button"
+            className="completedToggle"
+
+            onClick={() =>
+              setShowCompleted(
+                (value) =>
+                  !value
+              )
+            }
+          >
+
+            <span>
+              {showCompleted
+                ? 'Скрыть выполненные'
+                : 'Показать выполненные'}
+            </span>
+
+            <b>
+              {completed.length}
+            </b>
+
+          </button>
+
+
+          {showCompleted && (
+
+            <div className="completedTasksList">
+
+              {completed.map(
+                (task) =>
+                  renderTask(
+                    task,
+                    true
+                  )
+              )}
+
+            </div>
+
+          )}
+
+        </div>
+
+      )}
+
+    </section>
+  );
+}
+
+function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onBack: () => void }) {
+
+  const [status, setStatus] =
+    useState(task.status);
+
+  const [number, setNumber] =
+    useState('');
+
+  const [amount, setAmount] =
+    useState('');
+
+  const [
+    invoiceFiles,
+    setInvoiceFiles,
+  ] = useState<File[]>([]);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+
+  useEffect(() => {
+
+    setStatus(
+      task.status
+    );
+
+  }, [
+    task.id,
+    task.status,
+  ]);
+
+
+  function addInvoiceFiles(
+    files:
+      FileList | null,
+  ) {
+
+    if (!files) return;
+
+
+    const selected =
+      Array.from(files);
+
+
+    setInvoiceFiles(
+      (current) => {
+
+        const combined = [
+          ...current,
+          ...selected,
+        ];
+
+
+        return combined.filter(
+          (
+            file,
+            index,
+            all,
+          ) =>
+
+            all.findIndex(
+              (candidate) =>
+
+                candidate.name ===
+                  file.name &&
+
+                candidate.size ===
+                  file.size &&
+
+                candidate.lastModified ===
+                  file.lastModified
+
+            ) === index
+        );
+      }
+    );
+  }
+
+
+  function removeInvoiceFile(
+    index: number,
+  ) {
+
+    setInvoiceFiles(
+      (current) =>
+        current.filter(
+          (_, fileIndex) =>
+            fileIndex !==
+            index
+        )
+    );
+  }
+
+
+  async function take() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await updateTaskStatus(
+        task.id,
+        'IN_PROGRESS',
+        user.id,
+      );
+
+
+      setStatus(
+        'IN_PROGRESS',
+      );
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  async function finishInvoice() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      const uploadedIds:
+        string[] = [];
+
+
+      for (
+        const invoiceFile
+        of invoiceFiles
+      ) {
+
+        const uploaded =
+          await uploadDealFile(
+            task.deal.id,
+            invoiceFile,
+            'CLIENT_INVOICE_ATTACHMENT',
+          );
+
+
+        uploadedIds.push(
+          uploaded.id,
+        );
+      }
+
+
+      await createInvoice(
+        task.deal.id,
+        {
+
+          number:
+            number.trim(),
+
+          amount:
+            amount
+              ? Number(amount)
+              : undefined,
+
+          invoiceDate:
+            todayLocalDate(),
+
+          fileId:
+            uploadedIds[0],
+
+          actorId:
+            user.id,
+        },
+      );
+
+
+      onBack();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  const canAttachInvoice =
+    [
+      'ISSUE_CLIENT_INVOICE',
+      'CORRECT_CLIENT_INVOICE',
+    ].includes(
+      task.type,
+    );
+
+
+  const incomingFiles =
+    task.deal.files || [];
+
+
+  return (
+
+    <section className="content form">
+
+
+      <button
+        className="backLink"
+        onClick={onBack}
+      >
+        ← К задачам
+      </button>
+
+
+      <div className="detailHero">
+
+        <div className="eyebrow">
+          ЗК-
+          {task.deal.internalNumber}
+        </div>
+
+
+        <h2>
+          {task.title}
+        </h2>
+
+
+        <p>
+          {task.deal.clientName}
+        </p>
+
+
+        <div className="statusPill">
+          {
+            taskStatus(
+              status
+            )
+          }
+        </div>
+
+
+        {task.urgent && (
+
+          <b className="urgent">
+            СРОЧНО
+          </b>
+
+        )}
+
+      </div>
+
+
+      {task.deal.requestText && (
+
+        <div className="infoBox">
+
+          <strong>
+            Запрос менеджера
+          </strong>
+
+          <p>
+            {task.deal.requestText}
+          </p>
+
+        </div>
+
+      )}
+
+
+      {task.description && (
+
+        <div className="infoBox">
+
+          <strong>
+            Комментарий
+          </strong>
+
+          <p>
+            {task.description}
+          </p>
+
+        </div>
+
+      )}
+
+
+      {incomingFiles.length > 0 && (
+
+        <div className="infoBox">
+
+          <strong>
+            Вложения менеджера
+          </strong>
+
+
+          <div className="versionList">
+
+            {incomingFiles.map(
+              (incomingFile) => (
+
+              <div
+                className="versionRow"
+                key={
+                  incomingFile.id
+                }
+              >
+
+                <div>
+
+                  <b>
+                    {
+                      incomingFile
+                        .originalName
+                    }
+                  </b>
+
+                  <span>
+                    Вложение к заявке
+                  </span>
+
+                </div>
+
+
+                <a
+                  href={
+                    dealFileUrl(
+                      incomingFile.id
+                    )
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Открыть
+                </a>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {status === 'NEW' && (
+
+        <button
+          className="primary wide"
+          disabled={saving}
+          onClick={take}
+        >
+          {
+            saving
+              ? 'Сохраняем…'
+              : 'В работу'
+          }
+        </button>
+
+      )}
+
+
+      {status === 'IN_PROGRESS' && (
+
+        <div className="infoBox">
+
+          <strong>
+            Задача в работе
+          </strong>
+
+          <p>
+            Заполните готовый счёт ниже.
+          </p>
+
+        </div>
+
+      )}
+
+
+      {canAttachInvoice &&
+        status ===
+          'IN_PROGRESS' && (
+
+        <>
+
+          <Field title="Номер готового счёта">
+
+            <input
+              value={number}
+
+              onChange={(e) =>
+                setNumber(
+                  e.target.value
+                )
+              }
+
+              placeholder="1548"
+            />
+
+          </Field>
+
+
+          <Field title="Сумма">
+
+            <input
+              inputMode="decimal"
+
+              value={amount}
+
+              onChange={(e) =>
+                setAmount(
+                  e.target.value
+                )
+              }
+
+              placeholder="420000"
+            />
+
+          </Field>
+
+
+          <Field title="Файлы готового счёта">
+
+            <div>
+
+              <label className="fileButton">
+
+                {
+                  invoiceFiles.length
+                    ? '+ Прикрепить ещё'
+                    : '+ Прикрепить файлы'
+                }
+
+
+                <input
+                  type="file"
+                  multiple
+
+                  style={{
+                    display: 'none',
+                  }}
+
+                  onChange={(e) => {
+
+                    addInvoiceFiles(
+                      e.target.files
+                    );
+
+                    e.currentTarget.value =
+                      '';
+                  }}
+                />
+
+              </label>
+
+
+              {invoiceFiles.length > 0 && (
+
+                <div className="versionList">
+
+                  {invoiceFiles.map(
+                    (
+                      invoiceFile,
+                      index,
+                    ) => (
+
+                    <div
+                      className="versionRow"
+
+                      key={
+                        invoiceFile.name +
+                        invoiceFile.size +
+                        invoiceFile.lastModified
+                      }
+                    >
+
+                      <div>
+
+                        <b>
+                          {
+                            invoiceFile.name
+                          }
+                        </b>
+
+                        <span>
+                          {
+                            (
+                              invoiceFile.size /
+                              1024 /
+                              1024
+                            ).toFixed(2)
+                          } МБ
+                        </span>
+
+                      </div>
+
+
+                      <button
+                        type="button"
+                        className="secondary"
+
+                        onClick={() =>
+                          removeInvoiceFile(
+                            index
+                          )
+                        }
+                      >
+                        Удалить
+                      </button>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              )}
+
+            </div>
+
+          </Field>
+
+
+          <button
+            className="primary wide"
+            disabled={saving}
+            onClick={
+              finishInvoice
+            }
+          >
+
+            {
+              saving
+                ? 'Сохраняем…'
+                : 'Счёт готов'
+            }
+
+          </button>
+
+
+          <div className="microcopy">
+
+            Дата счёта ставится
+            автоматически —
+            сегодняшняя.
+
+            Номер счёта пока
+            необязателен только
+            для тестирования.
+
+          </div>
+
+        </>
+
+      )}
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+    </section>
+  );
+}
+
+
+function todayLocalDate() {
+
+  const now =
+    new Date();
+
+
+  const local =
+    new Date(
+
+      now.getTime() -
+
+      now.getTimezoneOffset() *
+        60000
+    );
+
+
+  return local
+    .toISOString()
+    .slice(0, 10);
+}
+
+function money(value: string | number) { return `${Number(value).toLocaleString('ru-RU')} ₽`; }
+function auditLabel(action: string) {
+
+  const labels:
+    Record<string, string> = {
+
+    CREATE:
+      '??????? ??????',
+
+    UPLOAD:
+      '???????? ????',
+
+    CONFIRM:
+      '???? ???????????',
+
+    REQUEST_CORRECTION:
+      '????????? ?????????????',
+
+    CLIENT_PAYMENT_ADDED:
+      '????????? ?????? ???????',
+
+    PAYMENT_STATUS_CHANGED:
+      '??????? ?????? ??????',
+
+    SUPPLIER_PURCHASE_CREATED:
+      '????????? ???????',
+
+    SUPPLIER_PURCHASE_UPDATED:
+      '???????? ?????? ???????',
+
+    SUPPLIER_PAYMENT_REQUESTED:
+      '????????? ?????? ??????????',
+
+    SUPPLIER_PAYMENT_ADDED:
+      '????????? ?????? ??????????',
+  };
+
+
+  return (
+    labels[action] ||
+    '????????? ?? ??????'
+  );
+}
+
+function paymentStatusLabel(status: PaymentStatus) { return ({ NO_PREPAYMENT: 'Без предоплаты', WAITING: 'Ожидаем оплату', ADVANCE: 'Аванс', PAID: 'Оплачен', DEFERRED: 'Отсрочка' } as Record<PaymentStatus,string>)[status]; }
+function paymentMethodLabel(method: ClientPaymentMethod) { return ({ NONCASH: 'Безнал', CASH: 'Наличные', CARD: 'Пластик', ADVANCE: 'Аванс' } as Record<ClientPaymentMethod,string>)[method]; }
+function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужны данные', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
+function Field({ title, children }: { title: string; children: React.ReactNode }) { return <label className="field"><span>{title}</span>{children}</label>; }
+function ScreenMessage({ children }: { children: React.ReactNode }) { return <div className="screenMessage">{children}</div>; }
+function roleName(role: CurrentUser['role']) { return ({ MANAGER: 'Менеджер', ACCOUNTANT: 'Бухгалтер', LEADER: 'Руководитель', ADMIN: 'Админ' } as const)[role]; }
+function statusLabel(status: string) { return ({ WAITING_MANAGER_REVIEW: 'Ожидает проверки', CONFIRMED: 'Счёт подтверждён', CORRECTION_REQUESTED: 'На корректировке', WAITING_ACCOUNTING: 'Ожидаем счёт' } as Record<string, string>)[status] || status; }
+
+export default App;

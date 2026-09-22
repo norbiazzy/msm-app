@@ -1,3 +1,4 @@
+import type { SupplierPayment, SupplierPurchase } from './types';
 import type { ClientPayment, ClientPaymentMethod, CurrentUser, Deal, PaymentStatus, UserRole } from './types';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -40,7 +41,10 @@ export type Task = {
   urgent: boolean;
   title: string;
   description?: string;
+  createdAt?: string;
+  updatedAt?: string;
   deal: Deal;
+  supplierPurchase?: SupplierPurchase;
 };
 
 export async function listTasks(): Promise<Task[]> {
@@ -51,14 +55,152 @@ export async function updateTaskStatus(id: string, status: string, assigneeId?: 
   return json(`/tasks/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, assigneeId }) });
 }
 
-export async function uploadDealFile(dealId: string, file: File, category: string) {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('category', category);
-  const res = await fetch(`${API}/files/deal/${dealId}`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json() as Promise<{ id: string }>;
+export async function returnInvoiceRequest(
+  taskId: string,
+  payload: {
+    actorId: string;
+    reasonCode: string;
+    comment?: string;
+  },
+) {
+  return json(`/tasks/${taskId}/return`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
+
+
+export function uploadDealFileWithProgress(
+  dealId: string,
+  file: File,
+  category: string,
+  onProgress?: (
+    percent: number
+  ) => void,
+): Promise<{ id: string }> {
+
+  return new Promise(
+    (
+      resolve,
+      reject,
+    ) => {
+
+      const form =
+        new FormData();
+
+      form.append(
+        'file',
+        file
+      );
+
+      form.append(
+        'category',
+        category
+      );
+
+
+      const xhr =
+        new XMLHttpRequest();
+
+
+      xhr.open(
+        'POST',
+        `${API}/files/deal/${dealId}`
+      );
+
+
+      xhr.upload.onprogress =
+        (event) => {
+
+          if (
+            !event.lengthComputable
+          ) {
+            return;
+          }
+
+
+          const percent =
+            Math.round(
+              (
+                event.loaded /
+                event.total
+              ) *
+              100
+            );
+
+
+          onProgress?.(
+            percent
+          );
+        };
+
+
+      xhr.onload = () => {
+
+        if (
+          xhr.status >= 200 &&
+          xhr.status < 300
+        ) {
+
+          try {
+
+            resolve(
+              JSON.parse(
+                xhr.responseText
+              )
+            );
+
+          } catch {
+
+            reject(
+              new Error(
+                'Некорректный ответ сервера'
+              )
+            );
+          }
+
+          return;
+        }
+
+
+        reject(
+          new Error(
+            xhr.responseText ||
+            'Ошибка загрузки файла'
+          )
+        );
+      };
+
+
+      xhr.onerror = () => {
+
+        reject(
+          new Error(
+            'Ошибка соединения при загрузке файла'
+          )
+        );
+      };
+
+
+      xhr.send(form);
+    }
+  );
+}
+
+
+export async function uploadDealFile(
+  dealId: string,
+  file: File,
+  category: string,
+) {
+
+  return uploadDealFileWithProgress(
+    dealId,
+    file,
+    category,
+  );
+}
+
 
 export function dealFileUrl(fileId: string) {
   return `${API}/files/${encodeURIComponent(fileId)}/download`;
@@ -67,6 +209,28 @@ export function dealFileUrl(fileId: string) {
 export async function createInvoice(dealId: string, payload: { number: string; invoiceDate?: string; amount?: number; fileId?: string; actorId: string }) {
   return json(`/deals/${dealId}/invoices`, { method: 'POST', body: JSON.stringify(payload) });
 }
+
+export async function updateInvoiceAmount(
+  dealId: string,
+  invoiceId: string,
+
+  payload: {
+    amount?: number;
+    actorId: string;
+  },
+) {
+
+  return json(
+    `/deals/${dealId}/invoices/${invoiceId}/amount`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(
+        payload
+      ),
+    },
+  );
+}
+
 
 export async function confirmInvoice(dealId: string, invoiceId: string, actorId: string) {
   return json(`/deals/${dealId}/invoices/${invoiceId}/confirm`, {
@@ -78,7 +242,7 @@ export async function confirmInvoice(dealId: string, invoiceId: string, actorId:
 export async function requestInvoiceCorrection(
   dealId: string,
   invoiceId: string,
-  payload: { actorId: string; comment: string; urgent?: boolean },
+  payload: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
 ) {
   return json(`/deals/${dealId}/invoices/${invoiceId}/correction`, {
     method: 'POST',
@@ -117,4 +281,271 @@ export async function updatePaymentStatus(
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
+}
+
+
+
+export async function listSupplierPurchases(
+  dealId: string,
+) {
+
+  return json<SupplierPurchase[]>(
+    `/deals/${dealId}/suppliers`
+  );
+}
+
+
+export async function createSupplierPurchase(
+  dealId: string,
+
+  payload: {
+    supplierName?: string;
+    incomingInvoiceNumber?: string;
+    incomingInvoiceAmount?: number;
+    comment?: string;
+    sourceFileId?: string;
+    createdById: string;
+  },
+) {
+
+  return json<SupplierPurchase>(
+    `/deals/${dealId}/suppliers`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function updateSupplierPurchase(
+  dealId: string,
+  purchaseId: string,
+  payload: {
+    supplierName?: string;
+    incomingInvoiceAmount?: number;
+    comment?: string;
+    actorId?: string;
+  },
+) {
+  return json<SupplierPurchase>(
+    `/deals/${dealId}/suppliers/${purchaseId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function requestSupplierPayment(
+  dealId: string,
+  purchaseId: string,
+
+  payload: {
+    amount?: number;
+    comment?: string;
+    urgent?: boolean;
+    actorId: string;
+  },
+) {
+
+  return json(
+    `/deals/${dealId}/suppliers/${purchaseId}/request-payment`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function addSupplierPayment(
+  dealId: string,
+  purchaseId: string,
+
+  payload: {
+    amount?: number;
+    paidAt?: string;
+    paymentOrderStamped?: boolean;
+    paidFromBalance?: boolean;
+    comment?: string;
+    actorId: string;
+  },
+) {
+
+  return json<SupplierPayment>(
+    `/deals/${dealId}/suppliers/${purchaseId}/payments`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+
+export async function markSupplierPaymentStamped(
+  dealId: string,
+  purchaseId: string,
+  paymentId: string,
+  actorId: string,
+) {
+
+  return json(
+    `/deals/${dealId}/suppliers/${purchaseId}/payments/${paymentId}/stamped`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        actorId,
+      }),
+    },
+  );
+}
+
+
+
+export type RecentActivity = {
+  id: string;
+  action: string;
+  reason?: string;
+  createdAt: string;
+  oldValue?: Record<string, unknown>;
+
+  newValue?: {
+    amount?: number | string;
+    supplierName?: string;
+    number?: string;
+    plannedShipmentAt?: string;
+    sellerType?: 'ST' | 'MSM' | 'IP';
+    clientPhone?: string;
+    contactName?: string;
+    deliveryAddresses?: string[];
+    paidFromBalance?: boolean;
+  };
+
+  actor?: {
+    id: string;
+    firstName: string;
+    lastName?: string;
+    role: string;
+  };
+
+  deal: {
+    id: string;
+    internalNumber: number;
+    clientName: string;
+    sellerType: 'ST' | 'MSM' | 'IP';
+
+    invoices: {
+      number: string;
+    }[];
+  };
+};
+
+
+export async function listRecentActivity() {
+
+  return json<RecentActivity[]>(
+    '/activity/recent'
+  );
+}
+
+
+
+export async function cancelSupplierPurchase(
+  dealId: string,
+  purchaseId: string,
+) {
+
+  return json<{
+    success: boolean;
+  }>(
+    `/deals/${dealId}/suppliers/${purchaseId}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
+
+
+export async function updateDealInfo(
+  dealId: string,
+
+  payload: {
+    sellerType?: 'ST' | 'MSM' | 'IP';
+    clientName?: string;
+    contactName?: string;
+    clientPhone?: string;
+    managerComment?: string;
+    accountingComment?: string;
+    marginMode?: string;
+    marginValue?: number;
+    deliveryAddresses?: string[];
+    actorId: string;
+  },
+) {
+
+  return json<Deal>(
+    `/deals/${dealId}/info`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(
+        payload
+      ),
+    },
+  );
+}
+
+
+export async function submitInvoiceRequest(
+  dealId: string,
+  payload: {
+    actorId: string;
+    urgent?: boolean;
+  },
+) {
+  return json(
+    `/deals/${dealId}/invoice-request`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function withdrawInvoiceRequest(
+  dealId: string,
+  actorId: string,
+) {
+  return json(
+    `/deals/${dealId}/invoice-request/withdraw`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ actorId }),
+    },
+  );
+}
+
+
+export async function updateShipmentDate(
+  dealId: string,
+
+  payload: {
+    plannedShipmentAt?: string;
+    actorId: string;
+  },
+) {
+
+  return json<Deal>(
+    `/deals/${dealId}/shipment-date`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(
+        payload
+      ),
+    },
+  );
 }

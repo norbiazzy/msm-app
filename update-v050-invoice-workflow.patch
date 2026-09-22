@@ -1,0 +1,1851 @@
+diff --git a/backend/src/deals/deals.controller.ts b/backend/src/deals/deals.controller.ts
+index c9416c2..b5e8dd5 100644
+--- a/backend/src/deals/deals.controller.ts
++++ b/backend/src/deals/deals.controller.ts
+@@ -16,6 +16,23 @@ export class DealsController {
+     return this.deals.list(managerId);
+   }
+ 
++
++  @Post(':id/invoice-request')
++  submitInvoiceRequest(
++    @Param('id') id: string,
++    @Body() body: { actorId: string; urgent?: boolean },
++  ) {
++    return this.deals.submitInvoiceRequest(id, body);
++  }
++
++  @Post(':id/invoice-request/withdraw')
++  withdrawInvoiceRequest(
++    @Param('id') id: string,
++    @Body() body: { actorId: string },
++  ) {
++    return this.deals.withdrawInvoiceRequest(id, body.actorId);
++  }
++
+   @Patch(':id/shipment-date')
+   updateShipmentDate(
+     @Param('id')
+@@ -43,9 +60,13 @@ export class DealsController {
+ 
+     @Body()
+     body: {
++      clientName?: string;
+       contactName?: string;
+       clientPhone?: string;
+       managerComment?: string;
++      accountingComment?: string;
++      marginMode?: string;
++      marginValue?: number;
+       deliveryAddresses?: string[];
+       actorId: string;
+     },
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index 8212eb8..c6786a7 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -1,9 +1,11 @@
+ 
+ import {
++  BadRequestException,
+   Injectable,
+ } from '@nestjs/common';
+ 
+ import {
++  TaskStatus,
+   TaskType,
+ } from '@prisma/client';
+ 
+@@ -87,31 +89,34 @@ export class DealsService {
+             });
+ 
+ 
+-          await tx.task.create({
+-            data: {
++          if (!dto.deferInvoiceTask) {
+ 
+-              dealId:
+-                deal.id,
++            await tx.task.create({
++              data: {
++
++                dealId:
++                  deal.id,
+ 
+-              type:
+-                TaskType
+-                  .ISSUE_CLIENT_INVOICE,
++                type:
++                  TaskType
++                    .ISSUE_CLIENT_INVOICE,
+ 
+-              title:
+-                'Выставить счёт',
++                title:
++                  'Выставить счёт',
+ 
+-              description:
+-                dto.accountingComment,
++                description:
++                  dto.accountingComment,
+ 
+-              urgent:
+-                Boolean(
+-                  dto.urgent,
+-                ),
++                urgent:
++                  Boolean(
++                    dto.urgent,
++                  ),
+ 
+-              createdById:
+-                dto.createdById,
+-            },
+-          });
++                createdById:
++                  dto.createdById,
++              },
++            });
++          }
+ 
+ 
+           await tx
+@@ -335,13 +340,176 @@ export class DealsService {
+       });
+   }
+ 
++  async submitInvoiceRequest(
++    id: string,
++    body: {
++      actorId: string;
++      urgent?: boolean;
++    },
++  ) {
++
++    const deal =
++      await this.prisma.deal
++        .findUniqueOrThrow({
++          where: { id },
++        });
++
++
++    const active =
++      await this.prisma.task
++        .findFirst({
++          where: {
++            dealId: id,
++            type: TaskType.ISSUE_CLIENT_INVOICE,
++            status: {
++              notIn: [
++                TaskStatus.DONE,
++                TaskStatus.CANCELLED,
++              ],
++            },
++          },
++          orderBy: {
++            createdAt: 'desc',
++          },
++        });
++
++
++    if (active?.status === TaskStatus.IN_PROGRESS) {
++      throw new BadRequestException(
++        'Бухгалтер уже взял запрос в работу',
++      );
++    }
++
++
++    const task = active
++      ? await this.prisma.task.update({
++          where: { id: active.id },
++          data: {
++            status: TaskStatus.NEW,
++            assigneeId: null,
++            completedAt: null,
++            urgent:
++              body.urgent !== undefined
++                ? Boolean(body.urgent)
++                : active.urgent,
++            description:
++              deal.accountingComment ||
++              active.description,
++          },
++        })
++      : await this.prisma.task.create({
++          data: {
++            dealId: id,
++            type: TaskType.ISSUE_CLIENT_INVOICE,
++            title: 'Выставить счёт',
++            description:
++              deal.accountingComment || undefined,
++            urgent: Boolean(body.urgent),
++            createdById: body.actorId,
++          },
++        });
++
++
++    await this.prisma.auditEvent.create({
++      data: {
++        dealId: id,
++        actorId: body.actorId,
++        action: active
++          ? 'INVOICE_REQUEST_RESUBMITTED'
++          : 'INVOICE_REQUEST_SUBMITTED',
++        entityType: 'Task',
++        entityId: task.id,
++        newValue: {
++          status: TaskStatus.NEW,
++        },
++      },
++    });
++
++
++    return task;
++  }
++
++
++  async withdrawInvoiceRequest(
++    id: string,
++    actorId: string,
++  ) {
++
++    const task =
++      await this.prisma.task
++        .findFirst({
++          where: {
++            dealId: id,
++            type: TaskType.ISSUE_CLIENT_INVOICE,
++            status: {
++              notIn: [
++                TaskStatus.DONE,
++                TaskStatus.CANCELLED,
++              ],
++            },
++          },
++          orderBy: {
++            createdAt: 'desc',
++          },
++        });
++
++
++    if (!task) {
++      throw new BadRequestException(
++        'Активный запрос на счёт не найден',
++      );
++    }
++
++
++    if (task.status === TaskStatus.IN_PROGRESS) {
++      throw new BadRequestException(
++        'Бухгалтер уже взял запрос в работу. Отозвать его автоматически нельзя.',
++      );
++    }
++
++
++    const updated =
++      await this.prisma.task.update({
++        where: { id: task.id },
++        data: {
++          status: TaskStatus.CANCELLED,
++          completedAt: new Date(),
++        },
++      });
++
++
++    await this.prisma.auditEvent.create({
++      data: {
++        dealId: id,
++        actorId,
++        action: 'INVOICE_REQUEST_WITHDRAWN',
++        entityType: 'Task',
++        entityId: task.id,
++        oldValue: {
++          status: task.status,
++        },
++        newValue: {
++          status: TaskStatus.CANCELLED,
++        },
++      },
++    });
++
++
++    return updated;
++  }
++
++
+   async updateInfo(
+     id: string,
+ 
+     body: {
++      clientName?: string;
+       contactName?: string;
+       clientPhone?: string;
+       managerComment?: string;
++      accountingComment?: string;
++      marginMode?: string;
++      marginValue?: number;
+       deliveryAddresses?: string[];
+       actorId: string;
+     },
+@@ -421,6 +589,30 @@ export class DealsService {
+         : currentAddresses;
+ 
+ 
++    const nextClientName =
++      body.clientName !== undefined
++        ? body.clientName.trim() || current.clientName
++        : current.clientName;
++
++
++    const nextAccountingComment =
++      body.accountingComment !== undefined
++        ? body.accountingComment.trim() || null
++        : current.accountingComment;
++
++
++    const nextMarginMode =
++      body.marginMode !== undefined
++        ? body.marginMode || null
++        : current.marginMode;
++
++
++    const nextMarginValue =
++      body.marginValue !== undefined
++        ? body.marginValue
++        : current.marginValue;
++
++
+     return this.prisma
+       .$transaction(
+         async (tx) => {
+@@ -432,6 +624,9 @@ export class DealsService {
+               },
+ 
+               data: {
++                clientName:
++                  nextClientName,
++
+                 contactName:
+                   nextContactName,
+ 
+@@ -441,6 +636,15 @@ export class DealsService {
+                 managerComment:
+                   nextComment,
+ 
++                accountingComment:
++                  nextAccountingComment,
++
++                marginMode:
++                  nextMarginMode,
++
++                marginValue:
++                  nextMarginValue,
++
+                 deliveryAddresses:
+                   nextAddresses,
+               },
+diff --git a/backend/src/deals/dto.ts b/backend/src/deals/dto.ts
+index 9927a96..9f2c06e 100644
+--- a/backend/src/deals/dto.ts
++++ b/backend/src/deals/dto.ts
+@@ -46,4 +46,7 @@ export class CreateDealDto {
+ 
+   @IsOptional()
+   urgent?: boolean;
++
++  @IsOptional()
++  deferInvoiceTask?: boolean;
+ }
+diff --git a/backend/src/tasks/tasks.controller.ts b/backend/src/tasks/tasks.controller.ts
+index cd9cc70..2a71ac9 100644
+--- a/backend/src/tasks/tasks.controller.ts
++++ b/backend/src/tasks/tasks.controller.ts
+@@ -1,4 +1,4 @@
+-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
++import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+ import { TaskStatus } from '@prisma/client';
+ import { TasksService } from './tasks.service';
+ 
+@@ -11,6 +11,19 @@ export class TasksController {
+     return this.tasks.list();
+   }
+ 
++
++  @Post(':id/return')
++  returnInvoiceRequest(
++    @Param('id') id: string,
++    @Body() body: {
++      actorId: string;
++      reasonCode: string;
++      comment?: string;
++    },
++  ) {
++    return this.tasks.returnInvoiceRequest(id, body);
++  }
++
+   @Patch(':id/status')
+   updateStatus(@Param('id') id: string, @Body() body: { status: TaskStatus; assigneeId?: string }) {
+     return this.tasks.updateStatus(id, body.status, body.assigneeId);
+diff --git a/backend/src/tasks/tasks.service.ts b/backend/src/tasks/tasks.service.ts
+index c85abd0..825323d 100644
+--- a/backend/src/tasks/tasks.service.ts
++++ b/backend/src/tasks/tasks.service.ts
+@@ -1,5 +1,5 @@
+-import { Injectable } from '@nestjs/common';
+-import { TaskStatus } from '@prisma/client';
++import { BadRequestException, Injectable } from '@nestjs/common';
++import { TaskStatus, TaskType } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
+ 
+ @Injectable()
+@@ -93,6 +93,133 @@ export class TasksService {
+   }
+ 
+ 
++  async returnInvoiceRequest(
++    id: string,
++    body: {
++      actorId: string;
++      reasonCode: string;
++      comment?: string;
++    },
++  ) {
++
++    const reasons:
++      Record<string, string> = {
++      NO_INCOMING_INVOICE:
++        'Нет входящего счёта',
++      NO_TERMS:
++        'Нет условий',
++      NO_DETAILS:
++        'Нет реквизитов / непонятно, на кого делать',
++      OTHER:
++        'Другое',
++    };
++
++
++    const reasonLabel =
++      reasons[body.reasonCode];
++
++
++    if (!reasonLabel) {
++      throw new BadRequestException(
++        'Выберите причину возврата',
++      );
++    }
++
++
++    const comment =
++      body.comment?.trim() || '';
++
++
++    if (
++      body.reasonCode === 'OTHER' &&
++      !comment
++    ) {
++      throw new BadRequestException(
++        'Для причины «Другое» добавьте комментарий',
++      );
++    }
++
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const task =
++          await tx.task
++            .findUniqueOrThrow({
++              where: { id },
++            });
++
++
++        if (
++          task.type !==
++          TaskType.ISSUE_CLIENT_INVOICE
++        ) {
++          throw new BadRequestException(
++            'Эту задачу нельзя вернуть как запрос на счёт',
++          );
++        }
++
++
++        if (
++          ![
++            TaskStatus.NEW,
++            TaskStatus.IN_PROGRESS,
++          ].includes(task.status)
++        ) {
++          throw new BadRequestException(
++            'Задача уже не находится на этапе выставления счёта',
++          );
++        }
++
++
++        const updated =
++          await tx.task.update({
++            where: { id },
++            data: {
++              status:
++                TaskStatus.NEED_DATA,
++              assigneeId:
++                body.actorId,
++              completedAt: null,
++            },
++          });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId:
++              task.dealId,
++            actorId:
++              body.actorId,
++            action:
++              'INVOICE_REQUEST_RETURNED',
++            entityType:
++              'Task',
++            entityId:
++              task.id,
++            oldValue: {
++              status:
++                task.status,
++            },
++            newValue: {
++              status:
++                TaskStatus.NEED_DATA,
++              reasonCode:
++                body.reasonCode,
++              reasonLabel,
++            },
++            reason:
++              comment || undefined,
++          },
++        });
++
++
++        return updated;
++      },
++    );
++  }
++
++
+   async updateStatus(
+     id: string,
+     status: TaskStatus,
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 29c850d..45e1130 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -36,6 +36,9 @@ import {
+   listTasks,
+   login,
+   requestInvoiceCorrection,
++  returnInvoiceRequest,
++  submitInvoiceRequest,
++  withdrawInvoiceRequest,
+   updatePaymentStatus,
+   updateTaskStatus,
+   uploadDealFile,
+@@ -447,6 +450,46 @@ function DealDetail({
+     setEditAddresses,
+   ] = useState<string[]>([]);
+ 
++  const [
++    requestClientName,
++    setRequestClientName,
++  ] = useState('');
++
++  const [
++    requestMarginMode,
++    setRequestMarginMode,
++  ] = useState('TOTAL_PLUS');
++
++  const [
++    requestMarginValue,
++    setRequestMarginValue,
++  ] = useState('');
++
++  const [
++    requestAccountingComment,
++    setRequestAccountingComment,
++  ] = useState('');
++
++  const [
++    requestIncomingInvoice,
++    setRequestIncomingInvoice,
++  ] = useState<File | null>(null);
++
++  const [
++    requestExtraFiles,
++    setRequestExtraFiles,
++  ] = useState<File[]>([]);
++
++  const [
++    requestUrgent,
++    setRequestUrgent,
++  ] = useState(false);
++
++  const [
++    withdrawConfirmOpen,
++    setWithdrawConfirmOpen,
++  ] = useState(false);
++
+ 
+   async function reload(
+     showLoading = true,
+@@ -569,12 +612,36 @@ function DealDetail({
+           : []
+       );
+ 
++      setRequestClientName(
++        deal?.clientName || ''
++      );
++
++      setRequestMarginMode(
++        deal?.marginMode ||
++        'TOTAL_PLUS'
++      );
++
++      setRequestMarginValue(
++        deal?.marginValue === undefined ||
++        deal?.marginValue === null
++          ? ''
++          : String(deal.marginValue)
++      );
++
++      setRequestAccountingComment(
++        deal?.accountingComment || ''
++      );
++
+     },
+     [
+       deal?.contactName,
+       deal?.clientPhone,
+       deal?.managerComment,
+       deal?.deliveryAddresses,
++      deal?.clientName,
++      deal?.marginMode,
++      deal?.marginValue,
++      deal?.accountingComment,
+     ],
+   );
+ 
+@@ -677,6 +744,28 @@ function DealDetail({
+     );
+ 
+ 
++  const invoiceRequestTask =
++    deal.tasks.find(
++      (task) =>
++        task.type ===
++          'ISSUE_CLIENT_INVOICE' &&
++        ![
++          'DONE',
++          'CANCELLED',
++        ].includes(
++          task.status
++        )
++    );
++
++
++  const latestInvoiceReturn =
++    deal.auditEvents?.find(
++      (event) =>
++        event.action ===
++        'INVOICE_REQUEST_RETURNED'
++    );
++
++
+   const canManageDeal =
+     [
+       'MANAGER',
+@@ -844,6 +933,135 @@ function DealDetail({
+   }
+ 
+ 
++  async function sendInvoiceRequestAgain() {
++
++    const activeDeal = deal;
++
++    if (!activeDeal) {
++      return;
++    }
++
++
++    const parsedMargin =
++      parseMoneyInput(
++        requestMarginValue
++      );
++
++
++    if (
++      requestMarginValue.trim() &&
++      parsedMargin === undefined
++    ) {
++      setError(
++        'Проверьте значение условий'
++      );
++      return;
++    }
++
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++
++      await updateDealInfo(
++        dealId,
++        {
++          clientName:
++            requestClientName.trim() ||
++            activeDeal.clientName,
++          accountingComment:
++            requestAccountingComment
++              .trim() ||
++            undefined,
++          marginMode:
++            requestMarginMode,
++          marginValue:
++            parsedMargin,
++          actorId:
++            user.id,
++        },
++      );
++
++
++      if (requestIncomingInvoice) {
++        await uploadDealFile(
++          dealId,
++          requestIncomingInvoice,
++          'CUSTOMER_INVOICE_PRIMARY',
++        );
++      }
++
++
++      for (const file of requestExtraFiles) {
++        await uploadDealFile(
++          dealId,
++          file,
++          'MANAGER_ATTACHMENT',
++        );
++      }
++
++
++      await submitInvoiceRequest(
++        dealId,
++        {
++          actorId:
++            user.id,
++          urgent:
++            requestUrgent,
++        },
++      );
++
++
++      setRequestIncomingInvoice(null);
++      setRequestExtraFiles([]);
++      setRequestUrgent(false);
++
++      await reload(false);
++
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  async function withdrawRequest() {
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++      await withdrawInvoiceRequest(
++        dealId,
++        user.id,
++      );
++
++      setWithdrawConfirmOpen(false);
++      await reload(false);
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
+   async function saveInvoiceData() {
+ 
+     if (!current) {
+@@ -1953,6 +2171,319 @@ function DealDetail({
+       )}
+ 
+ 
++      {!current &&
++        canManageDeal && (
++
++        <div className="invoiceRequestManagerBox">
++
++          {invoiceRequestTask?.status ===
++            'NEED_DATA' ? (
++
++            <>
++
++              <div className="invoiceRequestReturnedHead">
++                <div>
++                  <strong>
++                    Бухгалтерия вернула запрос
++                  </strong>
++
++                  <span>
++                    Исправьте данные и отправьте ту же задачу повторно.
++                  </span>
++                </div>
++
++                <b>Нужны данные</b>
++              </div>
++
++
++              <div className="invoiceReturnReason">
++                <span>Причина</span>
++                <strong>
++                  {
++                    String(
++                      latestInvoiceReturn
++                        ?.newValue
++                        ?.reasonLabel ||
++                      'Не указана'
++                    )
++                  }
++                </strong>
++
++                {latestInvoiceReturn?.reason && (
++                  <p>
++                    {latestInvoiceReturn.reason}
++                  </p>
++                )}
++              </div>
++
++
++              <div className="invoiceRequestRepairForm">
++
++                <Field title="На кого выставлять">
++                  <input
++                    value={requestClientName}
++                    onChange={(e) =>
++                      setRequestClientName(
++                        e.target.value
++                      )
++                    }
++                  />
++                </Field>
++
++
++                <div className="inline">
++                  <Field title="Условия">
++                    <select
++                      value={requestMarginMode}
++                      onChange={(e) =>
++                        setRequestMarginMode(
++                          e.target.value
++                        )
++                      }
++                    >
++                      <option value="PERCENT">
++                        ± %
++                      </option>
++                      <option value="TOTAL_PLUS">
++                        + к сумме
++                      </option>
++                      <option value="UNIT_PLUS">
++                        + за единицу
++                      </option>
++                      <option value="FINAL">
++                        Итоговая цена
++                      </option>
++                    </select>
++                  </Field>
++
++                  <Field title="Значение">
++                    <input
++                      inputMode="decimal"
++                      value={requestMarginValue}
++                      onChange={(e) =>
++                        setRequestMarginValue(
++                          e.target.value
++                        )
++                      }
++                      placeholder="-7 или +4"
++                    />
++                  </Field>
++                </div>
++
++
++                <Field title="Комментарий бухгалтерии">
++                  <textarea
++                    rows={3}
++                    value={requestAccountingComment}
++                    onChange={(e) =>
++                      setRequestAccountingComment(
++                        e.target.value
++                      )
++                    }
++                  />
++                </Field>
++
++
++                <Field title="Новый входящий счёт, если нужен">
++                  <input
++                    type="file"
++                    accept="application/pdf,image/*"
++                    onChange={(e) =>
++                      setRequestIncomingInvoice(
++                        e.target.files?.[0] ||
++                        null
++                      )
++                    }
++                  />
++                </Field>
++
++                {requestIncomingInvoice && (
++                  <div className="selectedRequestFile">
++                    <b>
++                      {requestIncomingInvoice.name}
++                    </b>
++                    <button
++                      type="button"
++                      className="secondary compactButton"
++                      onClick={() =>
++                        setRequestIncomingInvoice(null)
++                      }
++                    >
++                      Убрать
++                    </button>
++                  </div>
++                )}
++
++
++                <Field title="Дополнительные документы / реквизиты">
++                  <MultiFilePicker
++                    files={requestExtraFiles}
++                    onChange={setRequestExtraFiles}
++                    title="+ Прикрепить документы"
++                  />
++                </Field>
++
++
++                <label className="urgentToggle">
++                  <input
++                    type="checkbox"
++                    checked={requestUrgent}
++                    onChange={(e) =>
++                      setRequestUrgent(
++                        e.target.checked
++                      )
++                    }
++                  />
++                  <span>Срочно</span>
++                </label>
++
++
++                <button
++                  type="button"
++                  className="primary wide"
++                  disabled={saving}
++                  onClick={sendInvoiceRequestAgain}
++                >
++                  {
++                    saving
++                      ? 'Отправляем…'
++                      : 'Сохранить и повторно отправить'
++                  }
++                </button>
++
++
++                <button
++                  type="button"
++                  className="purchaseCancelButton"
++                  disabled={saving}
++                  onClick={() =>
++                    setWithdrawConfirmOpen(true)
++                  }
++                >
++                  Отозвать запрос на счёт
++                </button>
++
++              </div>
++            </>
++
++          ) : invoiceRequestTask ? (
++
++            <div className="invoiceRequestStateRow">
++              <div>
++                <strong>
++                  {
++                    invoiceRequestTask.status ===
++                      'IN_PROGRESS'
++                      ? 'Бухгалтер выставляет счёт'
++                      : 'Запрос отправлен бухгалтерии'
++                  }
++                </strong>
++
++                <span>
++                  {
++                    invoiceRequestTask.status ===
++                      'IN_PROGRESS'
++                      ? 'Задача уже взята в работу.'
++                      : 'Все загруженные документы доступны бухгалтерии.'
++                  }
++                </span>
++              </div>
++
++              {invoiceRequestTask.status !==
++                'IN_PROGRESS' && (
++                <button
++                  type="button"
++                  className="purchaseCancelButton invoiceRequestWithdrawCompact"
++                  disabled={saving}
++                  onClick={() =>
++                    setWithdrawConfirmOpen(true)
++                  }
++                >
++                  Отозвать
++                </button>
++              )}
++            </div>
++
++          ) : (
++
++            <div className="invoiceRequestStateRow">
++              <div>
++                <strong>
++                  Запрос на счёт не активен
++                </strong>
++                <span>
++                  Его можно отправить бухгалтерии снова.
++                </span>
++              </div>
++
++              <button
++                type="button"
++                className="primary"
++                disabled={saving}
++                onClick={sendInvoiceRequestAgain}
++              >
++                Отправить снова
++              </button>
++            </div>
++
++          )}
++
++
++          {withdrawConfirmOpen && (
++            <div
++              className="appModalBackdrop"
++              onClick={() =>
++                setWithdrawConfirmOpen(false)
++              }
++            >
++              <div
++                className="appModal"
++                onClick={(event) =>
++                  event.stopPropagation()
++                }
++              >
++                <strong>
++                  Отозвать запрос на счёт?
++                </strong>
++
++                <p>
++                  Если бухгалтер ещё не начал работу, задача будет отменена. Сама сделка и документы останутся в приложении.
++                </p>
++
++                <div className="appModalActions">
++                  <button
++                    type="button"
++                    className="secondary"
++                    disabled={saving}
++                    onClick={() =>
++                      setWithdrawConfirmOpen(false)
++                    }
++                  >
++                    Не отзывать
++                  </button>
++
++                  <button
++                    type="button"
++                    className="dangerButton"
++                    disabled={saving}
++                    onClick={withdrawRequest}
++                  >
++                    {
++                      saving
++                        ? 'Отзываем…'
++                        : 'Отозвать'
++                    }
++                  </button>
++                </div>
++              </div>
++            </div>
++          )}
++
++        </div>
++
++      )}
++
++
+       {invoiceMenuOpen &&
+         canManageInvoice &&
+         current && (
+@@ -3106,6 +3637,9 @@ async function submit(
+ 
+           urgent,
+ 
++          deferInvoiceTask:
++            true,
++
+           managerId:
+             user.id,
+ 
+@@ -3175,9 +3709,31 @@ async function submit(
+               }
+ 
+ 
++              setProgress(96);
++
++              await submitInvoiceRequest(
++                deal.id,
++                {
++                  actorId:
++                    user.id,
++                  urgent,
++                },
++              );
++
+               setProgress(99);
+             },
+         });
++
++      } else {
++
++        await submitInvoiceRequest(
++          deal.id,
++          {
++            actorId:
++              user.id,
++            urgent,
++          },
++        );
+       }
+ 
+ 
+@@ -4342,6 +4898,21 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+   const [error, setError] =
+     useState('');
+ 
++  const [
++    returnModalOpen,
++    setReturnModalOpen,
++  ] = useState(false);
++
++  const [
++    returnReason,
++    setReturnReason,
++  ] = useState('');
++
++  const [
++    returnComment,
++    setReturnComment,
++  ] = useState('');
++
+ 
+   useEffect(() => {
+ 
+@@ -4453,6 +5024,63 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+   }
+ 
+ 
++  async function sendBackToManager() {
++
++    if (!returnReason) {
++      setError(
++        'Выберите причину возврата'
++      );
++      return;
++    }
++
++
++    if (
++      returnReason === 'OTHER' &&
++      !returnComment.trim()
++    ) {
++      setError(
++        'Для причины «Другое» добавьте комментарий'
++      );
++      return;
++    }
++
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++      await returnInvoiceRequest(
++        task.id,
++        {
++          actorId:
++            user.id,
++          reasonCode:
++            returnReason,
++          comment:
++            returnComment.trim() ||
++            undefined,
++        },
++      );
++
++      setReturnModalOpen(false);
++      setReturnReason('');
++      setReturnComment('');
++      onBack();
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
+   function finishInvoice() {
+ 
+     setError('');
+@@ -5173,33 +5801,204 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+       {status === 'NEW' && (
+ 
+-        <button
+-          className="primary wide"
+-          disabled={saving}
+-          onClick={take}
+-        >
+-          {
+-            saving
+-              ? 'Сохраняем…'
+-              : 'В работу'
+-          }
+-        </button>
++        task.type ===
++          'ISSUE_CLIENT_INVOICE' ? (
++
++          <div className="invoiceTaskStartActions">
++
++            <button
++              type="button"
++              className="secondary"
++              disabled={saving}
++              onClick={() =>
++                setReturnModalOpen(true)
++              }
++            >
++              Отказать / вернуть
++            </button>
++
++            <button
++              className="primary"
++              disabled={saving}
++              onClick={take}
++            >
++              {
++                saving
++                  ? 'Сохраняем…'
++                  : 'В работу'
++              }
++            </button>
++
++          </div>
++
++        ) : (
++
++          <button
++            className="primary wide"
++            disabled={saving}
++            onClick={take}
++          >
++            {
++              saving
++                ? 'Сохраняем…'
++                : 'В работу'
++            }
++          </button>
++        )
+ 
+       )}
+ 
+ 
+       {status === 'IN_PROGRESS' && (
+ 
+-        <div className="infoBox">
++        <div className="infoBox invoiceTaskInWorkBox">
+ 
+-          <strong>
+-            Задача в работе
+-          </strong>
++          <div>
++            <strong>
++              Задача в работе
++            </strong>
+ 
+-          <p>
+-            Заполните готовый счёт ниже.
+-          </p>
++            <p>
++              Заполните готовый счёт ниже.
++            </p>
++          </div>
++
++          {task.type ===
++            'ISSUE_CLIENT_INVOICE' && (
++            <button
++              type="button"
++              className="secondary compactButton"
++              disabled={saving}
++              onClick={() =>
++                setReturnModalOpen(true)
++              }
++            >
++              Отказать / вернуть
++            </button>
++          )}
++
++        </div>
++
++      )}
++
++
++      {returnModalOpen &&
++        task.type ===
++          'ISSUE_CLIENT_INVOICE' && (
++
++        <div
++          className="appModalBackdrop"
++          onClick={() =>
++            setReturnModalOpen(false)
++          }
++        >
++          <div
++            className="appModal invoiceReturnModal"
++            onClick={(event) =>
++              event.stopPropagation()
++            }
++          >
++
++            <strong>
++              Отказать / вернуть менеджеру
++            </strong>
++
++            <p>
++              Выберите, чего не хватает для выставления счёта. Менеджер увидит причину и сможет повторно отправить эту же задачу.
++            </p>
++
++
++            <div className="invoiceReturnReasons">
++
++              {[
++                [
++                  'NO_INCOMING_INVOICE',
++                  'Нет входящего счёта',
++                ],
++                [
++                  'NO_TERMS',
++                  'Нет условий',
++                ],
++                [
++                  'NO_DETAILS',
++                  'Нет реквизитов / непонятно, на кого делать',
++                ],
++                [
++                  'OTHER',
++                  'Другое',
++                ],
++              ].map(
++                ([value, label]) => (
++
++                <button
++                  type="button"
++                  key={value}
++                  className={
++                    returnReason === value
++                      ? 'invoiceReturnReason selected'
++                      : 'invoiceReturnReason'
++                  }
++                  onClick={() =>
++                    setReturnReason(value)
++                  }
++                >
++                  <span className="invoiceReturnRadio" />
++                  <b>{label}</b>
++                </button>
++
++              ))}
++
++            </div>
++
++
++            <Field title="Комментарий">
++              <textarea
++                rows={3}
++                value={returnComment}
++                onChange={(e) =>
++                  setReturnComment(
++                    e.target.value
++                  )
++                }
++                placeholder="Что нужно добавить или уточнить"
++              />
++            </Field>
++
++
++            {error && (
++              <div className="error">
++                {error}
++              </div>
++            )}
++
++
++            <div className="appModalActions">
++              <button
++                type="button"
++                className="secondary"
++                disabled={saving}
++                onClick={() =>
++                  setReturnModalOpen(false)
++                }
++              >
++                Отмена
++              </button>
+ 
++              <button
++                type="button"
++                className="primary"
++                disabled={saving || !returnReason}
++                onClick={sendBackToManager}
++              >
++                {
++                  saving
++                    ? 'Отправляем…'
++                    : 'Отказать / вернуть'
++                }
++              </button>
++            </div>
++
++          </div>
+         </div>
+ 
+       )}
+@@ -5604,6 +6403,18 @@ function auditLabel(
+     REQUEST_CORRECTION:
+       'Запрошена корректировка',
+ 
++    INVOICE_REQUEST_SUBMITTED:
++      'Запрос на счёт отправлен бухгалтерии',
++
++    INVOICE_REQUEST_RESUBMITTED:
++      'Запрос на счёт отправлен повторно',
++
++    INVOICE_REQUEST_RETURNED:
++      'Бухгалтерия вернула запрос менеджеру',
++
++    INVOICE_REQUEST_WITHDRAWN:
++      'Запрос на счёт отозван менеджером',
++
+     CLIENT_PAYMENT_ADDED:
+       'Добавлена оплата клиента',
+ 
+diff --git a/frontend/src/RecentActivityPanel.tsx b/frontend/src/RecentActivityPanel.tsx
+index 9d50e4a..bb9fe2e 100644
+--- a/frontend/src/RecentActivityPanel.tsx
++++ b/frontend/src/RecentActivityPanel.tsx
+@@ -198,6 +198,18 @@ function actionLabel(
+     REQUEST_CORRECTION:
+       'Отправил счёт на корректировку',
+ 
++    INVOICE_REQUEST_SUBMITTED:
++      'Отправил запрос на счёт',
++
++    INVOICE_REQUEST_RESUBMITTED:
++      'Повторно отправил запрос на счёт',
++
++    INVOICE_REQUEST_RETURNED:
++      'Вернул запрос менеджеру',
++
++    INVOICE_REQUEST_WITHDRAWN:
++      'Отозвал запрос на счёт',
++
+     CLIENT_PAYMENT_ADDED:
+       'Добавил оплату клиента',
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 7959aac..4d099c8 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -55,6 +55,20 @@ export async function updateTaskStatus(id: string, status: string, assigneeId?:
+   return json(`/tasks/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, assigneeId }) });
+ }
+ 
++export async function returnInvoiceRequest(
++  taskId: string,
++  payload: {
++    actorId: string;
++    reasonCode: string;
++    comment?: string;
++  },
++) {
++  return json(`/tasks/${taskId}/return`, {
++    method: 'POST',
++    body: JSON.stringify(payload),
++  });
++}
++
+ 
+ export function uploadDealFileWithProgress(
+   dealId: string,
+@@ -438,9 +452,13 @@ export async function updateDealInfo(
+   dealId: string,
+ 
+   payload: {
++    clientName?: string;
+     contactName?: string;
+     clientPhone?: string;
+     managerComment?: string;
++    accountingComment?: string;
++    marginMode?: string;
++    marginValue?: number;
+     deliveryAddresses?: string[];
+     actorId: string;
+   },
+@@ -458,6 +476,37 @@ export async function updateDealInfo(
+ }
+ 
+ 
++export async function submitInvoiceRequest(
++  dealId: string,
++  payload: {
++    actorId: string;
++    urgent?: boolean;
++  },
++) {
++  return json(
++    `/deals/${dealId}/invoice-request`,
++    {
++      method: 'POST',
++      body: JSON.stringify(payload),
++    },
++  );
++}
++
++
++export async function withdrawInvoiceRequest(
++  dealId: string,
++  actorId: string,
++) {
++  return json(
++    `/deals/${dealId}/invoice-request/withdraw`,
++    {
++      method: 'POST',
++      body: JSON.stringify({ actorId }),
++    },
++  );
++}
++
++
+ export async function updateShipmentDate(
+   dealId: string,
+ 
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 3696720..6e045d0 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -2698,3 +2698,259 @@ html[data-theme='dark'] .sellerTaskBadge {
+     grid-column: 1 / -1;
+   }
+ }
++
++/* MSM invoice request workflow v0.5.0 */
++
++.invoiceRequestManagerBox {
++  display: grid;
++  gap: 12px;
++  padding: 14px;
++  border: 1px solid #e7e5e4;
++  border-radius: 18px;
++  background: #fff;
++  animation: msmFadeUp 220ms cubic-bezier(.2,.8,.25,1) both;
++}
++
++.invoiceRequestStateRow,
++.invoiceRequestReturnedHead {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.invoiceRequestStateRow > div,
++.invoiceRequestReturnedHead > div {
++  min-width: 0;
++}
++
++.invoiceRequestStateRow strong,
++.invoiceRequestStateRow span,
++.invoiceRequestReturnedHead strong,
++.invoiceRequestReturnedHead span {
++  display: block;
++}
++
++.invoiceRequestStateRow span,
++.invoiceRequestReturnedHead span {
++  margin-top: 3px;
++  color: #78716c;
++  font-size: 11px;
++  line-height: 1.4;
++}
++
++.invoiceRequestReturnedHead > b {
++  flex: 0 0 auto;
++  padding: 5px 8px;
++  border-radius: 999px;
++  background: #ede9fe;
++  color: #6d28d9;
++  font-size: 11px;
++}
++
++.invoiceReturnReason {
++  display: grid;
++  gap: 3px;
++  padding: 11px 12px;
++  border-radius: 13px;
++  background: #faf5ff;
++  border: 1px solid #e9d5ff;
++}
++
++.invoiceReturnReason > span {
++  color: #7c3aed;
++  font-size: 10px;
++  font-weight: 800;
++  text-transform: uppercase;
++  letter-spacing: .04em;
++}
++
++.invoiceReturnReason > strong {
++  font-size: 13px;
++}
++
++.invoiceReturnReason > p {
++  margin: 3px 0 0;
++  color: #57534e;
++  font-size: 12px;
++  white-space: pre-wrap;
++}
++
++.invoiceRequestRepairForm {
++  display: grid;
++  gap: 11px;
++  padding-top: 2px;
++}
++
++.selectedRequestFile {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  padding: 9px 10px;
++  border-radius: 12px;
++  background: #fafaf9;
++}
++
++.selectedRequestFile b {
++  min-width: 0;
++  overflow-wrap: anywhere;
++  font-size: 12px;
++}
++
++.invoiceRequestWithdrawCompact {
++  width: auto;
++  flex: 0 0 auto;
++  padding: 10px 12px;
++}
++
++.invoiceTaskStartActions {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
++  gap: 9px;
++}
++
++.invoiceTaskInWorkBox {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.invoiceTaskInWorkBox > div {
++  min-width: 0;
++}
++
++.invoiceTaskInWorkBox p {
++  margin-top: 4px;
++}
++
++.invoiceReturnModal {
++  max-height: min(720px, calc(100vh - 32px));
++  overflow-y: auto;
++}
++
++.invoiceReturnReasons {
++  display: grid;
++  gap: 7px;
++}
++
++.invoiceReturnReason {
++  width: 100%;
++}
++
++button.invoiceReturnReason {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  padding: 11px 12px;
++  text-align: left;
++  border: 1px solid #e7e5e4;
++  border-radius: 12px;
++  background: #fafaf9;
++  color: #171717;
++  transition:
++    border-color 160ms ease,
++    background-color 160ms ease,
++    transform 120ms ease;
++}
++
++button.invoiceReturnReason:active {
++  transform: scale(.992);
++}
++
++button.invoiceReturnReason.selected {
++  border-color: #a78bfa;
++  background: #f5f3ff;
++}
++
++.invoiceReturnRadio {
++  width: 17px;
++  height: 17px;
++  flex: 0 0 17px;
++  border: 2px solid #a8a29e;
++  border-radius: 50%;
++  box-shadow: inset 0 0 0 3px #fafaf9;
++}
++
++button.invoiceReturnReason.selected .invoiceReturnRadio {
++  border-color: #7c3aed;
++  background: #7c3aed;
++  box-shadow: inset 0 0 0 3px #f5f3ff;
++}
++
++html[data-theme='dark'] .invoiceRequestManagerBox {
++  background: #1d1d1f;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .invoiceRequestStateRow span,
++html[data-theme='dark'] .invoiceRequestReturnedHead span {
++  color: #a8a29e;
++}
++
++html[data-theme='dark'] .invoiceReturnReason {
++  background: #251d2d;
++  border-color: #4c1d5f;
++}
++
++html[data-theme='dark'] .invoiceReturnReason > p {
++  color: #d6d3d1;
++}
++
++html[data-theme='dark'] .selectedRequestFile,
++html[data-theme='dark'] button.invoiceReturnReason {
++  background: #242426;
++  border-color: #3f3f42;
++  color: #f5f5f4;
++}
++
++html[data-theme='dark'] button.invoiceReturnReason.selected {
++  background: #2e2540;
++  border-color: #7c3aed;
++}
++
++html[data-theme='dark'] .invoiceReturnRadio {
++  box-shadow: inset 0 0 0 3px #242426;
++}
++
++html[data-theme='dark'] button.invoiceReturnReason.selected .invoiceReturnRadio {
++  box-shadow: inset 0 0 0 3px #2e2540;
++}
++
++/* Mobile thumb-zone: extra scroll room lets the last card/button
++   move into a comfortable one-hand reach area above the bottom nav. */
++@media (max-width: 820px) {
++  .content {
++    padding-bottom: calc(32vh + 92px);
++  }
++
++  .invoiceRequestStateRow,
++  .invoiceRequestReturnedHead,
++  .invoiceTaskInWorkBox {
++    align-items: flex-start;
++  }
++}
++
++@media (max-width: 520px) {
++  .invoiceTaskStartActions {
++    grid-template-columns: 1fr 1.35fr;
++  }
++
++  .invoiceRequestStateRow {
++    flex-direction: column;
++  }
++
++  .invoiceRequestStateRow > button,
++  .invoiceRequestWithdrawCompact {
++    width: 100%;
++  }
++
++  .invoiceTaskInWorkBox {
++    flex-direction: column;
++  }
++
++  .invoiceTaskInWorkBox > button {
++    width: 100%;
++  }
++}

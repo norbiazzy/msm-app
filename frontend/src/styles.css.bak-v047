@@ -1,0 +1,1863 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #171717; background: #f5f5f4; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+.shell { max-width: 760px; margin: 0 auto; min-height: 100vh; background: #fafaf9; padding-bottom: 82px; }
+.topbar { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 18px 14px; background: rgba(250,250,249,.94); backdrop-filter: blur(12px); border-bottom: 1px solid #e7e5e4; }
+h1 { margin: 3px 0 0; font-size: 25px; }
+.eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #78716c; }
+.userBadge { background: #fff; border: 1px solid #e7e5e4; border-radius: 14px; padding: 8px 10px; font-weight: 700; font-size: 13px; text-align: right; }
+.userBadge span { display: block; font-size: 11px; font-weight: 500; color: #78716c; }
+.content { padding: 18px; }
+.primary, .secondary { border: 0; border-radius: 14px; padding: 13px 16px; font-weight: 800; }
+.primary { background: #111; color: #fff; }
+.secondary { background: #e7e5e4; color: #1c1917; }
+.wide { width: 100%; font-size: 16px; }
+.sectionHead { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; }
+.sectionHead h2 { font-size: 18px; margin: 0; }
+.sectionHead span { background: #e7e5e4; border-radius: 999px; padding: 3px 9px; font-weight: 800; }
+.dealList { display: grid; gap: 10px; }
+.dealCard { background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 15px; box-shadow: 0 4px 18px rgba(0,0,0,.035); }
+.dealTop { display: flex; justify-content: space-between; gap: 12px; }
+.dealTop strong { display: block; font-size: 17px; }
+.dealTop span { color: #57534e; font-size: 13px; }
+.urgent { color: #b91c1c; background: #fee2e2; border-radius: 999px; padding: 4px 8px; font-size: 11px; align-self: flex-start; }
+.dealMeta { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; font-size: 12px; color: #57534e; }
+.note { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: #fafaf9; font-size: 12px; }
+.tasksHint { margin-top: 9px; font-size: 12px; font-weight: 700; }
+.empty { color: #78716c; text-align: center; padding: 30px 10px; }
+.form { display: grid; gap: 15px; }
+.field { display: grid; gap: 7px; font-weight: 700; font-size: 13px; }
+.field input, .field textarea, .field select { width: 100%; border: 1px solid #d6d3d1; background: #fff; border-radius: 12px; padding: 12px; outline: none; font-weight: 500; }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: #57534e; box-shadow: 0 0 0 3px rgba(87,83,78,.08); }
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; background: #e7e5e4; padding: 4px; border-radius: 14px; }
+.segmented.two { grid-template-columns: 1fr 1fr; }
+.segmented button { border: 0; border-radius: 10px; padding: 10px 8px; background: transparent; font-weight: 800; }
+.segmented button.selected { background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.08); }
+.inline { display: grid; grid-template-columns: 1.3fr .7fr; gap: 8px; }
+.urgentToggle { display: flex; gap: 9px; align-items: center; font-weight: 800; color: #b91c1c; background: #fff1f2; border: 1px solid #fecdd3; padding: 12px; border-radius: 12px; }
+.actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 4px; }
+.error { color: #b91c1c; background: #fee2e2; border-radius: 10px; padding: 10px; white-space: pre-wrap; font-size: 12px; }
+.bottomNav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: min(760px,100%); display: grid; grid-template-columns: repeat(3,1fr); background: rgba(255,255,255,.96); border-top: 1px solid #e7e5e4; backdrop-filter: blur(12px); padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+.bottomNav button { border: 0; background: transparent; color: #78716c; font-weight: 700; padding: 9px; }
+.bottomNav button.active { color: #111; }
+.bottomNav button:disabled { opacity: .35; cursor: default; }
+.screenMessage { min-height: 100vh; display: grid; place-items: center; padding: 20px; text-align: center; }
+@media (max-width: 520px) { .dealMeta { flex-direction: column; } .inline { grid-template-columns: 1fr; } }
+.taskCard { width: 100%; border: 1px solid #e7e5e4; background: #fff; border-radius: 16px; padding: 14px; display: flex; justify-content: space-between; gap: 12px; text-align: left; }
+.taskCard strong { display: block; color: #171717; }
+.taskCard span { display: block; margin-top: 3px; color: #78716c; font-size: 12px; }
+.taskState { display: grid; justify-items: end; align-content: start; gap: 5px; }
+.taskState span { white-space: nowrap; }
+.backLink { border: 0; background: transparent; padding: 0; text-align: left; color: #57534e; font-weight: 700; }
+.detailHero { background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 16px; }
+.detailHero h2 { margin: 4px 0; }
+.detailHero p { margin: 0 0 8px; color: #57534e; }
+.infoBox { background: #fff; border: 1px solid #e7e5e4; border-radius: 14px; padding: 13px; }
+.infoBox p { white-space: pre-wrap; margin: 6px 0 0; color: #44403c; }
+.microcopy { font-size: 11px; color: #78716c; text-align: center; }
+.clickable { width: 100%; text-align: left; cursor: pointer; color: inherit; }
+.statusPill { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #f5f5f4; color: #57534e; font-size: 12px; font-weight: 800; }
+.invoiceBlock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 14px; }
+.invoiceBlock > div { display: grid; gap: 3px; }
+.invoiceBlock span { font-size: 11px; color: #78716c; }
+.invoiceBlock strong { font-size: 15px; }
+.fileButton { grid-column: 1 / -1; text-align: center; text-decoration: none; background: #f5f5f4; color: #171717; border-radius: 12px; padding: 11px; font-weight: 800; }
+.reviewBox, .correctionBox { background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 14px; }
+.reviewBox p { margin: 7px 0 12px; color: #57534e; font-size: 13px; }
+.correctionBox { display: grid; gap: 12px; }
+.versionList { display: grid; gap: 8px; margin-top: 10px; }
+.versionRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 12px; background: #fafaf9; }
+.versionRow b, .versionRow span { display: block; }
+.versionRow span { margin-top: 2px; color: #78716c; font-size: 11px; }
+.versionRow a { color: #171717; font-weight: 800; }
+.historyList { display: grid; gap: 9px; margin-top: 10px; }
+.historyList > div { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; padding-bottom: 8px; border-bottom: 1px solid #f0efed; }
+.historyList span { color: #78716c; font-size: 11px; }
+.historyList b { font-size: 12px; }
+.historyList em { grid-column: 2; font-size: 11px; color: #57534e; font-style: normal; }
+@media (max-width: 520px) { .invoiceBlock { grid-template-columns: 1fr 1fr; } .invoiceBlock > div:last-of-type { grid-column: 1 / -1; } .historyList > div { grid-template-columns: 1fr; } .historyList em { grid-column: 1; } }
+.paymentMini { margin-top: 9px; font-size: 12px; font-weight: 800; color: #44403c; }
+.paymentBox { display: grid; gap: 12px; background: #fff; border: 1px solid #e7e5e4; border-radius: 18px; padding: 14px; }
+.paymentHead { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.paymentHead span { display: block; color: #78716c; font-size: 11px; }
+.paymentHead strong { display: block; margin-top: 2px; font-size: 16px; }
+.paymentHead > b { white-space: nowrap; font-size: 16px; }
+.paymentActions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.paymentForm { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid #f0efed; }
+.paymentList { display: grid; gap: 7px; padding-top: 4px; }
+.paymentRow { display: flex; justify-content: space-between; gap: 10px; align-items: center; background: #fafaf9; border-radius: 12px; padding: 10px; }
+.paymentRow b, .paymentRow span, .paymentRow em { display: block; }
+.paymentRow span { margin-top: 2px; color: #78716c; font-size: 11px; }
+.paymentRow em { margin-top: 3px; color: #57534e; font-size: 11px; font-style: normal; }
+.paymentRow a { color: #171717; font-size: 12px; font-weight: 800; }
+.deferralSummary { padding: 9px 10px; background: #fafaf9; border-radius: 12px; font-size: 12px; }
+.deferralSummary span { display: block; margin-top: 4px; color: #57534e; }
+@media (max-width: 520px) { .paymentActions { grid-template-columns: 1fr 1fr; } .paymentHead { align-items: center; } }
+
+
+/* MSM task queue v0.3.8 */
+
+.taskQueue {
+  display: grid;
+  gap: 22px;
+}
+
+.taskQueueCaption {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #78716c;
+}
+
+.taskGroup {
+  display: grid;
+  gap: 9px;
+}
+
+.taskGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 3px;
+}
+
+.taskGroupHead strong {
+  font-size: 13px;
+  letter-spacing: .01em;
+}
+
+.taskGroupHead span {
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+
+/* В работе */
+
+.taskGroupWorking
+.taskGroupHead strong {
+  color: #1d4ed8;
+}
+
+.taskGroupWorking
+.taskGroupHead span {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+
+/* Новые */
+
+.taskGroupNew
+.taskGroupHead strong {
+  color: #b45309;
+}
+
+.taskGroupNew
+.taskGroupHead span {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+
+/* Нужны данные */
+
+.taskGroupNeedData
+.taskGroupHead strong {
+  color: #7c3aed;
+}
+
+.taskGroupNeedData
+.taskGroupHead span {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+
+.taskCard {
+  position: relative;
+  overflow: hidden;
+  align-items: center;
+  min-height: 82px;
+  border-left-width: 4px;
+  box-shadow:
+    0 2px 10px
+    rgba(0,0,0,.025);
+}
+
+
+/* В работе */
+
+.taskCardStatus-in-progress {
+  border-left-color: #3b82f6;
+  background: #f8fbff;
+}
+
+
+/* Новая */
+
+.taskCardStatus-new {
+  border-left-color: #f59e0b;
+  background: #fffdf7;
+}
+
+
+/* Нужны данные */
+
+.taskCardStatus-need-data {
+  border-left-color: #8b5cf6;
+  background: #fbfaff;
+}
+
+
+.taskCardMain {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.taskCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.taskCardTitle strong {
+  font-size: 15px;
+}
+
+.taskClient {
+  color: #57534e !important;
+  font-size: 12px !important;
+}
+
+.taskCreated {
+  color: #a8a29e !important;
+  font-size: 10px !important;
+}
+
+
+/* Статус */
+
+.taskStatusBadge {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 6px 9px;
+  border-radius: 999px;
+  font-size: 11px !important;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.taskStatus-in-progress {
+  background: #dbeafe;
+  color: #1d4ed8 !important;
+}
+
+.taskStatus-new {
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+.taskStatus-need-data {
+  background: #ede9fe;
+  color: #6d28d9 !important;
+}
+
+.taskStatus-done,
+.taskStatus-cancelled {
+  background: #e7e5e4;
+  color: #78716c !important;
+}
+
+
+/* Срочная активная */
+
+.taskCardUrgent {
+  box-shadow:
+    0 0 0 1px
+    rgba(185,28,28,.08),
+    0 4px 16px
+    rgba(185,28,28,.06);
+}
+
+
+/* Выполненные */
+
+.completedTasksBlock {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid #e7e5e4;
+}
+
+.completedToggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #78716c;
+  padding: 8px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font-weight: 700;
+}
+
+.completedToggle b {
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #e7e5e4;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.completedTasksList {
+  display: grid;
+  gap: 7px;
+  animation:
+    msmFadeUp
+    180ms
+    ease-out
+    both;
+}
+
+.taskCardCompleted {
+  background: #f5f5f4;
+  border-color: #e7e5e4;
+  border-left-color: #d6d3d1;
+  box-shadow: none;
+  opacity: .62;
+}
+
+.taskCardCompleted:hover {
+  opacity: .82;
+}
+
+.taskCardCompleted
+.urgent {
+  display: none;
+}
+
+
+/* Наведение */
+
+.taskCard:not(.taskCardCompleted):hover {
+  box-shadow:
+    0 6px 20px
+    rgba(0,0,0,.055);
+}
+
+
+/* Телефон */
+
+@media (max-width: 520px) {
+
+  .taskCard {
+    align-items: flex-start;
+  }
+
+  .taskState {
+    min-width: max-content;
+  }
+
+  .taskCardTitle {
+    align-items: flex-start;
+  }
+
+  .taskQueue {
+    gap: 19px;
+  }
+}
+
+
+/* MSM purchases v0.4.0 */
+
+.purchaseBox {
+  display: grid;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #e7e5e4;
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.purchaseHead,
+.purchaseCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.purchaseHead span,
+.purchaseCardTop span {
+  display: block;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.purchaseHead strong,
+.purchaseCardTop strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 16px;
+}
+
+.purchaseEmpty {
+  padding: 12px 4px;
+}
+
+.purchaseList {
+  display: grid;
+  gap: 10px;
+}
+
+.purchaseCard {
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid #e7e5e4;
+  border-radius: 14px;
+  background: #fafaf9;
+  animation: msmFadeUp 180ms ease-out both;
+}
+
+.purchaseNumbers {
+  display: flex;
+  gap: 24px;
+}
+
+.purchaseNumbers div {
+  min-width: 105px;
+}
+
+.purchaseNumbers span,
+.supplierTaskNumbers span {
+  display: block;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.purchaseNumbers b,
+.supplierTaskNumbers b {
+  display: block;
+  margin-top: 3px;
+}
+
+.purchaseStatus {
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 11px !important;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.purchaseStatus-draft {
+  background: #e7e5e4;
+  color: #57534e !important;
+}
+
+.purchaseStatus-payment_requested {
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+.purchaseStatus-partially_paid {
+  background: #dbeafe;
+  color: #1d4ed8 !important;
+}
+
+.purchaseStatus-paid {
+  background: #dcfce7;
+  color: #166534 !important;
+}
+
+.purchaseStatus-cancelled {
+  background: #e7e5e4;
+  color: #78716c !important;
+}
+
+.purchaseForm {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0efed;
+  animation: msmFadeUp 180ms ease-out both;
+}
+
+.purchaseFiles {
+  display: grid;
+  gap: 5px;
+}
+
+.purchaseFiles > span {
+  color: #78716c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.purchaseFiles a {
+  color: #171717;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.supplierPaymentHistory {
+  display: grid;
+  gap: 7px;
+}
+
+.supplierPaymentHistory > div {
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.supplierPaymentHistory b,
+.supplierPaymentHistory span,
+.supplierPaymentHistory em {
+  display: block;
+}
+
+.supplierPaymentHistory span {
+  margin-top: 2px;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.supplierPaymentHistory em {
+  margin-top: 3px;
+  color: #57534e;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.multiFilePicker {
+  display: grid;
+  gap: 8px;
+}
+
+.compactButton {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.stampToggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 12px;
+  background: #fafaf9;
+}
+
+.stampToggle input {
+  margin-top: 3px;
+}
+
+.stampToggle strong,
+.stampToggle span {
+  display: block;
+}
+
+.stampToggle span {
+  margin-top: 3px;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.supplierTaskNumbers {
+  display: grid;
+  grid-template-columns:
+    1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 520px) {
+
+  .purchaseNumbers {
+    gap: 14px;
+  }
+
+  .supplierTaskNumbers {
+    grid-template-columns:
+      1fr 1fr;
+  }
+}
+
+
+/* MSM background uploads v0.4.1 */
+
+.backgroundUploadList {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.backgroundUploadCard {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  background: #eff6ff;
+  animation: msmFadeUp 180ms ease-out both;
+}
+
+.backgroundUploadTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backgroundUploadTop strong {
+  display: block;
+  font-size: 14px;
+}
+
+.backgroundUploadTop span {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.backgroundUploadTop > b {
+  color: #2563eb;
+  font-size: 12px;
+}
+
+.backgroundUploadBar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.backgroundUploadBar > div {
+  height: 100%;
+  border-radius: inherit;
+  background: #3b82f6;
+  transition: width 180ms ease;
+}
+
+.backgroundUploadMeta {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.backgroundUpload-success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.backgroundUpload-success
+.backgroundUploadBar > div {
+  background: #22c55e;
+}
+
+.backgroundUpload-success
+.backgroundUploadTop > b {
+  color: #15803d;
+}
+
+.backgroundUpload-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.backgroundUpload-error
+.backgroundUploadBar > div {
+  background: #ef4444;
+}
+
+.backgroundUpload-error
+.backgroundUploadTop > b {
+  color: #b91c1c;
+}
+
+.backgroundUploadError {
+  color: #b91c1c;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+
+/* supplier stamp */
+
+.supplierPaymentNoStamp {
+  border: 1px solid #fde68a;
+  background: #fffbeb !important;
+}
+
+.supplierPaymentStamped {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4 !important;
+}
+
+.stampAddButton {
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: #92400e;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stampUploadBox {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #fde68a;
+}
+
+.waitingStampBox {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid #fde68a;
+  border-radius: 14px;
+  background: #fffbeb;
+}
+
+.waitingStampBox strong {
+  color: #92400e;
+}
+
+.waitingStampBox span {
+  color: #78716c;
+  font-size: 12px;
+}
+
+.purchaseStatus-waiting_stamp {
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+
+/* MSM v0.4.2 UI fixes */
+
+
+/* --------------------------------------------------
+   Mobile horizontal overflow
+-------------------------------------------------- */
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  position: relative;
+}
+
+.shell {
+  width: 100%;
+  max-width: 760px;
+  overflow-x: clip;
+}
+
+.content,
+.form,
+.infoBox,
+.invoiceBlock,
+.paymentBox,
+.purchaseBox,
+.purchaseCard,
+.reviewBox,
+.correctionBox,
+.detailHero,
+.dealCard,
+.taskCard,
+.versionRow,
+.paymentRow,
+.backgroundUploadCard {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dealTop > div,
+.taskCardMain,
+.versionRow > div,
+.paymentRow > div,
+.purchaseCardTop > div {
+  min-width: 0;
+}
+
+.versionRow b,
+.versionRow span,
+.versionRow a,
+.paymentRow b,
+.paymentRow span,
+.paymentRow em,
+.purchaseFiles a,
+.taskCard strong,
+.taskCard span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+input,
+textarea,
+select,
+button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+textarea {
+  resize: vertical;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+.actions,
+.inline,
+.segmented,
+.paymentActions {
+  min-width: 0;
+}
+
+.actions {
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 2fr);
+}
+
+.inline {
+  grid-template-columns:
+    minmax(0, 1.3fr)
+    minmax(0, .7fr);
+}
+
+.paymentActions {
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1.4fr);
+}
+
+@media (max-width: 520px) {
+
+  .shell {
+    overflow-x: hidden;
+  }
+
+  .content {
+    width: 100%;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .actions {
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(0, 1.6fr);
+  }
+
+  .inline {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* --------------------------------------------------
+   Theme button
+-------------------------------------------------- */
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.themeToggle {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  flex: 0 0 42px;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 14px;
+
+  background: #fff;
+  color: #171717;
+
+  font-size: 20px;
+  line-height: 1;
+
+  transition:
+    transform 160ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease;
+}
+
+.themeToggle:active {
+  transform: scale(.94);
+}
+
+
+/* --------------------------------------------------
+   Dark theme
+-------------------------------------------------- */
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  background: #0f0f10;
+}
+
+html[data-theme='dark'] body {
+  background: #0f0f10;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .shell {
+  background: #141415;
+}
+
+html[data-theme='dark'] .topbar {
+  background: rgba(20,20,21,.94);
+  border-color: #303033;
+}
+
+html[data-theme='dark'] .bottomNav {
+  background: rgba(20,20,21,.96);
+  border-color: #303033;
+}
+
+html[data-theme='dark'] .userBadge,
+html[data-theme='dark'] .themeToggle,
+html[data-theme='dark'] .dealCard,
+html[data-theme='dark'] .taskCard,
+html[data-theme='dark'] .detailHero,
+html[data-theme='dark'] .infoBox,
+html[data-theme='dark'] .invoiceBlock,
+html[data-theme='dark'] .reviewBox,
+html[data-theme='dark'] .correctionBox,
+html[data-theme='dark'] .paymentBox,
+html[data-theme='dark'] .purchaseBox,
+html[data-theme='dark'] .purchaseCard,
+html[data-theme='dark'] .supplierPaymentHistory > div,
+html[data-theme='dark'] .stampToggle {
+  background: #1d1d1f;
+  border-color: #343437;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .purchaseCard,
+html[data-theme='dark'] .versionRow,
+html[data-theme='dark'] .paymentRow,
+html[data-theme='dark'] .note,
+html[data-theme='dark'] .deferralSummary {
+  background: #242426;
+}
+
+html[data-theme='dark'] h1,
+html[data-theme='dark'] h2,
+html[data-theme='dark'] strong,
+html[data-theme='dark'] b,
+html[data-theme='dark'] .taskCard strong,
+html[data-theme='dark'] .dealCard,
+html[data-theme='dark'] .clickable {
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .eyebrow,
+html[data-theme='dark'] .userBadge span,
+html[data-theme='dark'] .dealTop span,
+html[data-theme='dark'] .detailHero p,
+html[data-theme='dark'] .infoBox p,
+html[data-theme='dark'] .taskClient,
+html[data-theme='dark'] .field > span,
+html[data-theme='dark'] .invoiceBlock span,
+html[data-theme='dark'] .paymentHead span,
+html[data-theme='dark'] .purchaseHead span,
+html[data-theme='dark'] .purchaseCardTop span,
+html[data-theme='dark'] .microcopy {
+  color: #a8a29e !important;
+}
+
+html[data-theme='dark'] .field input,
+html[data-theme='dark'] .field textarea,
+html[data-theme='dark'] .field select {
+  background: #19191b;
+  border-color: #3f3f42;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .field input::placeholder,
+html[data-theme='dark'] .field textarea::placeholder {
+  color: #71717a;
+}
+
+html[data-theme='dark'] .secondary,
+html[data-theme='dark'] .fileButton {
+  background: #303033;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .primary {
+  background: #f5f5f4;
+  color: #111;
+}
+
+html[data-theme='dark'] .segmented {
+  background: #303033;
+}
+
+html[data-theme='dark'] .segmented button {
+  color: #d6d3d1;
+}
+
+html[data-theme='dark'] .segmented button.selected {
+  background: #48484c;
+  color: #fff;
+}
+
+html[data-theme='dark'] .backLink,
+html[data-theme='dark'] .versionRow a,
+html[data-theme='dark'] .purchaseFiles a,
+html[data-theme='dark'] .paymentRow a {
+  color: #e7e5e4;
+}
+
+html[data-theme='dark'] .historyList > div {
+  border-color: #303033;
+}
+
+html[data-theme='dark'] .historyList span {
+  color: #a8a29e;
+}
+
+
+/* Mobile header */
+
+@media (max-width: 520px) {
+
+  .topbar {
+    gap: 8px;
+  }
+
+  .topbarActions {
+    gap: 6px;
+  }
+
+  .themeToggle {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    border-radius: 12px;
+  }
+
+  .userBadge {
+    max-width: 160px;
+  }
+}
+
+
+/* MSM recent activity v0.4.3 */
+
+.shell {
+  max-width: 1100px;
+}
+
+.bottomNav {
+  width: min(
+    1100px,
+    100%
+  );
+}
+
+.content:not(.homeContent) {
+  max-width: 760px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.homeLayout {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    320px;
+  gap: 18px;
+  align-items: start;
+}
+
+.homeDeals {
+  min-width: 0;
+}
+
+.recentActivity {
+  position: sticky;
+  top: 92px;
+
+  display: grid;
+  gap: 10px;
+
+  min-width: 0;
+
+  padding: 14px;
+
+  background: #fff;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 18px;
+}
+
+.recentActivityHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recentActivityHead strong {
+  font-size: 15px;
+}
+
+.recentActivityHead span {
+  display: grid;
+  place-items: center;
+
+  min-width: 24px;
+  height: 24px;
+
+  padding: 0 6px;
+
+  border-radius: 999px;
+
+  background: #f5f5f4;
+
+  color: #57534e;
+
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.recentActivityList {
+  display: grid;
+  gap: 3px;
+
+  max-height:
+    calc(100vh - 180px);
+
+  overflow-y: auto;
+}
+
+.recentActivityRow {
+  display: grid;
+  gap: 3px;
+
+  padding: 10px 2px;
+
+  border-bottom:
+    1px solid #f0efed;
+}
+
+.recentActivityRow:last-child {
+  border-bottom: 0;
+}
+
+.recentActivityTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recentActivityTop b {
+  font-size: 12px;
+}
+
+.recentActivityTop span {
+  color: #a8a29e;
+  font-size: 10px;
+}
+
+.recentActivityRow > strong {
+  font-size: 12px;
+}
+
+.recentActivityWho {
+  color: #78716c;
+  font-size: 10px;
+}
+
+.recentActivityRow em {
+  color: #57534e;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.recentActivityEmpty {
+  padding: 18px 4px;
+
+  color: #78716c;
+  text-align: center;
+  font-size: 12px;
+}
+
+
+/* dark */
+
+html[data-theme='dark']
+.recentActivity {
+  background: #1d1d1f;
+  border-color: #343437;
+}
+
+html[data-theme='dark']
+.recentActivityRow {
+  border-color: #303033;
+}
+
+html[data-theme='dark']
+.recentActivityHead span {
+  background: #303033;
+  color: #d6d3d1;
+}
+
+
+/* mobile */
+
+@media (max-width: 820px) {
+
+  .shell {
+    max-width: 760px;
+  }
+
+  .bottomNav {
+    width: min(
+      760px,
+      100%
+    );
+  }
+
+  .homeLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .recentActivity {
+    position: static;
+  }
+
+  .recentActivityList {
+    max-height: none;
+  }
+}
+
+
+/* MSM purchase cancel v0.4.4 */
+
+.purchaseCancelButton {
+  width: 100%;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 11px 14px;
+
+  background: #fff;
+  color: #b91c1c;
+
+  font-weight: 800;
+
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.purchaseCancelButton:hover {
+  background: #fef2f2;
+}
+
+.purchaseCancelButton:active {
+  transform: scale(.99);
+}
+
+.purchaseCancelButton:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+
+html[data-theme='dark']
+.purchaseCancelButton {
+  background: transparent;
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+html[data-theme='dark']
+.purchaseCancelButton:hover {
+  background: #2a1717;
+}
+
+
+/* MSM invoice workflow v0.4.5 */
+
+.managerInvoiceAmount {
+  display: grid;
+  gap: 12px;
+
+  padding: 14px;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 18px;
+
+  background: #fff;
+}
+
+.managerInvoiceAmount > div:first-child span,
+.managerInvoiceAmount > div:first-child strong {
+  display: block;
+}
+
+.managerInvoiceAmount > div:first-child span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.managerInvoiceAmount > div:first-child strong {
+  margin-top: 3px;
+  font-size: 16px;
+}
+
+.managerAmountEdit {
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto;
+
+  gap: 8px;
+}
+
+.managerAmountEdit input {
+  width: 100%;
+  min-width: 0;
+
+  padding: 12px;
+
+  border: 1px solid #d6d3d1;
+  border-radius: 12px;
+
+  background: #fff;
+  color: #171717;
+
+  outline: none;
+}
+
+.currentVersionLabel {
+  grid-column: 1 / -1;
+
+  color: #2563eb;
+
+  font-size: 11px;
+  font-weight: 800;
+}
+
+
+/* Invoice version history */
+
+.invoiceVersionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  padding: 12px;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 13px;
+
+  background: #fafaf9;
+}
+
+.invoiceVersionMain {
+  min-width: 0;
+
+  display: grid;
+  gap: 3px;
+}
+
+.invoiceVersionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.invoiceVersionMain > span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.invoiceVersionRow > a {
+  flex-shrink: 0;
+
+  color: #171717;
+
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.invoiceVersionBadge {
+  display: inline-flex;
+
+  padding: 4px 7px;
+
+  border-radius: 999px;
+
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.invoiceVersionBadge.current {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.invoiceVersionBadge.old {
+  background: #e7e5e4;
+  color: #78716c;
+}
+
+.invoiceVersionCurrent {
+  border-left: 4px solid #3b82f6;
+}
+
+.invoiceVersionOld {
+  border-left: 4px solid #d6d3d1;
+  opacity: .62;
+}
+
+.invoiceVersionOld:hover {
+  opacity: .82;
+}
+
+.correctionPending {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+
+/* Custom modal */
+
+.appModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+
+  display: grid;
+  place-items: center;
+
+  padding: 20px;
+
+  background:
+    rgba(0,0,0,.48);
+
+  backdrop-filter:
+    blur(4px);
+
+  animation:
+    msmFade
+    140ms
+    ease-out
+    both;
+}
+
+.appModal {
+  width: min(
+    430px,
+    100%
+  );
+
+  display: grid;
+  gap: 10px;
+
+  padding: 20px;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 20px;
+
+  background: #fff;
+
+  box-shadow:
+    0 24px 70px
+    rgba(0,0,0,.22);
+
+  animation:
+    msmFadeUp
+    170ms
+    ease-out
+    both;
+}
+
+.appModal > strong {
+  font-size: 19px;
+}
+
+.appModal > p {
+  margin: 0;
+
+  color: #57534e;
+
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.appModalActions {
+  display: grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap: 8px;
+
+  margin-top: 6px;
+}
+
+.dangerButton {
+  border: 0;
+  border-radius: 14px;
+
+  padding: 13px 16px;
+
+  background: #b91c1c;
+  color: #fff;
+
+  font-weight: 800;
+}
+
+
+/* Dark */
+
+html[data-theme='dark']
+.managerInvoiceAmount,
+html[data-theme='dark']
+.appModal {
+  background: #1d1d1f;
+  border-color: #343437;
+}
+
+html[data-theme='dark']
+.managerAmountEdit input {
+  background: #19191b;
+  border-color: #3f3f42;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark']
+.invoiceVersionRow {
+  background: #242426;
+  border-color: #343437;
+}
+
+html[data-theme='dark']
+.invoiceVersionRow > a {
+  color: #f5f5f4;
+}
+
+html[data-theme='dark']
+.correctionPending {
+  background: #292317;
+  border-color: #854d0e;
+}
+
+html[data-theme='dark']
+.appModal > p {
+  color: #a8a29e;
+}
+
+
+@media (max-width: 520px) {
+
+  .managerAmountEdit {
+    grid-template-columns: 1fr;
+  }
+
+  .invoiceVersionRow {
+    align-items: flex-start;
+  }
+}
+
+
+/* MSM invoice menu v0.4.6 */
+
+.invoiceBlockWithMenu {
+  position: relative;
+  padding-top: 44px;
+}
+
+.invoiceMenuButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+
+  width: 38px;
+  height: 32px;
+
+  display: grid;
+  place-items: center;
+
+  padding: 0;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 10px;
+
+  background: #f5f5f4;
+  color: #171717;
+
+  font-size: 16px;
+  font-weight: 900;
+
+  letter-spacing: 1px;
+}
+
+.invoiceMenuButton:hover {
+  background: #e7e5e4;
+}
+
+
+/* Created / shipment */
+
+.dealDates {
+  display: grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap: 10px;
+
+  padding: 12px 14px;
+
+  border: 1px solid #e7e5e4;
+  border-radius: 16px;
+
+  background: #fff;
+}
+
+.dealDates span,
+.dealDates b {
+  display: block;
+}
+
+.dealDates span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.dealDates b {
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+
+/* Invoice manage popup/card */
+
+.invoiceManageMenu {
+  display: grid;
+  gap: 13px;
+
+  padding: 16px;
+
+  border: 1px solid #d6d3d1;
+  border-radius: 18px;
+
+  background: #fff;
+
+  animation:
+    msmFadeUp
+    160ms
+    ease-out
+    both;
+}
+
+.invoiceManageTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.invoiceManageTitle strong,
+.invoiceManageTitle span {
+  display: block;
+}
+
+.invoiceManageTitle strong {
+  font-size: 16px;
+}
+
+.invoiceManageTitle span {
+  margin-top: 3px;
+
+  color: #78716c;
+
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.invoiceMenuClose {
+  width: 32px;
+  height: 32px;
+
+  flex: 0 0 32px;
+
+  border: 0;
+  border-radius: 9px;
+
+  background: #f5f5f4;
+
+  color: #57534e;
+
+  font-size: 20px;
+  line-height: 1;
+}
+
+.invoiceManageFields {
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1fr);
+
+  gap: 10px;
+}
+
+.invoiceManageDivider {
+  height: 1px;
+  background: #e7e5e4;
+}
+
+.invoiceAccountingCorrection {
+  display: grid;
+  gap: 10px;
+}
+
+.invoiceAccountingCorrection strong,
+.invoiceAccountingCorrection span {
+  display: block;
+}
+
+.invoiceAccountingCorrection span {
+  margin-top: 3px;
+
+  color: #78716c;
+
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+
+/* Attachment spacing */
+
+.multiFilePicker {
+  gap: 10px;
+}
+
+.multiFilePicker > .versionList {
+  margin-top: 3px;
+}
+
+.field .versionList {
+  margin-top: 9px;
+}
+
+.field .fileButton {
+  margin-bottom: 3px;
+}
+
+.versionList {
+  gap: 8px;
+}
+
+.versionRow {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.microcopy {
+  display: block;
+
+  margin-top: 10px;
+
+  line-height: 1.45;
+}
+
+.field > .multiFilePicker {
+  margin-top: 4px;
+}
+
+
+/* Dark */
+
+html[data-theme='dark']
+.dealDates,
+html[data-theme='dark']
+.invoiceManageMenu {
+  background: #1d1d1f;
+  border-color: #343437;
+}
+
+html[data-theme='dark']
+.invoiceMenuButton,
+html[data-theme='dark']
+.invoiceMenuClose {
+  background: #303033;
+  border-color: #444447;
+  color: #f5f5f4;
+}
+
+html[data-theme='dark']
+.invoiceManageDivider {
+  background: #343437;
+}
+
+
+@media (max-width: 520px) {
+
+  .dealDates {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .invoiceManageFields {
+    grid-template-columns: 1fr;
+  }
+
+  .invoiceBlockWithMenu {
+    padding-top: 48px;
+  }
+}

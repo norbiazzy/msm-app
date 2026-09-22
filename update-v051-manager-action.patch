@@ -1,0 +1,288 @@
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index c6786a7..c672f43 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -231,6 +231,20 @@ export class DealsService {
+               },
+             ],
+           },
++
++
++          auditEvents: {
++            where: {
++              action:
++                'INVOICE_REQUEST_RETURNED',
++            },
++
++            orderBy: {
++              createdAt: 'desc',
++            },
++
++            take: 1,
++          },
+         },
+       });
+   }
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 45e1130..6e9610b 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -237,6 +237,20 @@ function App() {
+ }
+ 
+ 
++function invoiceRequestNeedsManager(
++  deal: Deal,
++) {
++
++  return deal.tasks.some(
++    (task) =>
++      task.type ===
++        'ISSUE_CLIENT_INVOICE' &&
++      task.status ===
++        'NEED_DATA'
++  );
++}
++
++
+ function Home({
+   deals,
+   onNew,
+@@ -254,11 +268,25 @@ function Home({
+   const active =
+     useMemo(
+       () =>
+-        deals.filter(
+-          (deal) =>
+-            deal.status !==
+-            'CLOSED'
+-        ),
++        deals
++          .filter(
++            (deal) =>
++              deal.status !==
++              'CLOSED'
++          )
++          .sort(
++            (a, b) =>
++              Number(
++                invoiceRequestNeedsManager(
++                  b
++                )
++              ) -
++              Number(
++                invoiceRequestNeedsManager(
++                  a
++                )
++              )
++          ),
+       [deals]
+     );
+ 
+@@ -340,8 +368,39 @@ function Home({
+ function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
+   const invoice = deal.invoices[0];
+   const urgent = deal.tasks.some((t) => t.urgent);
++
++  const needsManagerAction =
++    invoiceRequestNeedsManager(
++      deal
++    );
++
++  const latestReturn =
++    deal.auditEvents?.find(
++      (event) =>
++        event.action ===
++        'INVOICE_REQUEST_RETURNED'
++    );
++
++  const returnReason =
++    String(
++      latestReturn
++        ?.newValue
++        ?.reasonLabel ||
++      'Нужно уточнить данные для счёта'
++    );
++
+   return (
+-    <button className="dealCard clickable" onClick={onOpen}>
++    <button
++      className={
++        'dealCard clickable' +
++        (
++          needsManagerAction
++            ? ' dealCardNeedsAction'
++            : ''
++        )
++      }
++      onClick={onOpen}
++    >
+       <div className="dealTop">
+         <div>
+           <strong>{invoice ? `${sellerLabels[deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
+@@ -349,13 +408,48 @@ function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
+         </div>
+         {urgent && <b className="urgent">СРОЧНО</b>}
+       </div>
++
+       <div className="dealMeta">
+         <span>Отгрузка: {deal.plannedShipmentAt ? new Date(deal.plannedShipmentAt).toLocaleDateString('ru-RU') : 'не указана'}</span>
+-        <span>{invoice ? statusLabel(invoice.status) : 'Ожидаем счёт'}</span>
++
++        {needsManagerAction ? (
++          <b className="dealCardActionStatus">
++            Нужны данные
++          </b>
++        ) : (
++          <span>{invoice ? statusLabel(invoice.status) : 'Ожидаем счёт'}</span>
++        )}
+       </div>
++
+       <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
+-      {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
+-      {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
++
++      {needsManagerAction ? (
++        <div className="dealCardActionBox">
++          <div className="dealCardActionHead">
++            <strong>
++              Бухгалтерия вернула запрос
++            </strong>
++            <span>
++              {returnReason}
++            </span>
++          </div>
++
++          {latestReturn?.reason && (
++            <p>
++              {latestReturn.reason}
++            </p>
++          )}
++
++          <span className="dealCardActionCta">
++            Исправить и повторно отправить →
++          </span>
++        </div>
++      ) : (
++        <>
++          {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
++          {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
++        </>
++      )}
+     </button>
+   );
+ }
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 6e045d0..8576545 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -2954,3 +2954,109 @@ html[data-theme='dark'] button.invoiceReturnReason.selected .invoiceReturnRadio
+     width: 100%;
+   }
+ }
++
++/* MSM manager action cards v0.5.1 */
++
++.dealCardNeedsAction {
++  border-color: #f59e0b;
++  background: #fffdf5;
++  box-shadow:
++    0 5px 22px
++    rgba(180,83,9,.08);
++}
++
++.dealCardNeedsAction:hover {
++  border-color: #d97706;
++}
++
++.dealCardActionStatus {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  padding: 4px 8px;
++  border-radius: 999px;
++  background: #fef3c7;
++  color: #92400e;
++  font-size: 11px;
++  font-weight: 800;
++  white-space: nowrap;
++}
++
++.dealCardActionBox {
++  display: grid;
++  gap: 8px;
++  margin-top: 12px;
++  padding: 12px;
++  border: 1px solid #fde68a;
++  border-radius: 13px;
++  background: #fffbeb;
++  text-align: left;
++}
++
++.dealCardActionHead {
++  display: grid;
++  gap: 3px;
++}
++
++.dealCardActionHead strong {
++  color: #92400e;
++  font-size: 13px;
++}
++
++.dealCardActionHead span {
++  color: #78350f;
++  font-size: 12px;
++  font-weight: 700;
++}
++
++.dealCardActionBox p {
++  display: -webkit-box;
++  margin: 0;
++  overflow: hidden;
++  color: #57534e;
++  font-size: 11px;
++  line-height: 1.45;
++  -webkit-box-orient: vertical;
++  -webkit-line-clamp: 2;
++}
++
++.dealCardActionCta {
++  color: #92400e;
++  font-size: 12px;
++  font-weight: 900;
++}
++
++html[data-theme='dark']
++.dealCardNeedsAction {
++  border-color: #854d0e;
++  background: #211d16;
++  box-shadow:
++    0 5px 22px
++    rgba(245,158,11,.06);
++}
++
++html[data-theme='dark']
++.dealCardActionBox {
++  border-color: #713f12;
++  background: #292317;
++}
++
++html[data-theme='dark']
++.dealCardActionStatus {
++  background: #422006;
++  color: #fcd34d;
++}
++
++html[data-theme='dark']
++.dealCardActionHead strong,
++html[data-theme='dark']
++.dealCardActionHead span,
++html[data-theme='dark']
++.dealCardActionCta {
++  color: #fcd34d;
++}
++
++html[data-theme='dark']
++.dealCardActionBox p {
++  color: #d6d3d1;
++}

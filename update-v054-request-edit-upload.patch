@@ -1,0 +1,1014 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index cd0678f..b16523c 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -17,6 +17,7 @@ import {
+ } from './RecentActivityPanel';
+ import {
+   BackgroundUploadList,
++  type BackgroundUploadJob,
+   startBackgroundUploadJob,
+   useBackgroundUploads,
+ } from './backgroundUploads';
+@@ -296,11 +297,6 @@ function Home({
+ 
+     <section className="content homeContent">
+ 
+-      <BackgroundUploadList
+-        jobs={backgroundUploads}
+-      />
+-
+-
+       <div className="homeLayout">
+ 
+         <div className="homeDeals">
+@@ -343,6 +339,12 @@ function Home({
+               <DealCard
+                 key={deal.id}
+                 deal={deal}
++                uploadJob={
++                  backgroundUploads.find(
++                    (job) =>
++                      job.dealId === deal.id
++                  )
++                }
+                 onOpen={() =>
+                   onOpen(
+                     deal.id
+@@ -366,7 +368,15 @@ function Home({
+ }
+ 
+ 
+-function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
++function DealCard({
++  deal,
++  onOpen,
++  uploadJob,
++}: {
++  deal: Deal;
++  onOpen: () => void;
++  uploadJob?: BackgroundUploadJob;
++}) {
+   const invoice = deal.invoices[0];
+   const urgent = deal.tasks.some((t) => t.urgent);
+ 
+@@ -424,6 +434,58 @@ function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
+ 
+       <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
+ 
++      {uploadJob && (
++        <div
++          className={
++            'dealUploadState dealUpload-' +
++            uploadJob.status.toLowerCase()
++          }
++        >
++          <div className="dealUploadStateTop">
++            <strong>
++              {
++                uploadJob.status === 'SUCCESS'
++                  ? '✓ ' +
++                    (uploadJob.successTitle ||
++                      uploadJob.title)
++                  : uploadJob.status === 'ERROR'
++                    ? 'Не удалось отправить файлы'
++                    : uploadJob.title
++              }
++            </strong>
++
++            <b>
++              {uploadJob.progress}%
++            </b>
++          </div>
++
++          <div className="dealUploadMiniBar">
++            <span
++              style={{
++                width:
++                  uploadJob.progress + '%',
++              }}
++            />
++          </div>
++
++          {uploadJob.status === 'RUNNING' && (
++            <span>
++              {uploadJob.currentFile
++                ? 'Загружаем: ' +
++                  uploadJob.currentFile
++                : 'Подготавливаем отправку…'}
++            </span>
++          )}
++
++          {uploadJob.status === 'ERROR' &&
++            uploadJob.error && (
++              <span>
++                {uploadJob.error}
++              </span>
++            )}
++        </div>
++      )}
++
+       {needsManagerAction ? (
+         <div className="dealCardActionBox">
+           <div className="dealCardActionHead">
+@@ -465,6 +527,9 @@ function DealDetail({
+   onBack: () => void;
+ }) {
+ 
++  const backgroundUploads =
++    useBackgroundUploads();
++
+   const [deal, setDeal] =
+     useState<Deal | null>(null);
+ 
+@@ -590,6 +655,11 @@ function DealDetail({
+     setWithdrawConfirmOpen,
+   ] = useState(false);
+ 
++  const [
++    invoiceRequestEditOpen,
++    setInvoiceRequestEditOpen,
++  ] = useState(false);
++
+ 
+   async function reload(
+     showLoading = true,
+@@ -864,6 +934,13 @@ function DealDetail({
+     );
+ 
+ 
++  const invoiceRequestUploadJob =
++    backgroundUploads.find(
++      (job) =>
++        job.dealId === dealId
++    );
++
++
+   const latestInvoiceReturn =
+     deal.auditEvents?.find(
+       (event) =>
+@@ -1075,6 +1152,8 @@ function DealDetail({
+       );
+ 
+ 
++      setInvoiceRequestEditOpen(false);
++
+       await reload(false);
+ 
+ 
+@@ -1148,21 +1227,101 @@ function DealDetail({
+       );
+ 
+ 
+-      if (requestIncomingInvoice) {
+-        await uploadDealFile(
+-          dealId,
+-          requestIncomingInvoice,
+-          'CUSTOMER_INVOICE_PRIMARY',
+-        );
+-      }
++      await reload(false);
++
++
++      const primaryFile =
++        requestIncomingInvoice;
++
++      const extraFiles =
++        [...requestExtraFiles];
++
++      const filesToUpload = [
++        ...(primaryFile
++          ? [primaryFile]
++          : []),
++        ...extraFiles,
++      ];
+ 
+ 
+-      for (const file of requestExtraFiles) {
+-        await uploadDealFile(
++      if (filesToUpload.length > 0) {
++
++        startBackgroundUploadJob({
+           dealId,
+-          file,
+-          'MANAGER_ATTACHMENT',
+-        );
++          title:
++            'Отправляем документы бухгалтерии',
++          successTitle:
++            'Запрос отправлен бухгалтерии',
++          subtitle:
++            activeDeal.clientName,
++          files:
++            filesToUpload,
++
++          run:
++            async ({
++              upload,
++              setProgress,
++            }) => {
++
++              let uploadIndex = 0;
++
++
++              if (primaryFile) {
++
++                await upload(
++                  dealId,
++                  primaryFile,
++                  'CUSTOMER_INVOICE_PRIMARY',
++                  uploadIndex,
++                  filesToUpload.length,
++                );
++
++                uploadIndex++;
++              }
++
++
++              for (
++                let index = 0;
++                index < extraFiles.length;
++                index++
++              ) {
++
++                await upload(
++                  dealId,
++                  extraFiles[index],
++                  'MANAGER_ATTACHMENT',
++                  uploadIndex,
++                  filesToUpload.length,
++                );
++
++                uploadIndex++;
++              }
++
++
++              setProgress(96);
++
++              await submitInvoiceRequest(
++                dealId,
++                {
++                  actorId:
++                    user.id,
++                  urgent:
++                    requestUrgent,
++                },
++              );
++
++              setProgress(99);
++
++              await reload(false);
++            },
++        });
++
++        setRequestIncomingInvoice(null);
++        setRequestExtraFiles([]);
++        setRequestUrgent(false);
++        setInvoiceRequestEditOpen(false);
++
++        return;
+       }
+ 
+ 
+@@ -1180,6 +1339,7 @@ function DealDetail({
+       setRequestIncomingInvoice(null);
+       setRequestExtraFiles([]);
+       setRequestUrgent(false);
++      setInvoiceRequestEditOpen(false);
+ 
+       await reload(false);
+ 
+@@ -1210,6 +1370,7 @@ function DealDetail({
+       );
+ 
+       setWithdrawConfirmOpen(false);
++      setInvoiceRequestEditOpen(true);
+       await reload(false);
+ 
+     } catch (e) {
+@@ -2177,7 +2338,7 @@ function DealDetail({
+ 
+ 
+       {currentCustomerInvoice &&
+-        invoiceRequestTask?.status !== 'NEED_DATA' && (
++        current && (
+ 
+         <div className="customerInvoiceBox">
+ 
+@@ -2340,123 +2501,315 @@ function DealDetail({
+ 
+         <div className="invoiceRequestManagerBox">
+ 
+-          <div className="invoiceRequestSellerEditor">
++          {!invoiceRequestEditOpen &&
++            invoiceRequestTask?.status !== 'NEED_DATA' && (
+ 
+-            <div className="invoiceRequestSellerHead">
++          <div className="invoiceRequestSellerSummary">
+ 
+-              <div>
+-                <span>
+-                  От кого выставляем
+-                </span>
++            <div>
++              <span>
++                От кого выставляем
++              </span>
+ 
+-                <strong>
+-                  {sellerLabels[requestSellerType]}
+-                </strong>
+-              </div>
++              <strong>
++                {sellerLabels[deal.sellerType]}
++              </strong>
++            </div>
+ 
+-              {invoiceRequestTask?.status ===
++
++            {invoiceRequestTask &&
++              invoiceRequestTask.status !== 'NEED_DATA' && (
++
++              <button
++                type="button"
++                className="secondary compactButton"
++                onClick={() =>
++                  setInvoiceRequestEditOpen(
++                    (value) => !value
++                  )
++                }
++              >
++                {
++                  invoiceRequestEditOpen
++                    ? 'Закрыть'
++                    : 'Изменить'
++                }
++              </button>
++
++            )}
++
++          </div>
++
++          )}
++
++
++          {invoiceRequestEditOpen &&
++            invoiceRequestTask &&
++            invoiceRequestTask.status !== 'NEED_DATA' && (
++
++            <div className="invoiceRequestSellerEditor">
++
++              {invoiceRequestTask.status ===
+                 'IN_PROGRESS' && (
+ 
+-                <em>
+-                  Бухгалтер уже работает. Изменение сразу отобразится в задаче.
+-                </em>
++                <div className="invoiceRequestEditWarning">
++                  Бухгалтер уже работает. Изменение «от кого» сразу отобразится в задаче.
++                </div>
+ 
+               )}
+ 
+-            </div>
+ 
++              <div className="segmented">
++
++                {(['ST', 'MSM', 'IP'] as SellerType[]).map(
++                  (type) => (
++
++                  <button
++                    type="button"
++                    key={type}
++                    className={
++                      requestSellerType === type
++                        ? 'selected'
++                        : ''
++                    }
++                    onClick={() =>
++                      setRequestSellerType(type)
++                    }
++                  >
++                    {sellerLabels[type]}
++                  </button>
++
++                ))}
+ 
+-            <div className="segmented">
++              </div>
+ 
+-              {(['ST', 'MSM', 'IP'] as SellerType[]).map(
+-                (type) => (
+ 
++              <div className="actions">
+                 <button
+                   type="button"
+-                  key={type}
+-
+-                  className={
+-                    requestSellerType === type
+-                      ? 'selected'
+-                      : ''
+-                  }
++                  className="secondary"
++                  disabled={saving}
++                  onClick={() => {
++                    setRequestSellerType(
++                      deal.sellerType
++                    );
++                    setInvoiceRequestEditOpen(false);
++                  }}
++                >
++                  Отмена
++                </button>
+ 
+-                  onClick={() =>
+-                    setRequestSellerType(type)
++                <button
++                  type="button"
++                  className="primary"
++                  disabled={
++                    saving ||
++                    requestSellerType === deal.sellerType
+                   }
++                  onClick={saveInvoiceRequestSeller}
+                 >
+-                  {sellerLabels[type]}
++                  {
++                    saving
++                      ? 'Сохраняем…'
++                      : 'Сохранить'
++                  }
+                 </button>
+-
+-              ))}
++              </div>
+ 
+             </div>
+ 
+-
+-            {requestSellerType !==
+-              deal.sellerType && (
+-
+-              <button
+-                type="button"
+-                className="secondary wide"
+-                disabled={saving}
+-                onClick={saveInvoiceRequestSeller}
+-              >
+-                {
+-                  saving
+-                    ? 'Сохраняем…'
+-                    : 'Сохранить «от кого»'
+-                }
+-              </button>
+-
+-            )}
+-
+-          </div>
++          )}
+ 
+ 
+-          {invoiceRequestTask?.status ===
+-            'NEED_DATA' ? (
++          {currentCustomerInvoice &&
++            !invoiceRequestEditOpen &&
++            invoiceRequestTask?.status !== 'NEED_DATA' && (
+ 
+-            <>
++            <div className="requestPreviousIncoming invoiceRequestIncomingCompact">
++              <span>
++                Входящий счёт, отправленный бухгалтерии
++              </span>
+ 
+-              <div className="invoiceRequestReturnedHead">
++              <div className="versionRow">
+                 <div>
+-                  <strong>
+-                    Бухгалтерия вернула запрос
+-                  </strong>
+-
++                  <b>
++                    {currentCustomerInvoice.originalName}
++                  </b>
+                   <span>
+-                    Исправьте данные и отправьте ту же задачу повторно.
++                    Актуальный входящий документ
+                   </span>
+                 </div>
+ 
+-                <b>Нужны данные</b>
++                <a
++                  href={
++                    dealFileUrl(
++                      currentCustomerInvoice.id
++                    )
++                  }
++                  target="_blank"
++                  rel="noreferrer"
++                >
++                  Открыть
++                </a>
+               </div>
++            </div>
++
++          )}
++
++
++          {invoiceRequestUploadJob && (
+ 
++            <div
++              className={
++                'invoiceRequestUploadState invoiceRequestUpload-' +
++                invoiceRequestUploadJob.status.toLowerCase()
++              }
++            >
+ 
+-              <div className="invoiceReturnReason">
+-                <span>Причина</span>
++              <div className="invoiceRequestUploadTop">
+                 <strong>
+                   {
+-                    String(
+-                      latestInvoiceReturn
+-                        ?.newValue
+-                        ?.reasonLabel ||
+-                      'Не указана'
+-                    )
++                    invoiceRequestUploadJob.status === 'SUCCESS'
++                      ? '✓ ' +
++                        (invoiceRequestUploadJob.successTitle ||
++                          invoiceRequestUploadJob.title)
++                      : invoiceRequestUploadJob.status === 'ERROR'
++                        ? 'Не удалось отправить документы'
++                        : invoiceRequestUploadJob.title
+                   }
+                 </strong>
+ 
+-                {latestInvoiceReturn?.reason && (
+-                  <p>
+-                    {latestInvoiceReturn.reason}
+-                  </p>
+-                )}
++                <b>
++                  {invoiceRequestUploadJob.progress}%
++                </b>
++              </div>
++
++              <div className="invoiceRequestUploadBar">
++                <span
++                  style={{
++                    width:
++                      invoiceRequestUploadJob.progress + '%',
++                  }}
++                />
+               </div>
+ 
++              {invoiceRequestUploadJob.status === 'RUNNING' && (
++                <span>
++                  {
++                    invoiceRequestUploadJob.currentFile
++                      ? 'Сейчас: ' +
++                        invoiceRequestUploadJob.currentFile
++                      : 'Сохраняем данные и отправляем запрос…'
++                  }
++                </span>
++              )}
++
++              {invoiceRequestUploadJob.status === 'ERROR' &&
++                invoiceRequestUploadJob.error && (
++                  <span>
++                    {invoiceRequestUploadJob.error}
++                  </span>
++                )}
++
++            </div>
++
++          )}
++
++
++          {(
++            invoiceRequestTask?.status ===
++              'NEED_DATA' ||
++            (
++              !invoiceRequestTask &&
++              invoiceRequestEditOpen
++            )
++          ) ? (
++
++            <>
++
++              {invoiceRequestTask?.status === 'NEED_DATA' ? (
++
++                <>
++                  <div className="invoiceRequestReturnedHead">
++                    <div>
++                      <strong>
++                        Бухгалтерия вернула запрос
++                      </strong>
++
++                      <span>
++                        Исправьте данные и отправьте ту же задачу повторно.
++                      </span>
++                    </div>
++
++                    <b>Нужны данные</b>
++                  </div>
++
++
++                  <div className="invoiceReturnReason">
++                    <span>Причина</span>
++                    <strong>
++                      {
++                        String(
++                          latestInvoiceReturn
++                            ?.newValue
++                            ?.reasonLabel ||
++                          'Не указана'
++                        )
++                      }
++                    </strong>
++
++                    {latestInvoiceReturn?.reason && (
++                      <p>
++                        {latestInvoiceReturn.reason}
++                      </p>
++                    )}
++                  </div>
++                </>
++
++              ) : (
++
++                <div className="invoiceRequestReturnedHead invoiceRequestWithdrawnHead">
++                  <div>
++                    <strong>
++                      Запрос отозван
++                    </strong>
++
++                    <span>
++                      Внесите нужные изменения и отправьте запрос бухгалтерии заново.
++                    </span>
++                  </div>
++
++                  <b>Редактирование</b>
++                </div>
++
++              )}
++
+ 
+               <div className="invoiceRequestRepairForm">
+ 
++                <Field title="От кого выставляем">
++                  <div className="segmented">
++                    {(['ST', 'MSM', 'IP'] as SellerType[]).map(
++                      (type) => (
++                      <button
++                        type="button"
++                        key={type}
++                        className={
++                          requestSellerType === type
++                            ? 'selected'
++                            : ''
++                        }
++                        onClick={() =>
++                          setRequestSellerType(type)
++                        }
++                      >
++                        {sellerLabels[type]}
++                      </button>
++                    ))}
++                  </div>
++                </Field>
++
++
+                 <Field title="На кого выставлять">
+                   <input
+                     value={requestClientName}
+@@ -2609,21 +2962,36 @@ function DealDetail({
+                   {
+                     saving
+                       ? 'Отправляем…'
+-                      : 'Сохранить и повторно отправить'
++                      : invoiceRequestTask?.status === 'NEED_DATA'
++                        ? 'Сохранить и повторно отправить'
++                        : 'Сохранить и отправить бухгалтерии'
+                   }
+                 </button>
+ 
+ 
+-                <button
+-                  type="button"
+-                  className="purchaseCancelButton"
+-                  disabled={saving}
+-                  onClick={() =>
+-                    setWithdrawConfirmOpen(true)
+-                  }
+-                >
+-                  Отозвать запрос на счёт
+-                </button>
++                {invoiceRequestTask?.status === 'NEED_DATA' ? (
++                  <button
++                    type="button"
++                    className="purchaseCancelButton"
++                    disabled={saving}
++                    onClick={() =>
++                      setWithdrawConfirmOpen(true)
++                    }
++                  >
++                    Отозвать запрос на счёт
++                  </button>
++                ) : (
++                  <button
++                    type="button"
++                    className="secondary wide"
++                    disabled={saving}
++                    onClick={() =>
++                      setInvoiceRequestEditOpen(false)
++                    }
++                  >
++                    Отмена
++                  </button>
++                )}
+ 
+               </div>
+             </>
+@@ -2681,10 +3049,15 @@ function DealDetail({
+               <button
+                 type="button"
+                 className="primary"
+-                disabled={saving}
+-                onClick={sendInvoiceRequestAgain}
++                disabled={
++                  saving ||
++                  invoiceRequestUploadJob?.status === 'RUNNING'
++                }
++                onClick={() =>
++                  setInvoiceRequestEditOpen(true)
++                }
+               >
+-                Отправить снова
++                Редактировать и отправить снова
+               </button>
+             </div>
+ 
+@@ -3870,9 +4243,15 @@ async function submit(
+ 
+         startBackgroundUploadJob({
+ 
++          dealId:
++            deal.id,
++
+           title:
+             'Отправляем бухгалтерии',
+ 
++          successTitle:
++            'Запрос отправлен бухгалтерии',
++
+           subtitle:
+             clientName.trim() ||
+             'Новая сделка',
+diff --git a/frontend/src/backgroundUploads.tsx b/frontend/src/backgroundUploads.tsx
+index d4954a6..d34d120 100644
+--- a/frontend/src/backgroundUploads.tsx
++++ b/frontend/src/backgroundUploads.tsx
+@@ -15,6 +15,10 @@ export type BackgroundUploadJob = {
+ 
+   taskId?: string;
+ 
++  dealId?: string;
++
++  successTitle?: string;
++
+   title: string;
+ 
+   subtitle?: string;
+@@ -150,6 +154,10 @@ export function startBackgroundUploadJob(
+ 
+     taskId?: string;
+ 
++    dealId?: string;
++
++    successTitle?: string;
++
+     title: string;
+ 
+     subtitle?: string;
+@@ -199,6 +207,12 @@ export function startBackgroundUploadJob(
+       taskId:
+         options.taskId,
+ 
++      dealId:
++        options.dealId,
++
++      successTitle:
++        options.successTitle,
++
+       title:
+         options.title,
+ 
+@@ -363,7 +377,7 @@ export function startBackgroundUploadJob(
+             );
+           },
+ 
+-          1800,
++          8000,
+         );
+ 
+ 
+@@ -435,7 +449,8 @@ export function BackgroundUploadList({
+                   'SUCCESS'
+ 
+                     ? '✓ ' +
+-                      job.title
++                      (job.successTitle ||
++                        job.title)
+ 
+                     : job.status ===
+                         'ERROR'
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 78f26e0..88276e1 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3174,3 +3174,182 @@ html[data-theme='dark']
+     text-align: left;
+   }
+ }
++
++/* MSM request editing + inline upload progress v0.5.4 */
++
++.invoiceRequestSellerSummary {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 12px;
++  border: 1px solid #e7e5e4;
++  border-radius: 14px;
++  background: #fafaf9;
++}
++
++.invoiceRequestSellerSummary span,
++.invoiceRequestSellerSummary strong {
++  display: block;
++}
++
++.invoiceRequestSellerSummary span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.invoiceRequestSellerSummary strong {
++  margin-top: 2px;
++  font-size: 17px;
++}
++
++.invoiceRequestEditWarning {
++  padding: 9px 10px;
++  border-radius: 11px;
++  background: #fffbeb;
++  color: #92400e;
++  font-size: 11px;
++  line-height: 1.45;
++}
++
++.invoiceRequestWithdrawnHead > b {
++  background: #e7e5e4;
++  color: #57534e;
++}
++
++.invoiceRequestUploadState,
++.dealUploadState {
++  display: grid;
++  gap: 7px;
++  padding: 11px 12px;
++  border: 1px solid #bfdbfe;
++  border-radius: 13px;
++  background: #eff6ff;
++}
++
++.invoiceRequestUploadTop,
++.dealUploadStateTop {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.invoiceRequestUploadTop strong,
++.dealUploadStateTop strong {
++  min-width: 0;
++  font-size: 12px;
++}
++
++.invoiceRequestUploadTop b,
++.dealUploadStateTop b {
++  flex: 0 0 auto;
++  color: #2563eb;
++  font-size: 11px;
++}
++
++.invoiceRequestUploadState > span,
++.dealUploadState > span {
++  color: #64748b;
++  font-size: 10px;
++  overflow-wrap: anywhere;
++}
++
++.invoiceRequestUploadBar,
++.dealUploadMiniBar {
++  height: 6px;
++  overflow: hidden;
++  border-radius: 999px;
++  background: #dbeafe;
++}
++
++.invoiceRequestUploadBar > span,
++.dealUploadMiniBar > span {
++  display: block;
++  height: 100%;
++  border-radius: inherit;
++  background: #3b82f6;
++  transition: width 180ms ease;
++}
++
++.dealUploadState {
++  margin-top: 10px;
++  text-align: left;
++}
++
++.invoiceRequestUpload-success,
++.dealUpload-success {
++  border-color: #bbf7d0;
++  background: #f0fdf4;
++}
++
++.invoiceRequestUpload-success .invoiceRequestUploadBar > span,
++.dealUpload-success .dealUploadMiniBar > span {
++  background: #22c55e;
++}
++
++.invoiceRequestUpload-success .invoiceRequestUploadTop b,
++.dealUpload-success .dealUploadStateTop b {
++  color: #15803d;
++}
++
++.invoiceRequestUpload-error,
++.dealUpload-error {
++  border-color: #fecaca;
++  background: #fef2f2;
++}
++
++.invoiceRequestUpload-error .invoiceRequestUploadBar > span,
++.dealUpload-error .dealUploadMiniBar > span {
++  background: #ef4444;
++}
++
++.invoiceRequestUpload-error .invoiceRequestUploadTop b,
++.dealUpload-error .dealUploadStateTop b {
++  color: #b91c1c;
++}
++
++html[data-theme='dark'] .invoiceRequestSellerSummary,
++html[data-theme='dark'] .invoiceRequestUploadState,
++html[data-theme='dark'] .dealUploadState {
++  background: #242426;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .invoiceRequestSellerSummary span,
++html[data-theme='dark'] .invoiceRequestUploadState > span,
++html[data-theme='dark'] .dealUploadState > span {
++  color: #a8a29e;
++}
++
++html[data-theme='dark'] .invoiceRequestEditWarning {
++  background: #292317;
++  color: #fcd34d;
++}
++
++html[data-theme='dark'] .invoiceRequestUploadBar,
++html[data-theme='dark'] .dealUploadMiniBar {
++  background: #303846;
++}
++
++html[data-theme='dark'] .invoiceRequestUpload-success,
++html[data-theme='dark'] .dealUpload-success {
++  background: #15251b;
++  border-color: #166534;
++}
++
++html[data-theme='dark'] .invoiceRequestUpload-error,
++html[data-theme='dark'] .dealUpload-error {
++  background: #2a1717;
++  border-color: #7f1d1d;
++}
++
++@media (max-width: 520px) {
++  .invoiceRequestSellerSummary {
++    align-items: center;
++  }
++
++  .invoiceRequestSellerSummary > button {
++    width: auto;
++  }
++}

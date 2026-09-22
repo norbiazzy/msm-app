@@ -1,0 +1,202 @@
+import type { SupplierPayment, SupplierPurchase } from './types';
+import type { ClientPayment, ClientPaymentMethod, CurrentUser, Deal, PaymentStatus, UserRole } from './types';
+
+const API = import.meta.env.VITE_API_URL || '/api';
+
+async function json<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API}${url}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function login(): Promise<CurrentUser> {
+  const initData = window.Telegram?.WebApp?.initData || 'dev';
+  const devRole = (new URLSearchParams(location.search).get('devRole') || 'MANAGER') as UserRole;
+  return json('/auth/telegram', {
+    method: 'POST',
+    body: JSON.stringify({ initData, devRole }),
+  });
+}
+
+export async function listDeals(managerId?: string): Promise<Deal[]> {
+  const q = managerId ? `?managerId=${encodeURIComponent(managerId)}` : '';
+  return json(`/deals${q}`);
+}
+
+export async function getDeal(id: string): Promise<Deal> {
+  return json(`/deals/${id}`);
+}
+
+export async function createDeal(payload: Record<string, unknown>) {
+  return json<Deal>('/deals', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export type Task = {
+  id: string;
+  type: string;
+  status: string;
+  urgent: boolean;
+  title: string;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deal: Deal;
+  supplierPurchase?: SupplierPurchase;
+};
+
+export async function listTasks(): Promise<Task[]> {
+  return json('/tasks');
+}
+
+export async function updateTaskStatus(id: string, status: string, assigneeId?: string) {
+  return json(`/tasks/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, assigneeId }) });
+}
+
+export async function uploadDealFile(dealId: string, file: File, category: string) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('category', category);
+  const res = await fetch(`${API}/files/deal/${dealId}`, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ id: string }>;
+}
+
+export function dealFileUrl(fileId: string) {
+  return `${API}/files/${encodeURIComponent(fileId)}/download`;
+}
+
+export async function createInvoice(dealId: string, payload: { number: string; invoiceDate?: string; amount?: number; fileId?: string; actorId: string }) {
+  return json(`/deals/${dealId}/invoices`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function confirmInvoice(dealId: string, invoiceId: string, actorId: string) {
+  return json(`/deals/${dealId}/invoices/${invoiceId}/confirm`, {
+    method: 'PATCH',
+    body: JSON.stringify({ actorId }),
+  });
+}
+
+export async function requestInvoiceCorrection(
+  dealId: string,
+  invoiceId: string,
+  payload: { actorId: string; comment: string; urgent?: boolean },
+) {
+  return json(`/deals/${dealId}/invoices/${invoiceId}/correction`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function addClientPayment(
+  dealId: string,
+  payload: {
+    amount: number;
+    paidAt: string;
+    method: ClientPaymentMethod;
+    comment?: string;
+    actorId: string;
+    fileId?: string;
+  },
+) {
+  return json<ClientPayment>(`/deals/${dealId}/payments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePaymentStatus(
+  dealId: string,
+  payload: {
+    status: PaymentStatus;
+    actorId: string;
+    deferralStartAt?: string;
+    deferralEndAt?: string;
+    deferralTerms?: string;
+  },
+) {
+  return json<Deal>(`/deals/${dealId}/payments/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+
+
+export async function listSupplierPurchases(
+  dealId: string,
+) {
+
+  return json<SupplierPurchase[]>(
+    `/deals/${dealId}/suppliers`
+  );
+}
+
+
+export async function createSupplierPurchase(
+  dealId: string,
+
+  payload: {
+    supplierName?: string;
+    incomingInvoiceNumber?: string;
+    incomingInvoiceAmount?: number;
+    comment?: string;
+    createdById: string;
+  },
+) {
+
+  return json<SupplierPurchase>(
+    `/deals/${dealId}/suppliers`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function requestSupplierPayment(
+  dealId: string,
+  purchaseId: string,
+
+  payload: {
+    amount?: number;
+    comment?: string;
+    urgent?: boolean;
+    actorId: string;
+  },
+) {
+
+  return json(
+    `/deals/${dealId}/suppliers/${purchaseId}/request-payment`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+
+export async function addSupplierPayment(
+  dealId: string,
+  purchaseId: string,
+
+  payload: {
+    amount?: number;
+    paidAt?: string;
+    paymentOrderStamped?: boolean;
+    comment?: string;
+    actorId: string;
+  },
+) {
+
+  return json<SupplierPayment>(
+    `/deals/${dealId}/suppliers/${purchaseId}/payments`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}

@@ -1,0 +1,224 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index e5d8a48..6304a42 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -568,6 +568,28 @@ function DealDetail({
+   );
+ 
+ 
++  useEffect(
++    () => {
++      if (!phoneMenuOpen) {
++        return;
++      }
++
++      const closeOnEscape = (event: KeyboardEvent) => {
++        if (event.key === 'Escape') {
++          setPhoneMenuOpen(false);
++        }
++      };
++
++      window.addEventListener('keydown', closeOnEscape);
++
++      return () => {
++        window.removeEventListener('keydown', closeOnEscape);
++      };
++    },
++    [phoneMenuOpen],
++  );
++
++
+   if (loading) {
+ 
+     return (
+@@ -1367,7 +1389,23 @@ function DealDetail({
+ 
+                   {phoneMenuOpen && (
+ 
+-                    <div className="dealPhoneMenu">
++                    <>
++
++                      <button
++                        type="button"
++                        className="popoverDismissLayer"
++                        aria-label="Закрыть меню"
++                        onClick={() =>
++                          setPhoneMenuOpen(false)
++                        }
++                      />
++
++                      <div
++                        className="dealPhoneMenu"
++                        onClick={() =>
++                          setPhoneMenuOpen(false)
++                        }
++                      >
+ 
+                       <a
+                         href={
+@@ -1433,7 +1471,9 @@ function DealDetail({
+                         Скопировать номер
+                       </button>
+ 
+-                    </div>
++                      </div>
++
++                    </>
+ 
+                   )}
+ 
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 40e61cf..c006f0c 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -2387,3 +2387,150 @@ html[data-theme='dark']
+ .balancePaymentToggle strong {
+   color: #86efac;
+ }
++
++
++/* MSM UI motion polish v0.4.8 */
++
++@keyframes msmFade {
++  from { opacity: 0; }
++  to { opacity: 1; }
++}
++
++@keyframes msmFadeUp {
++  from {
++    opacity: 0;
++    transform: translateY(8px);
++  }
++  to {
++    opacity: 1;
++    transform: translateY(0);
++  }
++}
++
++@keyframes msmPopIn {
++  from {
++    opacity: 0;
++    transform: translateY(-5px) scale(.985);
++  }
++  to {
++    opacity: 1;
++    transform: translateY(0) scale(1);
++  }
++}
++
++.primary,
++.secondary,
++.fileButton,
++.invoiceMenuButton,
++.invoiceMenuClose,
++.dealInfoEditButton,
++.dealPhoneButton,
++.purchaseAddAnother,
++.purchaseCancelButton,
++.compactButton,
++.backLink,
++.bottomNav button {
++  transition:
++    transform 160ms ease,
++    background-color 180ms ease,
++    border-color 180ms ease,
++    color 180ms ease,
++    box-shadow 180ms ease,
++    opacity 180ms ease;
++}
++
++.primary:not(:disabled):active,
++.secondary:not(:disabled):active,
++.fileButton:active,
++.invoiceMenuButton:not(:disabled):active,
++.invoiceMenuClose:not(:disabled):active,
++.dealInfoEditButton:not(:disabled):active,
++.dealPhoneButton:not(:disabled):active,
++.purchaseAddAnother:not(:disabled):active,
++.purchaseCancelButton:not(:disabled):active,
++.compactButton:not(:disabled):active {
++  transform: scale(.975);
++}
++
++.dealCard,
++.taskCard,
++.invoiceBlock,
++.paymentBox,
++.purchaseBox,
++.purchaseCard,
++.dealInfoBox,
++.infoBox {
++  transition:
++    transform 200ms ease,
++    box-shadow 220ms ease,
++    border-color 220ms ease,
++    background-color 220ms ease;
++}
++
++@media (hover: hover) {
++  .dealCard.clickable:hover {
++    transform: translateY(-2px);
++    box-shadow: 0 8px 24px rgba(0,0,0,.065);
++  }
++}
++
++.invoiceManageMenu,
++.dealInfoForm,
++.correctionBox,
++.paymentForm,
++.purchaseForm,
++.completedTasksList,
++.backgroundUploadCard {
++  animation: msmFadeUp 220ms cubic-bezier(.22,.8,.3,1) both;
++}
++
++.dealPhoneMenu {
++  z-index: 61;
++  transform-origin: top left;
++  animation: msmPopIn 170ms cubic-bezier(.2,.8,.25,1) both;
++}
++
++.popoverDismissLayer {
++  position: fixed;
++  inset: 0;
++  z-index: 60;
++  width: 100vw;
++  height: 100vh;
++  max-width: none;
++  padding: 0;
++  border: 0;
++  border-radius: 0;
++  background: transparent;
++  cursor: default;
++  animation: msmFade 120ms ease-out both;
++}
++
++.appModalBackdrop {
++  animation: msmFade 180ms ease-out both;
++}
++
++.appModal {
++  animation: msmPopIn 220ms cubic-bezier(.2,.8,.25,1) both;
++}
++
++.versionRow,
++.paymentRow,
++.invoiceVersionRow,
++.recentActivityRow {
++  transition:
++    background-color 180ms ease,
++    border-color 180ms ease,
++    opacity 180ms ease,
++    transform 180ms ease;
++}
++
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    scroll-behavior: auto !important;
++    animation-duration: .01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: .01ms !important;
++  }
++}

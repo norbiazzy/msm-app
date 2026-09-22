@@ -1,0 +1,789 @@
+
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+
+import {
+  SupplierPurchaseStatus,
+  TaskStatus,
+  TaskType,
+} from '@prisma/client';
+
+import {
+  PrismaService,
+} from '../prisma/prisma.service';
+
+
+@Injectable()
+export class PurchasesService {
+
+  constructor(
+    private readonly prisma:
+      PrismaService,
+  ) {}
+
+
+  async list(
+    dealId: string,
+  ) {
+
+    return this.prisma
+      .supplierPurchase
+      .findMany({
+
+        where: {
+          dealId,
+        },
+
+        orderBy: {
+          createdAt: 'asc',
+        },
+
+        include: {
+
+          payments: {
+
+            orderBy: {
+              paidAt: 'asc',
+            },
+
+            include: {
+
+              actor: {
+
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  role: true,
+                },
+              },
+            },
+          },
+        },
+      });
+  }
+
+
+  async create(
+    dealId: string,
+    body: any,
+  ) {
+
+    const purchase =
+      await this.prisma
+        .supplierPurchase
+        .create({
+
+          data: {
+
+            dealId,
+
+            supplierName:
+              body.supplierName
+                ?.trim() ||
+              'Тестовый поставщик',
+
+            incomingInvoiceNumber:
+              body
+                .incomingInvoiceNumber
+                ?.trim() ||
+              undefined,
+
+            incomingInvoiceAmount:
+              body
+                .incomingInvoiceAmount,
+
+            comment:
+              body.comment
+                ?.trim() ||
+              undefined,
+
+            createdById:
+              body.createdById,
+          },
+
+          include: {
+            payments: true,
+          },
+        });
+
+
+    await this.prisma
+      .auditEvent
+      .create({
+
+        data: {
+
+          dealId,
+
+          actorId:
+            body.createdById,
+
+          action:
+            'SUPPLIER_PURCHASE_CREATED',
+
+          entityType:
+            'SupplierPurchase',
+
+          entityId:
+            purchase.id,
+
+          newValue: {
+            supplierName:
+              purchase.supplierName,
+          },
+        },
+      });
+
+
+    return purchase;
+  }
+
+
+  async update(
+    dealId: string,
+    purchaseId: string,
+    body: any,
+  ) {
+
+    return this.prisma
+      .supplierPurchase
+      .update({
+
+        where: {
+          id: purchaseId,
+        },
+
+        data: {
+
+          supplierName:
+            body.supplierName,
+
+          incomingInvoiceNumber:
+            body
+              .incomingInvoiceNumber,
+
+          incomingInvoiceAmount:
+            body
+              .incomingInvoiceAmount,
+
+          comment:
+            body.comment,
+        },
+
+        include: {
+          payments: true,
+        },
+      });
+  }
+
+
+  async requestPayment(
+    dealId: string,
+    purchaseId: string,
+    body: any,
+  ) {
+
+    const purchase =
+      await this.prisma
+        .supplierPurchase
+        .findFirstOrThrow({
+
+          where: {
+            id: purchaseId,
+            dealId,
+          },
+        });
+
+
+    const existing =
+      await this.prisma
+        .task
+        .findFirst({
+
+          where: {
+
+            supplierPurchaseId:
+              purchaseId,
+
+            type:
+              TaskType.PAY_SUPPLIER,
+
+            status: {
+
+              notIn: [
+                TaskStatus.DONE,
+                TaskStatus.CANCELLED,
+              ],
+            },
+          },
+        });
+
+
+    if (existing) {
+
+      throw new BadRequestException(
+        'По этому поставщику уже есть активная задача на оплату',
+      );
+    }
+
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          await tx
+            .supplierPurchase
+            .update({
+
+              where: {
+                id: purchaseId,
+              },
+
+              data: {
+
+                requestedAmount:
+                  body.amount,
+
+                status:
+                  SupplierPurchaseStatus
+                    .PAYMENT_REQUESTED,
+              },
+            });
+
+
+          const task =
+            await tx.task.create({
+
+              data: {
+
+                dealId,
+
+                supplierPurchaseId:
+                  purchaseId,
+
+                type:
+                  TaskType.PAY_SUPPLIER,
+
+                title:
+                  'Оплатить поставщику: ' +
+                  purchase.supplierName,
+
+                description:
+                  body.comment
+                    ?.trim() ||
+                  purchase.comment ||
+                  undefined,
+
+                urgent:
+                  Boolean(
+                    body.urgent
+                  ),
+
+                createdById:
+                  body.actorId,
+              },
+            });
+
+
+          await tx
+            .auditEvent
+            .create({
+
+              data: {
+
+                dealId,
+
+                actorId:
+                  body.actorId,
+
+                action:
+                  'SUPPLIER_PAYMENT_REQUESTED',
+
+                entityType:
+                  'SupplierPurchase',
+
+                entityId:
+                  purchaseId,
+
+                newValue: {
+                  amount:
+                    body.amount,
+
+                  supplierName:
+                    purchase
+                      .supplierName,
+                },
+              },
+            });
+
+
+          return task;
+        },
+      );
+  }
+
+
+  private paymentState(
+    purchase: any,
+    payments: any[],
+  ) {
+
+    const totalPaid =
+      payments.reduce(
+        (
+          sum,
+          payment,
+        ) =>
+          sum +
+          Number(
+            payment.amount
+          ),
+        0,
+      );
+
+
+    const target =
+      purchase.requestedAmount
+        ? Number(
+            purchase
+              .requestedAmount
+          )
+
+        : purchase
+            .incomingInvoiceAmount
+          ? Number(
+              purchase
+                .incomingInvoiceAmount
+            )
+
+          : null;
+
+
+    const financiallyComplete =
+      target === null
+        ? totalPaid > 0
+        : totalPaid >= target;
+
+
+    const allStamped =
+      payments.length > 0 &&
+      payments.every(
+        (payment) =>
+          payment
+            .paymentOrderStamped
+      );
+
+
+    const complete =
+      financiallyComplete &&
+      allStamped;
+
+
+    return {
+      totalPaid,
+      target,
+      financiallyComplete,
+      allStamped,
+      complete,
+    };
+  }
+
+
+  async addPayment(
+    dealId: string,
+    purchaseId: string,
+    body: any,
+  ) {
+
+    const amount =
+      Number(
+        body.amount || 0
+      );
+
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          const purchase =
+            await tx
+              .supplierPurchase
+              .findFirstOrThrow({
+
+                where: {
+                  id: purchaseId,
+                  dealId,
+                },
+
+                include: {
+                  payments: true,
+                },
+              });
+
+
+          const payment =
+            await tx
+              .supplierPayment
+              .create({
+
+                data: {
+
+                  purchaseId,
+
+                  amount,
+
+                  paidAt:
+                    body.paidAt
+                      ? new Date(
+                          body.paidAt
+                        )
+                      : new Date(),
+
+                  paymentOrderStamped:
+                    Boolean(
+                      body
+                        .paymentOrderStamped
+                    ),
+
+                  comment:
+                    body.comment
+                      ?.trim() ||
+                    undefined,
+
+                  actorId:
+                    body.actorId,
+                },
+
+                include: {
+
+                  actor: {
+
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      role: true,
+                    },
+                  },
+                },
+              });
+
+
+          const state =
+            this.paymentState(
+              purchase,
+              [
+                ...purchase.payments,
+                payment,
+              ],
+            );
+
+
+          const nextStatus =
+            state.complete
+
+              ? SupplierPurchaseStatus.PAID
+
+              : state.totalPaid > 0
+
+                ? SupplierPurchaseStatus
+                    .PARTIALLY_PAID
+
+                : SupplierPurchaseStatus
+                    .PAYMENT_REQUESTED;
+
+
+          await tx
+            .supplierPurchase
+            .update({
+
+              where: {
+                id: purchaseId,
+              },
+
+              data: {
+                status:
+                  nextStatus,
+              },
+            });
+
+
+          if (
+            state.complete
+          ) {
+
+            await tx.task
+              .updateMany({
+
+                where: {
+
+                  supplierPurchaseId:
+                    purchaseId,
+
+                  type:
+                    TaskType
+                      .PAY_SUPPLIER,
+
+                  status: {
+
+                    notIn: [
+                      TaskStatus.DONE,
+                      TaskStatus.CANCELLED,
+                    ],
+                  },
+                },
+
+                data: {
+
+                  status:
+                    TaskStatus.DONE,
+
+                  completedAt:
+                    new Date(),
+                },
+              });
+          }
+
+
+          await tx
+            .auditEvent
+            .create({
+
+              data: {
+
+                dealId,
+
+                actorId:
+                  body.actorId,
+
+                action:
+                  'SUPPLIER_PAYMENT_ADDED',
+
+                entityType:
+                  'SupplierPayment',
+
+                entityId:
+                  payment.id,
+
+                newValue: {
+
+                  supplierName:
+                    purchase
+                      .supplierName,
+
+                  amount,
+
+                  paymentOrderStamped:
+                    Boolean(
+                      body
+                        .paymentOrderStamped
+                    ),
+
+                  totalPaid:
+                    state.totalPaid,
+                },
+              },
+            });
+
+
+          return payment;
+        },
+      );
+  }
+
+
+  async markPaymentStamped(
+    dealId: string,
+    purchaseId: string,
+    paymentId: string,
+    actorId: string,
+  ) {
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          const purchase =
+            await tx
+              .supplierPurchase
+              .findFirstOrThrow({
+
+                where: {
+                  id: purchaseId,
+                  dealId,
+                },
+              });
+
+
+          const existing =
+            await tx
+              .supplierPayment
+              .findFirstOrThrow({
+
+                where: {
+                  id: paymentId,
+                  purchaseId,
+                },
+              });
+
+
+          const updated =
+            await tx
+              .supplierPayment
+              .update({
+
+                where: {
+                  id: paymentId,
+                },
+
+                data: {
+                  paymentOrderStamped:
+                    true,
+                },
+
+                include: {
+
+                  actor: {
+
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      role: true,
+                    },
+                  },
+                },
+              });
+
+
+          const payments =
+            await tx
+              .supplierPayment
+              .findMany({
+
+                where: {
+                  purchaseId,
+                },
+
+                orderBy: {
+                  paidAt: 'asc',
+                },
+              });
+
+
+          const state =
+            this.paymentState(
+              purchase,
+              payments,
+            );
+
+
+          await tx
+            .supplierPurchase
+            .update({
+
+              where: {
+                id: purchaseId,
+              },
+
+              data: {
+
+                status:
+                  state.complete
+
+                    ? SupplierPurchaseStatus
+                        .PAID
+
+                    : state.totalPaid > 0
+
+                      ? SupplierPurchaseStatus
+                          .PARTIALLY_PAID
+
+                      : SupplierPurchaseStatus
+                          .PAYMENT_REQUESTED,
+              },
+            });
+
+
+          if (
+            state.complete
+          ) {
+
+            await tx.task
+              .updateMany({
+
+                where: {
+
+                  supplierPurchaseId:
+                    purchaseId,
+
+                  type:
+                    TaskType
+                      .PAY_SUPPLIER,
+
+                  status: {
+
+                    notIn: [
+                      TaskStatus.DONE,
+                      TaskStatus.CANCELLED,
+                    ],
+                  },
+                },
+
+                data: {
+
+                  status:
+                    TaskStatus.DONE,
+
+                  completedAt:
+                    new Date(),
+                },
+              });
+          }
+
+
+          await tx
+            .auditEvent
+            .create({
+
+              data: {
+
+                dealId,
+
+                actorId,
+
+                action:
+                  'SUPPLIER_PAYMENT_STAMPED',
+
+                entityType:
+                  'SupplierPayment',
+
+                entityId:
+                  paymentId,
+
+                oldValue: {
+                  paymentOrderStamped:
+                    existing
+                      .paymentOrderStamped,
+                },
+
+                newValue: {
+                  paymentOrderStamped:
+                    true,
+
+                  supplierName:
+                    purchase
+                      .supplierName,
+                },
+              },
+            });
+
+
+          return updated;
+        },
+      );
+  }
+}

@@ -1,0 +1,1143 @@
+diff --git a/backend/src/deals/deals.controller.ts b/backend/src/deals/deals.controller.ts
+index 89fcff4..c9416c2 100644
+--- a/backend/src/deals/deals.controller.ts
++++ b/backend/src/deals/deals.controller.ts
+@@ -43,6 +43,7 @@ export class DealsController {
+ 
+     @Body()
+     body: {
++      contactName?: string;
+       clientPhone?: string;
+       managerComment?: string;
+       deliveryAddresses?: string[];
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index 67b07a7..8212eb8 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -49,6 +49,14 @@ export class DealsService {
+                 contactName:
+                   dto.contactName,
+ 
++                deliveryAddresses:
++                  dto.deliveryAddresses
++                    ?.map(
++                      (value) =>
++                        value.trim()
++                    )
++                    .filter(Boolean),
++
+                 leadSource:
+                   dto.leadSource,
+ 
+@@ -331,6 +339,7 @@ export class DealsService {
+     id: string,
+ 
+     body: {
++      contactName?: string;
+       clientPhone?: string;
+       managerComment?: string;
+       deliveryAddresses?: string[];
+@@ -365,6 +374,17 @@ export class DealsService {
+         : [];
+ 
+ 
++    const nextContactName =
++      body.contactName !==
++        undefined
++
++        ? body.contactName
++            .trim() ||
++          null
++
++        : current.contactName;
++
++
+     const nextPhone =
+       body.clientPhone !==
+         undefined
+@@ -412,6 +432,9 @@ export class DealsService {
+               },
+ 
+               data: {
++                contactName:
++                  nextContactName,
++
+                 clientPhone:
+                   nextPhone,
+ 
+@@ -424,6 +447,44 @@ export class DealsService {
+             });
+ 
+ 
++          if (
++            (current.contactName || null) !==
++            (nextContactName || null)
++          ) {
++
++            await tx.auditEvent.create({
++              data: {
++                dealId:
++                  id,
++
++                actorId:
++                  body.actorId,
++
++                action:
++                  'DEAL_CONTACT_CHANGED',
++
++                entityType:
++                  'Deal',
++
++                entityId:
++                  id,
++
++                oldValue: {
++                  contactName:
++                    current.contactName ||
++                    null,
++                },
++
++                newValue: {
++                  contactName:
++                    nextContactName ||
++                    null,
++                },
++              },
++            });
++          }
++
++
+           if (
+             (current.clientPhone || null) !==
+             (nextPhone || null)
+diff --git a/backend/src/deals/dto.ts b/backend/src/deals/dto.ts
+index a2b7665..9927a96 100644
+--- a/backend/src/deals/dto.ts
++++ b/backend/src/deals/dto.ts
+@@ -1,5 +1,5 @@
+ import { SellerType } from '@prisma/client';
+-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
++import { IsArray, IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+ 
+ export class CreateDealDto {
+   @IsEnum(SellerType)
+@@ -14,6 +14,9 @@ export class CreateDealDto {
+   @IsOptional() @IsString()
+   contactName?: string;
+ 
++  @IsOptional() @IsArray() @IsString({ each: true })
++  deliveryAddresses?: string[];
++
+   @IsOptional() @IsString()
+   leadSource?: string;
+ 
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 6304a42..29c850d 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -427,6 +427,11 @@ function DealDetail({
+     setPhoneMenuOpen,
+   ] = useState(false);
+ 
++  const [
++    editContactName,
++    setEditContactName,
++  ] = useState('');
++
+   const [
+     editClientPhone,
+     setEditClientPhone,
+@@ -540,6 +545,11 @@ function DealDetail({
+   useEffect(
+     () => {
+ 
++      setEditContactName(
++        deal?.contactName ||
++        ''
++      );
++
+       setEditClientPhone(
+         deal?.clientPhone ||
+         ''
+@@ -561,6 +571,7 @@ function DealDetail({
+ 
+     },
+     [
++      deal?.contactName,
+       deal?.clientPhone,
+       deal?.managerComment,
+       deal?.deliveryAddresses,
+@@ -631,6 +642,41 @@ function DealDetail({
+     deal.invoices[0];
+ 
+ 
++  const customerInvoiceHistory =
++    (deal.files || [])
++      .filter(
++        (file) =>
++          file.category ===
++            'CUSTOMER_INVOICE_PRIMARY' ||
++          file.category
++            ?.startsWith(
++              'CORRECTION_PRIMARY_'
++            )
++      )
++      .sort(
++        (a, b) =>
++          new Date(
++            a.createdAt || 0
++          ).getTime() -
++          new Date(
++            b.createdAt || 0
++          ).getTime()
++      );
++
++
++  const currentCustomerInvoice =
++    customerInvoiceHistory[
++      customerInvoiceHistory.length - 1
++    ];
++
++
++  const previousCustomerInvoices =
++    customerInvoiceHistory.slice(
++      0,
++      -1,
++    );
++
++
+   const canManageDeal =
+     [
+       'MANAGER',
+@@ -693,6 +739,11 @@ function DealDetail({
+       await updateDealInfo(
+         dealId,
+         {
++          contactName:
++            editContactName
++              .trim() ||
++            undefined,
++
+           clientPhone:
+             editClientPhone
+               .trim() ||
+@@ -1360,6 +1411,22 @@ function DealDetail({
+ 
+           <div className="dealInfoView">
+ 
++            <div className="dealInfoRow">
++
++              <span>
++                Контактное лицо
++              </span>
++
++              <b>
++                {
++                  deal.contactName ||
++                  'Не указано'
++                }
++              </b>
++
++            </div>
++
++
+             <div className="dealInfoRow">
+ 
+               <span>
+@@ -1553,6 +1620,25 @@ function DealDetail({
+ 
+           <div className="dealInfoForm">
+ 
++            <Field title="Контактное лицо">
++
++              <input
++                value={
++                  editContactName
++                }
++
++                onChange={(e) =>
++                  setEditContactName(
++                    e.target.value
++                  )
++                }
++
++                placeholder="Имя заказчика"
++              />
++
++            </Field>
++
++
+             <Field title="Телефон заказчика">
+ 
+               <input
+@@ -1709,6 +1795,125 @@ function DealDetail({
+       </div>
+ 
+ 
++      {currentCustomerInvoice && (
++
++        <div className="customerInvoiceBox">
++
++          <div className="customerInvoiceHead">
++
++            <div>
++              <span>
++                Входящий счёт заказчика
++              </span>
++
++              <strong>
++                {
++                  currentCustomerInvoice
++                    .originalName
++                }
++              </strong>
++            </div>
++
++            <b>Актуальный</b>
++
++          </div>
++
++
++          <div className="customerInvoiceCurrent">
++
++            <span>
++              {
++                currentCustomerInvoice
++                  .createdAt
++                  ? new Date(
++                      currentCustomerInvoice
++                        .createdAt
++                    ).toLocaleString(
++                      'ru-RU',
++                      {
++                        day: '2-digit',
++                        month: '2-digit',
++                        year: 'numeric',
++                        hour: '2-digit',
++                        minute: '2-digit',
++                      }
++                    )
++                  : 'Дата не указана'
++              }
++            </span>
++
++            <a
++              href={
++                dealFileUrl(
++                  currentCustomerInvoice.id
++                )
++              }
++              target="_blank"
++              rel="noreferrer"
++            >
++              Открыть
++            </a>
++
++          </div>
++
++
++          {previousCustomerInvoices.length > 0 && (
++
++            <div className="customerInvoiceHistory">
++
++              <span className="customerInvoiceHistoryTitle">
++                История входящих счетов
++              </span>
++
++              {[...previousCustomerInvoices]
++                .reverse()
++                .map(
++                  (file, index) => (
++
++                  <div
++                    className="customerInvoiceHistoryRow"
++                    key={file.id}
++                  >
++
++                    <div>
++                      <b>
++                        Версия {
++                          customerInvoiceHistory.length -
++                          index -
++                          1
++                        }
++                      </b>
++
++                      <span>
++                        {file.originalName}
++                      </span>
++                    </div>
++
++                    <a
++                      href={
++                        dealFileUrl(
++                          file.id
++                        )
++                      }
++                      target="_blank"
++                      rel="noreferrer"
++                    >
++                      Открыть
++                    </a>
++
++                  </div>
++
++                ))}
++
++            </div>
++
++          )}
++
++        </div>
++
++      )}
++
++
+       {current ? (
+ 
+         <InvoiceBlock
+@@ -2713,6 +2918,15 @@ function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCance
+   const [clientPhone, setClientPhone] =
+     useState('');
+ 
++  const [contactName, setContactName] =
++    useState('');
++
++  const [deliveryAddress, setDeliveryAddress] =
++    useState('');
++
++  const [incomingInvoice, setIncomingInvoice] =
++    useState<File | null>(null);
++
+   const [requestText, setRequestText] =
+     useState('');
+ 
+@@ -2827,9 +3041,20 @@ async function submit(
+ 
+     try {
+ 
+-      const filesToUpload =
++      const extraFilesToUpload =
+         [...attachments];
+ 
++      const primaryIncomingInvoice =
++        incomingInvoice;
++
++      const filesToUpload =
++        [
++          ...(primaryIncomingInvoice
++            ? [primaryIncomingInvoice]
++            : []),
++          ...extraFilesToUpload,
++        ];
++
+ 
+       const deal =
+         await createDeal({
+@@ -2840,12 +3065,23 @@ async function submit(
+             clientName.trim() ||
+             'Тестовый клиент',
+ 
++          contactName:
++            contactName.trim() ||
++            undefined,
++
+           clientPhone:
+             clientPhone.trim() ||
+             undefined,
+ 
++          deliveryAddresses:
++            deliveryAddress.trim()
++              ? [deliveryAddress.trim()]
++              : undefined,
++
+           requestMode:
+-            'TEXT',
++            primaryIncomingInvoice
++              ? 'INCOMING_INVOICE'
++              : 'TEXT',
+ 
+           requestText:
+             requestText.trim() ||
+@@ -2901,26 +3137,41 @@ async function submit(
+               setProgress,
+             }) => {
+ 
++              let uploadIndex = 0;
++
++
++              if (primaryIncomingInvoice) {
++
++                await upload(
++                  deal.id,
++                  primaryIncomingInvoice,
++                  'CUSTOMER_INVOICE_PRIMARY',
++                  uploadIndex,
++                  filesToUpload.length,
++                );
++
++                uploadIndex++;
++              }
++
++
+               for (
+                 let index = 0;
+                 index <
+-                  filesToUpload.length;
++                  extraFilesToUpload.length;
+                 index++
+               ) {
+ 
+                 await upload(
+                   deal.id,
+-
+-                  filesToUpload[
++                  extraFilesToUpload[
+                     index
+                   ],
+-
+                   'MANAGER_ATTACHMENT',
+-
+-                  index,
+-
++                  uploadIndex,
+                   filesToUpload.length,
+                 );
++
++                uploadIndex++;
+               }
+ 
+ 
+@@ -3012,7 +3263,24 @@ async function submit(
+       </Field>
+ 
+ 
+-      <Field title="Телефон">
++      <Field title="Контактное лицо · необязательно">
++
++        <input
++          value={contactName}
++
++          onChange={(e) =>
++            setContactName(
++              e.target.value
++            )
++          }
++
++          placeholder="Например: Иван"
++        />
++
++      </Field>
++
++
++      <Field title="Телефон · необязательно">
+ 
+         <input
+           value={clientPhone}
+@@ -3029,17 +3297,81 @@ async function submit(
+       </Field>
+ 
+ 
+-      
++      <Field title="Адрес доставки · необязательно">
+ 
++        <input
++          value={deliveryAddress}
+ 
+-      <Field
+-        title={
+-          requestMode ===
+-          'INCOMING_INVOICE'
+-            ? 'Входящие счета и вложения'
+-            : 'Вложения'
+-        }
+-      >
++          onChange={(e) =>
++            setDeliveryAddress(
++              e.target.value
++            )
++          }
++
++          placeholder="Адрес объекта или выгрузки"
++        />
++
++      </Field>
++
++
++      <Field title="Входящий счёт заказчика · если есть">
++
++        <div className="primaryIncomingPicker">
++
++          {incomingInvoice ? (
++
++            <div className="versionRow primaryIncomingSelected">
++
++              <div>
++                <b>
++                  {incomingInvoice.name}
++                </b>
++
++                <span>
++                  Будет сохранён как входящий счёт сделки
++                </span>
++              </div>
++
++              <button
++                type="button"
++                className="secondary compactButton"
++                onClick={() =>
++                  setIncomingInvoice(null)
++                }
++              >
++                Удалить
++              </button>
++
++            </div>
++
++          ) : (
++
++            <label className="fileButton">
++              + Прикрепить входящий счёт
++
++              <input
++                type="file"
++                hidden
++                onChange={(e) => {
++                  setIncomingInvoice(
++                    e.target.files?.[0] ||
++                    null
++                  );
++
++                  e.currentTarget.value =
++                    '';
++                }}
++              />
++            </label>
++
++          )}
++
++        </div>
++
++      </Field>
++
++
++      <Field title="Дополнительные вложения">
+ 
+         <div>
+ 
+@@ -3141,12 +3473,8 @@ async function submit(
+ 
+           <div className="microcopy">
+ 
+-            Можно выбрать несколько
+-            файлов любого типа.
+-
+-            До отправки любой файл
+-            можно удалить или
+-            прикрепить ещё.
++            Здесь можно добавить спецификации, фото и другие документы.
++            Сам входящий счёт прикрепляется отдельным полем выше.
+ 
+           </div>
+ 
+@@ -3191,15 +3519,15 @@ async function submit(
+           >
+ 
+             <option value="TOTAL_PLUS">
+-              + к сумме
++              ± к сумме
+             </option>
+ 
+             <option value="UNIT_PLUS">
+-              + за единицу
++              ± за единицу
+             </option>
+ 
+             <option value="PERCENT">
+-              + %
++              ± %
+             </option>
+ 
+             <option value="FINAL">
+@@ -3220,7 +3548,7 @@ async function submit(
+               )
+             }
+ 
+-            placeholder="0"
++            placeholder="Например: -7 или 4"
+           />
+ 
+         </div>
+@@ -4255,6 +4583,34 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+     );
+ 
+ 
++  const customerInvoiceFiles =
++    allDealFiles
++      .filter(
++        (file) =>
++          file.category ===
++            'CUSTOMER_INVOICE_PRIMARY' ||
++          file.category
++            ?.startsWith(
++              'CORRECTION_PRIMARY_'
++            )
++      )
++      .sort(
++        (a, b) =>
++          new Date(
++            a.createdAt || 0
++          ).getTime() -
++          new Date(
++            b.createdAt || 0
++          ).getTime()
++      );
++
++
++  const currentCustomerIncoming =
++    customerInvoiceFiles[
++      customerInvoiceFiles.length - 1
++    ];
++
++
+   const correctionPrimaryFiles =
+     allDealFiles.filter(
+       (file) =>
+@@ -4282,7 +4638,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+     );
+ 
+ 
+-  const issueIncomingFiles =
++  const issueExtraFiles =
+     allDealFiles.filter(
+       (file) =>
+         file.category ===
+@@ -4348,6 +4704,45 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       </div>
+ 
+ 
++      {canAttachInvoice && (
++
++        <div className="invoiceTaskBrief">
++
++          <div>
++            <span>От кого</span>
++            <b className="sellerTaskBadge">
++              {
++                sellerLabels[
++                  task.deal.sellerType
++                ]
++              }
++            </b>
++          </div>
++
++          <div>
++            <span>На кого</span>
++            <b>
++              {task.deal.clientName}
++            </b>
++          </div>
++
++          <div>
++            <span>Условия</span>
++            <b>
++              {
++                pricingConditionLabel(
++                  task.deal.marginMode,
++                  task.deal.marginValue,
++                )
++              }
++            </b>
++          </div>
++
++        </div>
++
++      )}
++
++
+       {task.deal.requestText && (
+ 
+         <div className="infoBox">
+@@ -4382,6 +4777,58 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       )}
+ 
+ 
++      {task.type ===
++        'ISSUE_CLIENT_INVOICE' &&
++        currentCustomerIncoming && (
++
++        <div className="infoBox customerInvoiceTaskBox">
++
++          <strong>
++            Входящий счёт заказчика
++          </strong>
++
++          <p>
++            Используйте этот файл как исходный документ для выставления счёта.
++          </p>
++
++          <div className="versionList">
++
++            <div className="versionRow correctionPrimaryRow">
++
++              <div>
++                <b>
++                  {
++                    currentCustomerIncoming
++                      .originalName
++                  }
++                </b>
++
++                <span>
++                  Основной входящий счёт
++                </span>
++              </div>
++
++              <a
++                href={
++                  dealFileUrl(
++                    currentCustomerIncoming.id
++                  )
++                }
++                target="_blank"
++                rel="noreferrer"
++              >
++                Открыть
++              </a>
++
++            </div>
++
++          </div>
++
++        </div>
++
++      )}
++
++
+       {task.type ===
+         'CORRECT_CLIENT_INVOICE' &&
+         currentTaskInvoice && (
+@@ -4663,19 +5110,19 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+       {task.type !==
+         'CORRECT_CLIENT_INVOICE' &&
+-        issueIncomingFiles.length >
++        issueExtraFiles.length >
+           0 && (
+ 
+         <div className="infoBox">
+ 
+           <strong>
+-            Вложения менеджера
++            Дополнительные вложения
+           </strong>
+ 
+ 
+           <div className="versionList">
+ 
+-            {issueIncomingFiles.map(
++            {issueExtraFiles.map(
+               (incomingFile) => (
+ 
+               <div
+@@ -5185,6 +5632,9 @@ function auditLabel(
+ 
+     DELIVERY_ADDRESSES_CHANGED:
+       'Изменены адреса доставки',
++
++    DEAL_CONTACT_CHANGED:
++      'Изменено контактное лицо',
+   };
+ 
+ 
+@@ -5195,6 +5645,63 @@ function auditLabel(
+ }
+ 
+ 
++function pricingConditionLabel(
++  mode?: string,
++  rawValue?: string | number,
++) {
++
++  if (
++    rawValue === undefined ||
++    rawValue === null ||
++    rawValue === ''
++  ) {
++    return 'Не указаны';
++  }
++
++
++  const value =
++    Number(rawValue);
++
++
++  if (!Number.isFinite(value)) {
++    return String(rawValue);
++  }
++
++
++  const signed =
++    value > 0
++      ? '+' + value
++      : String(value);
++
++
++  if (mode === 'PERCENT') {
++    return signed + '%';
++  }
++
++
++  if (mode === 'UNIT_PLUS') {
++    return signed + ' ₽ за единицу';
++  }
++
++
++  if (mode === 'TOTAL_PLUS') {
++    return signed + ' ₽ к сумме';
++  }
++
++
++  if (mode === 'FINAL') {
++    return 'Итоговая цена ' +
++      value.toLocaleString(
++        'ru-RU'
++      ) +
++      ' ₽';
++  }
++
++
++  return signed;
++}
++
++
+ function paymentStatusLabel(status: PaymentStatus) { return ({ NO_PREPAYMENT: 'Без предоплаты', WAITING: 'Ожидаем оплату', ADVANCE: 'Аванс', PAID: 'Оплачен', DEFERRED: 'Отсрочка' } as Record<PaymentStatus,string>)[status]; }
+ function paymentMethodLabel(method: ClientPaymentMethod) { return ({ NONCASH: 'Безнал', CASH: 'Наличные', CARD: 'Пластик', ADVANCE: 'Аванс' } as Record<ClientPaymentMethod,string>)[method]; }
+ function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужны данные', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 74e54fd..7959aac 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -383,6 +383,7 @@ export type RecentActivity = {
+     number?: string;
+     plannedShipmentAt?: string;
+     clientPhone?: string;
++    contactName?: string;
+     deliveryAddresses?: string[];
+     paidFromBalance?: boolean;
+   };
+@@ -437,6 +438,7 @@ export async function updateDealInfo(
+   dealId: string,
+ 
+   payload: {
++    contactName?: string;
+     clientPhone?: string;
+     managerComment?: string;
+     deliveryAddresses?: string[];
+@@ -461,8 +463,6 @@ export async function updateShipmentDate(
+ 
+   payload: {
+     plannedShipmentAt?: string;
+-    clientPhone?: string;
+-    deliveryAddresses?: string[];
+     actorId: string;
+   },
+ ) {
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index c006f0c..3696720 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -2534,3 +2534,167 @@ html[data-theme='dark']
+     transition-duration: .01ms !important;
+   }
+ }
++
++/* MSM deal/customer invoice v0.4.9 */
++
++.customerInvoiceBox,
++.invoiceTaskBrief {
++  background: #fff;
++  border: 1px solid #e7e5e4;
++  border-radius: 18px;
++  padding: 14px;
++}
++
++.customerInvoiceBox {
++  display: grid;
++  gap: 11px;
++}
++
++.customerInvoiceHead,
++.customerInvoiceCurrent,
++.customerInvoiceHistoryRow {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.customerInvoiceHead > div,
++.customerInvoiceHistoryRow > div {
++  min-width: 0;
++}
++
++.customerInvoiceHead span,
++.customerInvoiceCurrent span,
++.customerInvoiceHistoryRow span,
++.invoiceTaskBrief span {
++  display: block;
++  color: #78716c;
++  font-size: 11px;
++}
++
++.customerInvoiceHead strong {
++  display: block;
++  margin-top: 3px;
++  overflow-wrap: anywhere;
++}
++
++.customerInvoiceHead > b {
++  flex-shrink: 0;
++  padding: 5px 8px;
++  border-radius: 999px;
++  background: #dcfce7;
++  color: #166534;
++  font-size: 10px;
++}
++
++.customerInvoiceCurrent a,
++.customerInvoiceHistoryRow a {
++  flex-shrink: 0;
++  color: #171717;
++  font-size: 12px;
++  font-weight: 800;
++}
++
++.customerInvoiceHistory {
++  display: grid;
++  gap: 7px;
++  padding-top: 10px;
++  border-top: 1px solid #f0efed;
++}
++
++.customerInvoiceHistoryTitle {
++  color: #78716c;
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.customerInvoiceHistoryRow {
++  padding: 9px 10px;
++  border-radius: 11px;
++  background: #fafaf9;
++}
++
++.customerInvoiceHistoryRow b {
++  display: block;
++  font-size: 12px;
++}
++
++.primaryIncomingPicker {
++  display: grid;
++  gap: 8px;
++}
++
++.primaryIncomingSelected {
++  border: 1px solid #bfdbfe;
++  background: #eff6ff;
++}
++
++.invoiceTaskBrief {
++  display: grid;
++  grid-template-columns: .7fr 1.5fr 1fr;
++  gap: 12px;
++}
++
++.invoiceTaskBrief > div {
++  min-width: 0;
++}
++
++.invoiceTaskBrief b {
++  display: block;
++  margin-top: 4px;
++  overflow-wrap: anywhere;
++}
++
++.sellerTaskBadge {
++  display: inline-flex !important;
++  width: fit-content;
++  padding: 5px 9px;
++  border-radius: 999px;
++  background: #111;
++  color: #fff !important;
++  font-size: 12px;
++}
++
++.customerInvoiceTaskBox .versionList {
++  margin-top: 10px;
++}
++
++html[data-theme='dark'] .customerInvoiceBox,
++html[data-theme='dark'] .invoiceTaskBrief {
++  background: #1d1d1f;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .customerInvoiceHistory {
++  border-color: #303033;
++}
++
++html[data-theme='dark'] .customerInvoiceHistoryRow {
++  background: #242426;
++}
++
++html[data-theme='dark'] .customerInvoiceCurrent a,
++html[data-theme='dark'] .customerInvoiceHistoryRow a {
++  color: #f5f5f4;
++}
++
++html[data-theme='dark'] .primaryIncomingSelected {
++  background: #172033;
++  border-color: #1d4ed8;
++}
++
++html[data-theme='dark'] .sellerTaskBadge {
++  background: #f5f5f4;
++  color: #111 !important;
++}
++
++@media (max-width: 520px) {
++  .invoiceTaskBrief {
++    grid-template-columns: 1fr 1fr;
++  }
++
++  .invoiceTaskBrief > div:last-child {
++    grid-column: 1 / -1;
++  }
++}
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index 84d56de..86d937b 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -17,6 +17,7 @@ export type StoredFile = {
+   originalName: string;
+   mimeType?: string;
+   category?: string;
++  createdAt?: string;
+ };
+ 
+ export type Invoice = {
+@@ -100,10 +101,13 @@ export type Deal = {
+   createdAt?: string;
+   sellerType: SellerType;
+   clientName: string;
++  contactName?: string;
+   clientPhone?: string;
+   managerComment?: string;
+   accountingComment?: string;
+   requestText?: string;
++  marginMode?: string;
++  marginValue?: string | number;
+   status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+   paymentStatus: PaymentStatus;
+   deferralStartAt?: string;

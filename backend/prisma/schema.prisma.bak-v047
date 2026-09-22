@@ -1,0 +1,283 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  MANAGER
+  ACCOUNTANT
+  LEADER
+  ADMIN
+}
+
+enum DealStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum SellerType {
+  ST
+  MSM
+  IP
+}
+
+enum TaskType {
+  ISSUE_CLIENT_INVOICE
+  CORRECT_CLIENT_INVOICE
+  PAY_SUPPLIER
+  POWER_OF_ATTORNEY
+  ETRN
+  NEED_DATA
+  OTHER
+}
+
+enum TaskStatus {
+  NEW
+  IN_PROGRESS
+  NEED_DATA
+  DONE
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  WAITING_ACCOUNTING
+  WAITING_MANAGER_REVIEW
+  CONFIRMED
+  CORRECTION_REQUESTED
+}
+
+enum FileProvider {
+  TELEGRAM
+  EXTERNAL
+}
+
+enum PaymentStatus {
+  NO_PREPAYMENT
+  WAITING
+  ADVANCE
+  PAID
+  DEFERRED
+}
+
+enum ClientPaymentMethod {
+  NONCASH
+  CASH
+  CARD
+  ADVANCE
+}
+
+enum SupplierPurchaseStatus {
+  DRAFT
+  PAYMENT_REQUESTED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+model User {
+  id               String            @id @default(cuid())
+  telegramId       BigInt            @unique
+  telegramUsername String?
+  firstName        String
+  lastName         String?
+  role             UserRole          @default(MANAGER)
+  active           Boolean           @default(true)
+  managedDeals     Deal[]            @relation("DealManager")
+  createdDeals     Deal[]            @relation("DealCreatedBy")
+  createdTasks     Task[]            @relation("TaskCreator")
+  assignedTasks    Task[]            @relation("TaskAssignee")
+  auditEvents      AuditEvent[]
+  clientPayments   ClientPayment[]   @relation("ClientPaymentActor")
+  supplierPayments SupplierPayment[] @relation("SupplierPaymentActor")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model Deal {
+  id                String             @id @default(cuid())
+  internalNumber    Int                @unique @default(autoincrement())
+  sellerType        SellerType
+  clientName        String
+  clientPhone       String?
+  contactName       String?
+  leadSource        String?
+  managerComment    String?
+  accountingComment String?
+  requestMode       String
+  requestText       String?
+  marginMode        String?
+  marginValue       Decimal?           @db.Decimal(14, 2)
+  status            DealStatus         @default(ACTIVE)
+  paymentStatus     PaymentStatus      @default(WAITING)
+  deferralStartAt   DateTime?
+  deferralEndAt     DateTime?
+  deferralTerms     String?
+  plannedShipmentAt DateTime?
+  managerId         String
+  manager           User               @relation("DealManager", fields: [managerId], references: [id])
+  createdById       String
+  createdBy         User               @relation("DealCreatedBy", fields: [createdById], references: [id])
+  invoices          ClientInvoice[]
+  tasks             Task[]
+  files             StoredFile[]
+  auditEvents       AuditEvent[]
+  clientPayments    ClientPayment[]
+  supplierPurchases SupplierPurchase[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  closedAt          DateTime?
+
+  @@index([managerId, status])
+  @@index([clientName])
+}
+
+model ClientInvoice {
+  id          String        @id @default(cuid())
+  dealId      String
+  deal        Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  sellerType  SellerType
+  number      String
+  invoiceDate DateTime?
+  amount      Decimal?      @db.Decimal(14, 2)
+  version     Int           @default(1)
+  isCurrent   Boolean       @default(true)
+  status      InvoiceStatus @default(WAITING_MANAGER_REVIEW)
+  fileId      String?       @unique
+  file        StoredFile?   @relation("InvoiceFile", fields: [fileId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([dealId, isCurrent])
+  @@index([number])
+}
+
+model Task {
+  id                 String            @id @default(cuid())
+  dealId             String
+  deal               Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  type               TaskType
+  status             TaskStatus        @default(NEW)
+  urgent             Boolean           @default(false)
+  title              String
+  description        String?
+  dueAt              DateTime?
+  createdById        String
+  createdBy          User              @relation("TaskCreator", fields: [createdById], references: [id])
+  assigneeId         String?
+  assignee           User?             @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  supplierPurchaseId String?
+  supplierPurchase   SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  completedAt        DateTime?
+
+  @@index([status, urgent])
+  @@index([assigneeId, status])
+  @@index([supplierPurchaseId, status])
+}
+
+model StoredFile {
+  id                String         @id @default(cuid())
+  dealId            String?
+  deal              Deal?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  provider          FileProvider   @default(TELEGRAM)
+  category          String
+  originalName      String
+  mimeType          String?
+  size              Int?
+  telegramFileId    String?
+  telegramUniqueId  String?
+  telegramMessageId Int?
+  telegramChatId    String?
+  externalUrl       String?
+  createdAt         DateTime       @default(now())
+  invoice           ClientInvoice? @relation("InvoiceFile")
+  clientPayment     ClientPayment? @relation("ClientPaymentFile")
+
+  @@index([dealId, category])
+}
+
+model ClientPayment {
+  id        String              @id @default(cuid())
+  dealId    String
+  deal      Deal                @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  amount    Decimal             @db.Decimal(14, 2)
+  paidAt    DateTime
+  method    ClientPaymentMethod @default(NONCASH)
+  comment   String?
+  actorId   String
+  actor     User                @relation("ClientPaymentActor", fields: [actorId], references: [id])
+  fileId    String?             @unique
+  file      StoredFile?         @relation("ClientPaymentFile", fields: [fileId], references: [id])
+  createdAt DateTime            @default(now())
+
+  @@index([dealId, paidAt])
+}
+
+model SupplierPurchase {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  supplierName          String
+  incomingInvoiceNumber String?
+  incomingInvoiceAmount Decimal? @db.Decimal(14, 2)
+  comment               String?
+  requestedAmount       Decimal? @db.Decimal(14, 2)
+
+  status SupplierPurchaseStatus @default(DRAFT)
+
+  createdById String
+
+  tasks    Task[]
+  payments SupplierPayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId, status])
+  @@index([supplierName])
+}
+
+model SupplierPayment {
+  id String @id @default(cuid())
+
+  purchaseId String
+  purchase   SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  amount Decimal  @db.Decimal(14, 2)
+  paidAt DateTime
+
+  paymentOrderStamped Boolean @default(false)
+
+  comment String?
+
+  actorId String
+  actor   User   @relation("SupplierPaymentActor", fields: [actorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([purchaseId, paidAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  dealId     String
+  deal       Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([dealId, createdAt])
+}

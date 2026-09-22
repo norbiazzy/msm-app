@@ -1,0 +1,492 @@
+diff --git a/backend/src/deals/deals.controller.ts b/backend/src/deals/deals.controller.ts
+index b5e8dd5..d705923 100644
+--- a/backend/src/deals/deals.controller.ts
++++ b/backend/src/deals/deals.controller.ts
+@@ -60,6 +60,7 @@ export class DealsController {
+ 
+     @Body()
+     body: {
++      sellerType?: 'ST' | 'MSM' | 'IP';
+       clientName?: string;
+       contactName?: string;
+       clientPhone?: string;
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index c672f43..0a63d2a 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -5,6 +5,7 @@ import {
+ } from '@nestjs/common';
+ 
+ import {
++  SellerType,
+   TaskStatus,
+   TaskType,
+ } from '@prisma/client';
+@@ -517,6 +518,7 @@ export class DealsService {
+     id: string,
+ 
+     body: {
++      sellerType?: SellerType;
+       clientName?: string;
+       contactName?: string;
+       clientPhone?: string;
+@@ -539,6 +541,35 @@ export class DealsService {
+         });
+ 
+ 
++    if (
++      body.sellerType !== undefined &&
++      body.sellerType !== current.sellerType
++    ) {
++
++      const existingInvoice =
++        await this.prisma
++          .clientInvoice
++          .findFirst({
++            where: {
++              dealId: id,
++              isCurrent: true,
++            },
++
++            select: {
++              id: true,
++            },
++          });
++
++
++      if (existingInvoice) {
++
++        throw new BadRequestException(
++          'После выставления счёта изменить СТ / МСМ / ИП нельзя',
++        );
++      }
++    }
++
++
+     const currentAddresses =
+       Array.isArray(
+         current.deliveryAddresses
+@@ -603,6 +634,12 @@ export class DealsService {
+         : currentAddresses;
+ 
+ 
++    const nextSellerType =
++      body.sellerType !== undefined
++        ? body.sellerType
++        : current.sellerType;
++
++
+     const nextClientName =
+       body.clientName !== undefined
+         ? body.clientName.trim() || current.clientName
+@@ -638,6 +675,9 @@ export class DealsService {
+               },
+ 
+               data: {
++                sellerType:
++                  nextSellerType,
++
+                 clientName:
+                   nextClientName,
+ 
+@@ -665,6 +705,42 @@ export class DealsService {
+             });
+ 
+ 
++          if (
++            current.sellerType !==
++            nextSellerType
++          ) {
++
++            await tx.auditEvent.create({
++              data: {
++                dealId:
++                  id,
++
++                actorId:
++                  body.actorId,
++
++                action:
++                  'DEAL_SELLER_CHANGED',
++
++                entityType:
++                  'Deal',
++
++                entityId:
++                  id,
++
++                oldValue: {
++                  sellerType:
++                    current.sellerType,
++                },
++
++                newValue: {
++                  sellerType:
++                    nextSellerType,
++                },
++              },
++            });
++          }
++
++
+           if (
+             (current.contactName || null) !==
+             (nextContactName || null)
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 25b2f74..c282dbd 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -550,6 +550,11 @@ function DealDetail({
+     setRequestClientName,
+   ] = useState('');
+ 
++  const [
++    requestSellerType,
++    setRequestSellerType,
++  ] = useState<SellerType>('MSM');
++
+   const [
+     requestMarginMode,
+     setRequestMarginMode,
+@@ -711,6 +716,11 @@ function DealDetail({
+         deal?.clientName || ''
+       );
+ 
++      setRequestSellerType(
++        deal?.sellerType ||
++        'MSM'
++      );
++
+       setRequestMarginMode(
+         deal?.marginMode ||
+         'TOTAL_PLUS'
+@@ -734,6 +744,7 @@ function DealDetail({
+       deal?.managerComment,
+       deal?.deliveryAddresses,
+       deal?.clientName,
++      deal?.sellerType,
+       deal?.marginMode,
+       deal?.marginValue,
+       deal?.accountingComment,
+@@ -1028,6 +1039,53 @@ function DealDetail({
+   }
+ 
+ 
++  async function saveInvoiceRequestSeller() {
++
++    if (
++      requestSellerType ===
++      deal.sellerType
++    ) {
++      return;
++    }
++
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++
++      await updateDealInfo(
++        dealId,
++        {
++          sellerType:
++            requestSellerType,
++
++          actorId:
++            user.id,
++        },
++      );
++
++
++      await reload(false);
++
++
++    } catch (e) {
++
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++
++    } finally {
++
++      setSaving(false);
++    }
++  }
++
++
+   async function sendInvoiceRequestAgain() {
+ 
+     const activeDeal = deal;
+@@ -1063,6 +1121,8 @@ function DealDetail({
+       await updateDealInfo(
+         dealId,
+         {
++          sellerType:
++            requestSellerType,
+           clientName:
+             requestClientName.trim() ||
+             activeDeal.clientName,
+@@ -2272,6 +2332,80 @@ function DealDetail({
+ 
+         <div className="invoiceRequestManagerBox">
+ 
++          <div className="invoiceRequestSellerEditor">
++
++            <div className="invoiceRequestSellerHead">
++
++              <div>
++                <span>
++                  От кого выставляем
++                </span>
++
++                <strong>
++                  {sellerLabels[requestSellerType]}
++                </strong>
++              </div>
++
++              {invoiceRequestTask?.status ===
++                'IN_PROGRESS' && (
++
++                <em>
++                  Бухгалтер уже работает. Изменение сразу отобразится в задаче.
++                </em>
++
++              )}
++
++            </div>
++
++
++            <div className="segmented">
++
++              {(['ST', 'MSM', 'IP'] as SellerType[]).map(
++                (type) => (
++
++                <button
++                  type="button"
++                  key={type}
++
++                  className={
++                    requestSellerType === type
++                      ? 'selected'
++                      : ''
++                  }
++
++                  onClick={() =>
++                    setRequestSellerType(type)
++                  }
++                >
++                  {sellerLabels[type]}
++                </button>
++
++              ))}
++
++            </div>
++
++
++            {requestSellerType !==
++              deal.sellerType && (
++
++              <button
++                type="button"
++                className="secondary wide"
++                disabled={saving}
++                onClick={saveInvoiceRequestSeller}
++              >
++                {
++                  saving
++                    ? 'Сохраняем…'
++                    : 'Сохранить «от кого»'
++                }
++              </button>
++
++            )}
++
++          </div>
++
++
+           {invoiceRequestTask?.status ===
+             'NEED_DATA' ? (
+ 
+@@ -6377,6 +6511,33 @@ function auditLabel(
+   }
+ 
+ 
++  if (
++    action ===
++    'DEAL_SELLER_CHANGED'
++  ) {
++
++    const oldSeller =
++      String(
++        oldValue?.sellerType ||
++        '—'
++      ) as SellerType;
++
++    const newSeller =
++      String(
++        newValue?.sellerType ||
++        '—'
++      ) as SellerType;
++
++
++    return (
++      'Изменено, от кого выставляем: ' +
++      (sellerLabels[oldSeller] || oldSeller) +
++      ' → ' +
++      (sellerLabels[newSeller] || newSeller)
++    );
++  }
++
++
+   if (
+     action ===
+     'SHIPMENT_DATE_CHANGED'
+diff --git a/frontend/src/RecentActivityPanel.tsx b/frontend/src/RecentActivityPanel.tsx
+index bb9fe2e..9200e61 100644
+--- a/frontend/src/RecentActivityPanel.tsx
++++ b/frontend/src/RecentActivityPanel.tsx
+@@ -72,6 +72,24 @@ function activityDate(
+ }
+ 
+ 
++function activitySeller(
++  value: unknown,
++) {
++
++  const key =
++    String(value || '');
++
++
++  return (
++    sellerLabels[
++      key as keyof typeof sellerLabels
++    ] ||
++    key ||
++    '—'
++  );
++}
++
++
+ function actionLabel(
+   event: RecentActivity,
+ ) {
+@@ -96,6 +114,26 @@ function actionLabel(
+   }
+ 
+ 
++  if (
++    event.action ===
++    'DEAL_SELLER_CHANGED'
++  ) {
++
++    return (
++      'От кого выставляем: ' +
++      activitySeller(
++        event.oldValue
++          ?.sellerType
++      ) +
++      ' → ' +
++      activitySeller(
++        event.newValue
++          ?.sellerType
++      )
++    );
++  }
++
++
+   if (
+     event.action ===
+     'SHIPMENT_DATE_CHANGED'
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 4d099c8..416e4b0 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -396,6 +396,7 @@ export type RecentActivity = {
+     supplierName?: string;
+     number?: string;
+     plannedShipmentAt?: string;
++    sellerType?: 'ST' | 'MSM' | 'IP';
+     clientPhone?: string;
+     contactName?: string;
+     deliveryAddresses?: string[];
+@@ -452,6 +453,7 @@ export async function updateDealInfo(
+   dealId: string,
+ 
+   payload: {
++    sellerType?: 'ST' | 'MSM' | 'IP';
+     clientName?: string;
+     contactName?: string;
+     clientPhone?: string;
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index e32c7f4..78f26e0 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3114,3 +3114,63 @@ html[data-theme='dark'] .requestPreviousIncoming > span,
+ html[data-theme='dark'] .fieldHint {
+   color: #a8a29e;
+ }
++
++
++/* MSM invoice request seller editor v0.5.3 */
++
++.invoiceRequestSellerEditor {
++  display: grid;
++  gap: 10px;
++  padding: 12px;
++  border: 1px solid #e7e5e4;
++  border-radius: 14px;
++  background: #fafaf9;
++}
++
++.invoiceRequestSellerHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.invoiceRequestSellerHead span,
++.invoiceRequestSellerHead strong {
++  display: block;
++}
++
++.invoiceRequestSellerHead span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.invoiceRequestSellerHead strong {
++  margin-top: 2px;
++  font-size: 16px;
++}
++
++.invoiceRequestSellerHead em {
++  max-width: 310px;
++  color: #78716c;
++  font-size: 11px;
++  font-style: normal;
++  line-height: 1.4;
++  text-align: right;
++}
++
++html[data-theme='dark']
++.invoiceRequestSellerEditor {
++  background: #242426;
++  border-color: #343437;
++}
++
++@media (max-width: 520px) {
++  .invoiceRequestSellerHead {
++    display: grid;
++  }
++
++  .invoiceRequestSellerHead em {
++    max-width: none;
++    text-align: left;
++  }
++}

@@ -1,5 +1,5 @@
 import { SellerType } from '@prisma/client';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateDealDto {
   @IsEnum(SellerType)
@@ -13,6 +13,9 @@ export class CreateDealDto {
 
   @IsOptional() @IsString()
   contactName?: string;
+
+  @IsOptional() @IsArray() @IsString({ each: true })
+  deliveryAddresses?: string[];
 
   @IsOptional() @IsString()
   leadSource?: string;
@@ -43,4 +46,7 @@ export class CreateDealDto {
 
   @IsOptional()
   urgent?: boolean;
+
+  @IsOptional()
+  deferInvoiceTask?: boolean;
 }

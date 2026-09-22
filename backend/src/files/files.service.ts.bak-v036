@@ -1,0 +1,261 @@
+
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+
+import {
+  FileProvider,
+} from '@prisma/client';
+
+import {
+  randomUUID,
+} from 'crypto';
+
+import {
+  mkdir,
+  readFile,
+  writeFile,
+} from 'fs/promises';
+
+import {
+  extname,
+  join,
+} from 'path';
+
+import {
+  PrismaService,
+} from '../prisma/prisma.service';
+
+import {
+  TelegramStorageService,
+} from './telegram-storage.service';
+
+
+@Injectable()
+export class FilesService {
+
+  constructor(
+    private readonly prisma:
+      PrismaService,
+
+    private readonly telegram:
+      TelegramStorageService,
+  ) {}
+
+
+  private uploadsDir() {
+
+    return join(
+      process.cwd(),
+      'uploads',
+    );
+  }
+
+
+  private async saveLocal(
+    dealId: string,
+    category: string,
+    file:
+      Express.Multer.File,
+  ) {
+
+    const uploadsDir =
+      this.uploadsDir();
+
+    await mkdir(
+      uploadsDir,
+      {
+        recursive: true,
+      },
+    );
+
+    const extension =
+      extname(
+        file.originalname,
+      );
+
+    const storedName =
+      randomUUID() +
+      extension;
+
+    await writeFile(
+      join(
+        uploadsDir,
+        storedName,
+      ),
+      file.buffer,
+    );
+
+    return this.prisma
+      .storedFile
+      .create({
+        data: {
+          dealId,
+          category,
+
+          provider:
+            FileProvider.EXTERNAL,
+
+          originalName:
+            file.originalname,
+
+          mimeType:
+            file.mimetype,
+
+          size:
+            file.size,
+
+          externalUrl:
+            'local:' +
+            storedName,
+        },
+      });
+  }
+
+
+  async upload(
+    dealId: string,
+    category: string,
+    file:
+      Express.Multer.File,
+  ) {
+
+    if (!file) {
+      throw new BadRequestException(
+        'Файл не передан',
+      );
+    }
+
+
+    try {
+
+      const remote =
+        await this.telegram.upload(
+          file,
+          `${category} · ${dealId}`,
+        );
+
+
+      return this.prisma
+        .storedFile
+        .create({
+          data: {
+            dealId,
+            category,
+
+            provider:
+              FileProvider.TELEGRAM,
+
+            originalName:
+              file.originalname,
+
+            mimeType:
+              file.mimetype,
+
+            size:
+              file.size,
+
+            telegramFileId:
+              remote.fileId,
+
+            telegramUniqueId:
+              remote.uniqueId,
+
+            telegramMessageId:
+              remote.messageId,
+
+            telegramChatId:
+              remote.chatId,
+          },
+        });
+
+    } catch (error) {
+
+      console.warn(
+        'Telegram upload failed. ' +
+        'Saving file locally.',
+        error,
+      );
+
+      return this.saveLocal(
+        dealId,
+        category,
+        file,
+      );
+    }
+  }
+
+
+  async download(
+    fileId: string,
+  ) {
+
+    const stored =
+      await this.prisma
+        .storedFile
+        .findUniqueOrThrow({
+          where: {
+            id: fileId,
+          },
+        });
+
+
+    if (
+      stored.telegramFileId
+    ) {
+
+      const buffer =
+        await this.telegram.download(
+          stored.telegramFileId,
+        );
+
+      return {
+        buffer,
+
+        fileName:
+          stored.originalName,
+
+        mimeType:
+          stored.mimeType,
+      };
+    }
+
+
+    if (
+      stored.externalUrl
+        ?.startsWith(
+          'local:',
+        )
+    ) {
+
+      const storedName =
+        stored.externalUrl.slice(
+          'local:'.length,
+        );
+
+      const buffer =
+        await readFile(
+          join(
+            this.uploadsDir(),
+            storedName,
+          ),
+        );
+
+      return {
+        buffer,
+
+        fileName:
+          stored.originalName,
+
+        mimeType:
+          stored.mimeType,
+      };
+    }
+
+
+    throw new BadRequestException(
+      'Файл недоступен',
+    );
+  }
+}

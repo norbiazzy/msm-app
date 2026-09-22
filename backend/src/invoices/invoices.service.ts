@@ -60,6 +60,100 @@ export class InvoicesService {
     });
   }
 
+  async updateAmount(
+    dealId: string,
+    invoiceId: string,
+
+    body: {
+      amount?: number;
+      actorId: string;
+    },
+  ) {
+
+    const invoice =
+      await this.prisma
+        .clientInvoice
+        .findFirstOrThrow({
+
+          where: {
+            id: invoiceId,
+            dealId,
+          },
+        });
+
+
+    if (!invoice.isCurrent) {
+
+      throw new BadRequestException(
+        'Изменить сумму можно только у актуальной версии счёта',
+      );
+    }
+
+
+    const updated =
+      await this.prisma
+        .clientInvoice
+        .update({
+
+          where: {
+            id: invoiceId,
+          },
+
+          data: {
+            amount:
+              body.amount ??
+              null,
+          },
+        });
+
+
+    await this.prisma
+      .auditEvent
+      .create({
+
+        data: {
+
+          dealId,
+
+          actorId:
+            body.actorId,
+
+          action:
+            'INVOICE_AMOUNT_CHANGED',
+
+          entityType:
+            'ClientInvoice',
+
+          entityId:
+            invoiceId,
+
+          oldValue: {
+            amount:
+              invoice.amount
+                ?.toString() ??
+              null,
+          },
+
+          newValue: {
+            amount:
+              updated.amount
+                ?.toString() ??
+              null,
+
+            number:
+              invoice.number,
+
+            version:
+              invoice.version,
+          },
+        },
+      });
+
+
+    return updated;
+  }
+
+
   async confirm(dealId: string, invoiceId: string, actorId: string) {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
@@ -89,7 +183,7 @@ export class InvoicesService {
   async requestCorrection(
     dealId: string,
     invoiceId: string,
-    body: { actorId: string; comment: string; urgent?: boolean },
+    body: { actorId: string; comment: string; urgent?: boolean; sellerType?: SellerType },
   ) {
     const comment = body.comment?.trim();
     if (!comment) throw new BadRequestException('Укажите, что нужно скорректировать');
@@ -97,6 +191,31 @@ export class InvoicesService {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
       if (!invoice.isCurrent) throw new BadRequestException('Корректировать можно только актуальную версию счёта');
+
+      const deal = await tx.deal.findUniqueOrThrow({ where: { id: dealId } });
+
+      if (
+        body.sellerType &&
+        body.sellerType !== deal.sellerType
+      ) {
+        await tx.deal.update({
+          where: { id: dealId },
+          data: { sellerType: body.sellerType },
+        });
+
+        await tx.auditEvent.create({
+          data: {
+            dealId,
+            actorId: body.actorId,
+            action: 'DEAL_SELLER_CHANGED',
+            entityType: 'Deal',
+            entityId: dealId,
+            oldValue: { sellerType: deal.sellerType },
+            newValue: { sellerType: body.sellerType },
+            reason: 'Изменено при отправке счёта на корректировку',
+          },
+        });
+      }
 
       const existing = await tx.task.findFirst({
         where: {

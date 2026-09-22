@@ -1,0 +1,135 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
+
+import {
+  PurchasesService,
+} from './purchases.service';
+
+
+@Controller('deals/:dealId/suppliers')
+export class PurchasesController {
+
+  constructor(
+    private readonly purchases:
+      PurchasesService,
+  ) {}
+
+
+  @Get()
+  list(
+    @Param('dealId')
+    dealId: string,
+  ) {
+
+    return this.purchases.list(
+      dealId,
+    );
+  }
+
+
+  @Post()
+  create(
+    @Param('dealId')
+    dealId: string,
+
+    @Body()
+    body: {
+      supplierName?: string;
+      incomingInvoiceNumber?: string;
+      incomingInvoiceAmount?: number;
+      comment?: string;
+      createdById: string;
+    },
+  ) {
+
+    return this.purchases.create(
+      dealId,
+      body,
+    );
+  }
+
+
+  @Patch(':purchaseId')
+  update(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('purchaseId')
+    purchaseId: string,
+
+    @Body()
+    body: {
+      supplierName?: string;
+      incomingInvoiceNumber?: string;
+      incomingInvoiceAmount?: number;
+      comment?: string;
+      actorId: string;
+    },
+  ) {
+
+    return this.purchases.update(
+      dealId,
+      purchaseId,
+      body,
+    );
+  }
+
+
+  @Post(':purchaseId/request-payment')
+  requestPayment(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('purchaseId')
+    purchaseId: string,
+
+    @Body()
+    body: {
+      amount?: number;
+      comment?: string;
+      urgent?: boolean;
+      actorId: string;
+    },
+  ) {
+
+    return this.purchases
+      .requestPayment(
+        dealId,
+        purchaseId,
+        body,
+      );
+  }
+
+
+  @Post(':purchaseId/payments')
+  addPayment(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('purchaseId')
+    purchaseId: string,
+
+    @Body()
+    body: {
+      amount?: number;
+      paidAt?: string;
+      paymentOrderStamped?: boolean;
+      comment?: string;
+      actorId: string;
+    },
+  ) {
+
+    return this.purchases
+      .addPayment(
+        dealId,
+        purchaseId,
+        body,
+      );
+  }
+}

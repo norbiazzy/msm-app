@@ -1,0 +1,292 @@
+
+import {
+  useEffect,
+  useState,
+} from 'react';
+
+import {
+  listRecentActivity,
+  type RecentActivity,
+} from './api';
+
+
+const sellerLabels = {
+  ST: '\u0421\u0422',
+  MSM: '\u041c\u0421\u041c',
+  IP: '\u0418\u041f',
+};
+
+
+function actionLabel(
+  event: RecentActivity,
+) {
+
+  const supplier =
+    event.newValue
+      ?.supplierName;
+
+
+  const amount =
+    event.newValue
+      ?.amount;
+
+
+  if (
+    event.action ===
+    'SUPPLIER_PAYMENT_ADDED'
+  ) {
+
+    return supplier
+
+      ? '\u041e\u043f\u043b\u0430\u0442\u0430 \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0443 ' +
+        supplier +
+        (
+          amount
+            ? ' \u00b7 ' +
+              Number(amount)
+                .toLocaleString(
+                  'ru-RU'
+                ) +
+              ' \u20bd'
+            : ''
+        )
+
+      : '\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0430 \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0443';
+  }
+
+
+  const labels:
+    Record<string, string> = {
+
+    CREATE:
+      '\u0421\u043e\u0437\u0434\u0430\u043b \u0441\u0434\u0435\u043b\u043a\u0443',
+
+    UPLOAD:
+      '\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u043b \u0441\u0447\u0451\u0442',
+
+    CONFIRM:
+      '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u043b \u0441\u0447\u0451\u0442',
+
+    REQUEST_CORRECTION:
+      '\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u043b \u0441\u0447\u0451\u0442 \u043d\u0430 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u0438\u0440\u043e\u0432\u043a\u0443',
+
+    CLIENT_PAYMENT_ADDED:
+      '\u0414\u043e\u0431\u0430\u0432\u0438\u043b \u043e\u043f\u043b\u0430\u0442\u0443 \u043a\u043b\u0438\u0435\u043d\u0442\u0430',
+
+    PAYMENT_STATUS_CHANGED:
+      '\u0418\u0437\u043c\u0435\u043d\u0438\u043b \u0441\u0442\u0430\u0442\u0443\u0441 \u043e\u043f\u043b\u0430\u0442\u044b',
+
+    SUPPLIER_PURCHASE_CREATED:
+      '\u0414\u043e\u0431\u0430\u0432\u0438\u043b \u0437\u0430\u043a\u0443\u043f\u043a\u0443',
+
+    SUPPLIER_PURCHASE_UPDATED:
+      '\u0418\u0437\u043c\u0435\u043d\u0438\u043b \u0437\u0430\u043a\u0443\u043f\u043a\u0443',
+
+    SUPPLIER_PAYMENT_REQUESTED:
+      '\u0417\u0430\u043f\u0440\u043e\u0441\u0438\u043b \u043e\u043f\u043b\u0430\u0442\u0443 \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0443',
+
+    SUPPLIER_PAYMENT_STAMPED:
+      '\u0414\u043e\u0431\u0430\u0432\u0438\u043b \u043f\u043b\u0430\u0442\u0451\u0436\u043a\u0443 \u0441 \u043f\u0435\u0447\u0430\u0442\u044c\u044e',
+  };
+
+
+  return (
+    labels[event.action] ||
+    '\u0418\u0437\u043c\u0435\u043d\u0438\u043b \u0441\u0434\u0435\u043b\u043a\u0443'
+  );
+}
+
+
+function dealLabel(
+  event: RecentActivity,
+) {
+
+  const invoice =
+    event.deal
+      .invoices?.[0];
+
+
+  if (invoice) {
+
+    return (
+      sellerLabels[
+        event.deal.sellerType
+      ] +
+      '-' +
+      invoice.number
+    );
+  }
+
+
+  return (
+    '\u0417\u041a-' +
+    event.deal.internalNumber
+  );
+}
+
+
+export function RecentActivityPanel() {
+
+  const [
+    events,
+    setEvents,
+  ] = useState<
+    RecentActivity[]
+  >([]);
+
+
+  async function reload() {
+
+    try {
+
+      setEvents(
+        await listRecentActivity()
+      );
+
+    } catch {
+      // sidebar should not break deals
+    }
+  }
+
+
+  useEffect(() => {
+
+    void reload();
+
+
+    const timer =
+      window.setInterval(
+        () => {
+          void reload();
+        },
+        3000
+      );
+
+
+    return () =>
+      window.clearInterval(
+        timer
+      );
+
+  }, []);
+
+
+  return (
+
+    <aside className="recentActivity">
+
+      <div className="recentActivityHead">
+
+        <strong>
+          \u041d\u0435\u0434\u0430\u0432\u043d\u0438\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f
+        </strong>
+
+        <span>
+          {events.length}
+        </span>
+
+      </div>
+
+
+      {events.length === 0 ? (
+
+        <div className="recentActivityEmpty">
+          \u041f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0441\u043e\u0431\u044b\u0442\u0438\u0439
+        </div>
+
+      ) : (
+
+        <div className="recentActivityList">
+
+          {events.slice(0, 15)
+            .map(
+              (event) => {
+
+              const actor =
+                event.actor
+
+                  ? [
+                      event.actor
+                        .firstName,
+
+                      event.actor
+                        .lastName,
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+
+                  : '\u0421\u0438\u0441\u0442\u0435\u043c\u0430';
+
+
+              return (
+
+                <div
+                  className="recentActivityRow"
+                  key={event.id}
+                >
+
+                  <div className="recentActivityTop">
+
+                    <b>
+                      {dealLabel(event)}
+                    </b>
+
+                    <span>
+                      {
+                        new Date(
+                          event.createdAt
+                        )
+                          .toLocaleTimeString(
+                            'ru-RU',
+                            {
+                              hour:
+                                '2-digit',
+                              minute:
+                                '2-digit',
+                            }
+                          )
+                      }
+                    </span>
+
+                  </div>
+
+
+                  <strong>
+                    {actionLabel(event)}
+                  </strong>
+
+
+                  <div className="recentActivityWho">
+
+                    {actor}
+
+                    {' \u00b7 '}
+
+                    {
+                      event.deal
+                        .clientName
+                    }
+
+                  </div>
+
+
+                  {event.reason && (
+
+                    <em>
+                      {event.reason}
+                    </em>
+
+                  )}
+
+                </div>
+
+              );
+            })}
+
+        </div>
+
+      )}
+
+    </aside>
+  );
+}
