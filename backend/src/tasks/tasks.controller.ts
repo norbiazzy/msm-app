@@ -11,6 +11,47 @@ export class TasksController {
     return this.tasks.list();
   }
 
+  @Post('power-of-attorney')
+  createPowerOfAttorney(
+    @Body() body: {
+      dealId: string;
+      actorId: string;
+      urgent?: boolean;
+      requestKey: string;
+      supplierName: string;
+      organization: 'ST' | 'MSM' | 'IP';
+      recipientName: string;
+      invoiceNumber?: string;
+      requestDate?: string;
+      goodsDescription: string;
+      comment?: string;
+    },
+  ) {
+    return this.tasks.createPowerOfAttorney(body);
+  }
+
+  @Post(':id/complete-power-of-attorney')
+  completePowerOfAttorney(
+    @Param('id') id: string,
+    @Body() body: { actorId: string },
+  ) {
+    return this.tasks.completePowerOfAttorney(
+      id,
+      body.actorId,
+    );
+  }
+
+  @Post(':id/complete-balance-correction')
+  completeBalanceCorrection(
+    @Param('id') id: string,
+    @Body() body: { actorId: string },
+  ) {
+    return this.tasks.completeBalanceCorrection(
+      id,
+      body.actorId,
+    );
+  }
+
 
   @Post(':id/return')
   returnInvoiceRequest(

@@ -231,7 +231,10 @@ function actionLabel(
       'Загрузил счёт',
 
     CONFIRM:
-      'Подтвердил счёт',
+      'Проверил готовый счёт',
+
+    CUSTOMER_APPROVED:
+      'Отметил счёт готовым',
 
     REQUEST_CORRECTION:
       'Отправил счёт на корректировку',
@@ -260,11 +263,32 @@ function actionLabel(
     SUPPLIER_PURCHASE_UPDATED:
       'Изменил закупку',
 
+    SUPPLIER_INVOICE_CHANGED:
+      'Изменил входящий счёт поставщика',
+
     SUPPLIER_PAYMENT_REQUESTED:
       'Запросил оплату поставщику',
 
     SUPPLIER_PAYMENT_STAMPED:
       'Добавил платёжку с печатью',
+
+    SUPPLIER_STAMP_REQUESTED:
+      'Запросил платёжку с печатью',
+
+    SUPPLIER_BALANCE_CORRECTION_REQUESTED:
+      'Запросил корректировку оплаты с остатка',
+
+    SUPPLIER_BALANCE_CORRECTED:
+      'Скорректировал оплату с остатка',
+
+    POWER_OF_ATTORNEY_REQUESTED:
+      'Запросил доверенность',
+
+    POWER_OF_ATTORNEY_READY:
+      'Доверенность готова',
+
+    CORRECTION_WITHDRAWN:
+      'Отозвал корректировку счёта',
 
     MANAGER_COMMENT_CHANGED:
       'Изменил комментарий менеджера',

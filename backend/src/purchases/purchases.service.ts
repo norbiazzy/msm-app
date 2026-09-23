@@ -62,6 +62,25 @@ export class PurchasesService {
               },
             },
           },
+
+
+          tasks: {
+            where: {
+              status: {
+                notIn: [
+                  TaskStatus.DONE,
+                  TaskStatus.CANCELLED,
+                ],
+              },
+            },
+            select: {
+              id: true,
+              type: true,
+              status: true,
+              title: true,
+              payload: true,
+            },
+          },
         },
       });
   }
@@ -245,6 +264,81 @@ export class PurchasesService {
         });
 
 
+    if (body.sourceFileId) {
+
+      const source =
+        await this.prisma
+          .storedFile
+          .findFirst({
+            where: {
+              id: body.sourceFileId,
+              dealId,
+            },
+          });
+
+
+      if (!source) {
+        throw new BadRequestException(
+          'Выбранный входящий счёт не найден в сделке',
+        );
+      }
+
+
+      const linked =
+        await this.prisma
+          .storedFile
+          .create({
+            data: {
+              dealId,
+              provider: source.provider,
+              category:
+                'SUPPLIER_INVOICE_' +
+                purchaseId,
+              originalName:
+                source.originalName,
+              mimeType:
+                source.mimeType,
+              size:
+                source.size,
+              telegramFileId:
+                source.telegramFileId,
+              telegramUniqueId:
+                source.telegramUniqueId,
+              telegramMessageId:
+                source.telegramMessageId,
+              telegramChatId:
+                source.telegramChatId,
+              externalUrl:
+                source.externalUrl,
+            },
+          });
+
+
+      if (body.actorId) {
+        await this.prisma.auditEvent.create({
+          data: {
+            dealId,
+            actorId: body.actorId,
+            action:
+              'SUPPLIER_INVOICE_CHANGED',
+            entityType:
+              'SupplierPurchase',
+            entityId:
+              purchaseId,
+            newValue: {
+              supplierName:
+                updated.supplierName,
+              fileId:
+                linked.id,
+              fileName:
+                linked.originalName,
+            },
+          },
+        });
+      }
+    }
+
+
     if (
       body.actorId &&
       body.incomingInvoiceAmount !== undefined &&
@@ -347,6 +441,8 @@ export class PurchasesService {
               data: {
 
                 requestedAmount:
+                  purchase.requestedAmount ??
+                  purchase.incomingInvoiceAmount ??
                   body.amount,
 
                 status:
@@ -383,6 +479,13 @@ export class PurchasesService {
                   Boolean(
                     body.urgent
                   ),
+
+                payload: {
+                  kind:
+                    'PAY_SUPPLIER',
+                  amountToPay:
+                    body.amount ?? null,
+                },
 
                 createdById:
                   body.actorId,
@@ -485,9 +588,12 @@ export class PurchasesService {
       );
 
 
+    // Оплата и наличие платёжки — разные этапы.
+    // Как только нужная сумма оплачена, закупка считается
+    // оплаченной и задача оплаты закрывается. Документ с
+    // печатью можно запросить отдельно позже.
     const complete =
-      financiallyComplete &&
-      allDocumentsSatisfied;
+      financiallyComplete;
 
 
     return {
@@ -712,6 +818,271 @@ export class PurchasesService {
           return payment;
         },
       );
+  }
+
+
+  async requestBalanceCorrection(
+    dealId: string,
+    purchaseId: string,
+    body: {
+      actualAmount: number;
+      comment?: string;
+      actorId: string;
+    },
+  ) {
+
+    const actualAmount =
+      Number(body.actualAmount);
+
+
+    if (
+      !Number.isFinite(actualAmount) ||
+      actualAmount < 0
+    ) {
+      throw new BadRequestException(
+        'Укажите фактическую сумму списания с остатка',
+      );
+    }
+
+
+    const purchase =
+      await this.prisma
+        .supplierPurchase
+        .findFirstOrThrow({
+          where: {
+            id: purchaseId,
+            dealId,
+          },
+          include: {
+            payments: {
+              orderBy: {
+                paidAt: 'desc',
+              },
+            },
+            tasks: {
+              where: {
+                type:
+                  TaskType.OTHER,
+                status: {
+                  notIn: [
+                    TaskStatus.DONE,
+                    TaskStatus.CANCELLED,
+                  ],
+                },
+              },
+            },
+          },
+        });
+
+
+    const balancePayment =
+      purchase.payments.find(
+        (payment) =>
+          payment.paidFromBalance,
+      );
+
+
+    if (!balancePayment) {
+      throw new BadRequestException(
+        'По этой закупке нет оплаты с остатка',
+      );
+    }
+
+
+    const existing =
+      purchase.tasks.find(
+        (task) => {
+          const payload =
+            task.payload as
+              | Record<string, unknown>
+              | null;
+
+          return payload?.kind ===
+            'SUPPLIER_BALANCE_CORRECTION';
+        },
+      );
+
+
+    if (existing) {
+      throw new BadRequestException(
+        'Корректировка оплаты с остатка уже отправлена бухгалтерии',
+      );
+    }
+
+
+    const oldAmount =
+      Number(balancePayment.amount);
+
+
+    if (
+      Math.abs(
+        oldAmount - actualAmount,
+      ) < 0.001
+    ) {
+      throw new BadRequestException(
+        'Фактическая сумма не изменилась',
+      );
+    }
+
+
+    const task =
+      await this.prisma.task.create({
+        data: {
+          dealId,
+          supplierPurchaseId:
+            purchaseId,
+          type:
+            TaskType.OTHER,
+          title:
+            'Уточнить списание с остатка: ' +
+            purchase.supplierName,
+          description:
+            body.comment?.trim() ||
+            undefined,
+          createdById:
+            body.actorId,
+          payload: {
+            kind:
+              'SUPPLIER_BALANCE_CORRECTION',
+            paymentId:
+              balancePayment.id,
+            oldAmount,
+            requestedAmount:
+              actualAmount,
+            supplierName:
+              purchase.supplierName,
+          },
+        },
+      });
+
+
+    await this.prisma.auditEvent.create({
+      data: {
+        dealId,
+        actorId:
+          body.actorId,
+        action:
+          'SUPPLIER_BALANCE_CORRECTION_REQUESTED',
+        entityType:
+          'SupplierPayment',
+        entityId:
+          balancePayment.id,
+        oldValue: {
+          amount:
+            balancePayment.amount
+              .toString(),
+        },
+        newValue: {
+          amount:
+            actualAmount,
+          supplierName:
+            purchase.supplierName,
+          paidFromBalance:
+            true,
+        },
+        reason:
+          body.comment?.trim() ||
+          undefined,
+      },
+    });
+
+
+    return task;
+  }
+
+
+  async requestStampedPayment(
+    dealId: string,
+    purchaseId: string,
+    actorId: string,
+  ) {
+
+    const purchase =
+      await this.prisma
+        .supplierPurchase
+        .findFirstOrThrow({
+          where: {
+            id: purchaseId,
+            dealId,
+          },
+          include: {
+            payments: true,
+          },
+        });
+
+
+    const needsStampedDocument =
+      purchase.payments.some(
+        (payment) =>
+          !payment.paymentOrderStamped &&
+          !payment.paidFromBalance
+      );
+
+
+    if (!needsStampedDocument) {
+      throw new BadRequestException(
+        'По этой закупке нет оплаты, для которой нужна платёжка с печатью',
+      );
+    }
+
+
+    const existing =
+      await this.prisma.task.findFirst({
+        where: {
+          supplierPurchaseId: purchaseId,
+          type: TaskType.PAY_SUPPLIER,
+          status: {
+            notIn: [
+              TaskStatus.DONE,
+              TaskStatus.CANCELLED,
+            ],
+          },
+        },
+      });
+
+
+    if (existing) {
+      throw new BadRequestException(
+        'Запрос платёжки с печатью уже передан бухгалтерии',
+      );
+    }
+
+
+    return this.prisma.$transaction(
+      async (tx) => {
+
+        const task = await tx.task.create({
+          data: {
+            dealId,
+            supplierPurchaseId: purchaseId,
+            type: TaskType.PAY_SUPPLIER,
+            title:
+              'Приложить платёжку с печатью: ' +
+              purchase.supplierName,
+            description:
+              'Оплата уже проведена. Нужна платёжка с печатью.',
+            createdById: actorId,
+          },
+        });
+
+
+        await tx.auditEvent.create({
+          data: {
+            dealId,
+            actorId,
+            action: 'SUPPLIER_STAMP_REQUESTED',
+            entityType: 'SupplierPurchase',
+            entityId: purchaseId,
+            newValue: {
+              supplierName: purchase.supplierName,
+            },
+          },
+        });
+
+
+        return task;
+      },
+    );
   }
 
 
@@ -1015,9 +1386,14 @@ export class PurchasesService {
 
                 dealId,
 
-                category:
-                  'SUPPLIER_INVOICE_' +
-                  purchaseId,
+                category: {
+                  in: [
+                    'SUPPLIER_INVOICE_' +
+                      purchaseId,
+                    'SUPPLIER_ATTACHMENT_' +
+                      purchaseId,
+                  ],
+                },
               },
             });
 

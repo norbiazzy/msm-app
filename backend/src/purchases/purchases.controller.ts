@@ -113,6 +113,51 @@ export class PurchasesController {
   }
 
 
+  @Post(':purchaseId/balance-correction')
+  requestBalanceCorrection(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('purchaseId')
+    purchaseId: string,
+
+    @Body()
+    body: {
+      actualAmount: number;
+      comment?: string;
+      actorId: string;
+    },
+  ) {
+    return this.purchases.requestBalanceCorrection(
+      dealId,
+      purchaseId,
+      body,
+    );
+  }
+
+  @Post(':purchaseId/request-stamped-payment')
+  requestStampedPayment(
+    @Param('dealId')
+    dealId: string,
+
+    @Param('purchaseId')
+    purchaseId: string,
+
+    @Body()
+    body: {
+      actorId: string;
+    },
+  ) {
+
+    return this.purchases
+      .requestStampedPayment(
+        dealId,
+        purchaseId,
+        body.actorId,
+      );
+  }
+
+
   @Patch(
     ':purchaseId/payments/:paymentId/stamped'
   )

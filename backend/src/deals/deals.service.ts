@@ -452,6 +452,222 @@ export class DealsService {
   }
 
 
+  async resubmitInvoiceRequest(
+    id: string,
+    body: {
+      actorId: string;
+      urgent?: boolean;
+      sellerType: SellerType;
+      clientName: string;
+      accountingComment?: string;
+      marginMode?: string;
+      marginValue?: number;
+    },
+  ) {
+
+    return this.prisma.$transaction(
+      async (tx) => {
+
+        const deal =
+          await tx.deal.findUniqueOrThrow({
+            where: { id },
+          });
+
+
+        const active =
+          await tx.task.findFirst({
+            where: {
+              dealId: id,
+              type: TaskType.ISSUE_CLIENT_INVOICE,
+              status: {
+                notIn: [
+                  TaskStatus.DONE,
+                  TaskStatus.CANCELLED,
+                ],
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+
+        if (active?.status === TaskStatus.IN_PROGRESS) {
+          throw new BadRequestException(
+            'Бухгалтер уже взял запрос в работу',
+          );
+        }
+
+
+        const latestReturned =
+          active
+            ? await tx.auditEvent.findFirst({
+                where: {
+                  dealId: id,
+                  entityId: active.id,
+                  action: 'INVOICE_REQUEST_RETURNED',
+                },
+                orderBy: {
+                  createdAt: 'desc',
+                },
+              })
+            : null;
+
+
+        const returnData =
+          latestReturned?.newValue as
+            | Record<string, unknown>
+            | null
+            | undefined;
+
+        const reasonCode =
+          typeof returnData?.reasonCode === 'string'
+            ? returnData.reasonCode
+            : undefined;
+
+
+        if (
+          reasonCode === 'NO_TERMS' &&
+          body.marginValue === undefined
+        ) {
+          throw new BadRequestException(
+            'Укажите условия перед повторной отправкой',
+          );
+        }
+
+
+        if (reasonCode === 'NO_INCOMING_INVOICE') {
+          const incoming =
+            await tx.storedFile.findFirst({
+              where: {
+                dealId: id,
+                OR: [
+                  {
+                    category:
+                      'CUSTOMER_INVOICE_PRIMARY',
+                  },
+                  {
+                    category: {
+                      startsWith:
+                        'CORRECTION_PRIMARY_',
+                    },
+                  },
+                ],
+              },
+              select: { id: true },
+            });
+
+          if (!incoming) {
+            throw new BadRequestException(
+              'Прикрепите входящий счёт перед повторной отправкой',
+            );
+          }
+        }
+
+
+        const nextClientName =
+          body.clientName?.trim() ||
+          deal.clientName;
+
+        const nextAccountingComment =
+          body.accountingComment?.trim() ||
+          null;
+
+
+        await tx.deal.update({
+          where: { id },
+          data: {
+            sellerType: body.sellerType,
+            clientName: nextClientName,
+            accountingComment:
+              nextAccountingComment,
+            marginMode:
+              body.marginMode || null,
+            marginValue:
+              body.marginValue ?? null,
+          },
+        });
+
+
+        if (deal.sellerType !== body.sellerType) {
+          await tx.auditEvent.create({
+            data: {
+              dealId: id,
+              actorId: body.actorId,
+              action: 'DEAL_SELLER_CHANGED',
+              entityType: 'Deal',
+              entityId: id,
+              oldValue: {
+                sellerType: deal.sellerType,
+              },
+              newValue: {
+                sellerType: body.sellerType,
+              },
+              reason:
+                'Изменено при повторной отправке запроса на счёт',
+            },
+          });
+        }
+
+
+        const task = active
+          ? await tx.task.update({
+              where: { id: active.id },
+              data: {
+                status: TaskStatus.NEW,
+                assigneeId: null,
+                completedAt: null,
+                urgent:
+                  body.urgent !== undefined
+                    ? Boolean(body.urgent)
+                    : active.urgent,
+                description:
+                  nextAccountingComment ||
+                  active.description,
+              },
+            })
+          : await tx.task.create({
+              data: {
+                dealId: id,
+                type:
+                  TaskType.ISSUE_CLIENT_INVOICE,
+                title: 'Выставить счёт',
+                description:
+                  nextAccountingComment ||
+                  undefined,
+                urgent:
+                  Boolean(body.urgent),
+                createdById:
+                  body.actorId,
+              },
+            });
+
+
+        await tx.auditEvent.create({
+          data: {
+            dealId: id,
+            actorId: body.actorId,
+            action:
+              'INVOICE_REQUEST_RESUBMITTED',
+            entityType: 'Task',
+            entityId: task.id,
+            newValue: {
+              status: TaskStatus.NEW,
+              marginMode:
+                body.marginMode || null,
+              marginValue:
+                body.marginValue ?? null,
+            },
+          },
+        });
+
+
+        return task;
+      },
+    );
+  }
+
+
   async withdrawInvoiceRequest(
     id: string,
     actorId: string,

@@ -1,4 +1,5 @@
 import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { SellerType } from '@prisma/client';
 import { InvoicesService } from './invoices.service';
 
 @Controller('deals/:dealId/invoices')
@@ -46,11 +47,33 @@ export class InvoicesController {
     return this.invoices.confirm(dealId, invoiceId, body.actorId);
   }
 
+  @Patch(':invoiceId/approve')
+  approve(
+    @Param('dealId') dealId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { actorId: string },
+  ) {
+    return this.invoices.approve(dealId, invoiceId, body.actorId);
+  }
+
+  @Post(':invoiceId/correction/withdraw')
+  withdrawCorrection(
+    @Param('dealId') dealId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { actorId: string },
+  ) {
+    return this.invoices.withdrawCorrection(
+      dealId,
+      invoiceId,
+      body.actorId,
+    );
+  }
+
   @Post(':invoiceId/correction')
   requestCorrection(
     @Param('dealId') dealId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
+    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: SellerType },
   ) {
     return this.invoices.requestCorrection(dealId, invoiceId, body);
   }

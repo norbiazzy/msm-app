@@ -1,4 +1,5 @@
 import { Body, Controller, Patch, Get, Param, Post, Query } from '@nestjs/common';
+import { SellerType } from '@prisma/client';
 import { CreateDealDto } from './dto';
 import { DealsService } from './deals.service';
 
@@ -23,6 +24,22 @@ export class DealsController {
     @Body() body: { actorId: string; urgent?: boolean },
   ) {
     return this.deals.submitInvoiceRequest(id, body);
+  }
+
+  @Post(':id/invoice-request/resubmit')
+  resubmitInvoiceRequest(
+    @Param('id') id: string,
+    @Body() body: {
+      actorId: string;
+      urgent?: boolean;
+      sellerType: SellerType;
+      clientName: string;
+      accountingComment?: string;
+      marginMode?: string;
+      marginValue?: number;
+    },
+  ) {
+    return this.deals.resubmitInvoiceRequest(id, body);
   }
 
   @Post(':id/invoice-request/withdraw')
@@ -60,7 +77,7 @@ export class DealsController {
 
     @Body()
     body: {
-      sellerType?: 'ST' | 'MSM' | 'IP';
+      sellerType?: SellerType;
       clientName?: string;
       contactName?: string;
       clientPhone?: string;

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { TaskStatus, TaskType } from '@prisma/client';
+import { SupplierPurchaseStatus, TaskStatus, TaskType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -212,6 +212,406 @@ export class TasksService {
 
 
         return updated;
+      },
+    );
+  }
+
+
+  async createPowerOfAttorney(
+    body: {
+      dealId: string;
+      actorId: string;
+      urgent?: boolean;
+      requestKey: string;
+      supplierName: string;
+      organization: 'ST' | 'MSM' | 'IP';
+      recipientName: string;
+      invoiceNumber?: string;
+      requestDate?: string;
+      goodsDescription: string;
+      comment?: string;
+    },
+  ) {
+
+    const supplierName =
+      body.supplierName?.trim();
+
+    const recipientName =
+      body.recipientName?.trim();
+
+    const goodsDescription =
+      body.goodsDescription?.trim();
+
+
+    if (!supplierName) {
+      throw new BadRequestException(
+        'Укажите поставщика / завод',
+      );
+    }
+
+    if (!recipientName) {
+      throw new BadRequestException(
+        'Укажите, на кого нужна доверенность',
+      );
+    }
+
+    if (!goodsDescription) {
+      throw new BadRequestException(
+        'Укажите, что получаем',
+      );
+    }
+
+
+    const deal =
+      await this.prisma.deal
+        .findUniqueOrThrow({
+          where: {
+            id: body.dealId,
+          },
+        });
+
+
+    const task =
+      await this.prisma.task.create({
+        data: {
+          dealId: body.dealId,
+          type:
+            TaskType.POWER_OF_ATTORNEY,
+          status:
+            TaskStatus.NEW,
+          urgent:
+            Boolean(body.urgent),
+          title:
+            'Сделать доверенность: ' +
+            supplierName,
+          description:
+            body.comment?.trim() ||
+            undefined,
+          createdById:
+            body.actorId,
+          payload: {
+            kind:
+              'POWER_OF_ATTORNEY',
+            requestKey:
+              body.requestKey,
+            supplierName,
+            organization:
+              body.organization,
+            recipientName,
+            invoiceNumber:
+              body.invoiceNumber?.trim() ||
+              null,
+            requestDate:
+              body.requestDate || null,
+            goodsDescription,
+            comment:
+              body.comment?.trim() ||
+              null,
+          },
+        },
+      });
+
+
+    await this.prisma.auditEvent.create({
+      data: {
+        dealId:
+          body.dealId,
+        actorId:
+          body.actorId,
+        action:
+          'POWER_OF_ATTORNEY_REQUESTED',
+        entityType:
+          'Task',
+        entityId:
+          task.id,
+        newValue: {
+          supplierName,
+          organization:
+            body.organization,
+          recipientName,
+        },
+        reason:
+          body.comment?.trim() ||
+          undefined,
+      },
+    });
+
+
+    return {
+      ...task,
+      deal,
+    };
+  }
+
+
+  async completePowerOfAttorney(
+    id: string,
+    actorId: string,
+  ) {
+
+    return this.prisma.$transaction(
+      async (tx) => {
+
+        const task =
+          await tx.task
+            .findUniqueOrThrow({
+              where: { id },
+            });
+
+
+        if (
+          task.type !==
+          TaskType.POWER_OF_ATTORNEY
+        ) {
+          throw new BadRequestException(
+            'Это не задача на доверенность',
+          );
+        }
+
+
+        const resultFile =
+          await tx.storedFile.findFirst({
+            where: {
+              dealId:
+                task.dealId,
+              category:
+                'POWER_OF_ATTORNEY_RESULT_' +
+                task.id,
+            },
+            select: {
+              id: true,
+            },
+          });
+
+
+        if (!resultFile) {
+          throw new BadRequestException(
+            'Прикрепите готовую доверенность',
+          );
+        }
+
+
+        const updated =
+          await tx.task.update({
+            where: { id },
+            data: {
+              status:
+                TaskStatus.DONE,
+              assigneeId:
+                actorId,
+              completedAt:
+                new Date(),
+            },
+          });
+
+
+        await tx.auditEvent.create({
+          data: {
+            dealId:
+              task.dealId,
+            actorId,
+            action:
+              'POWER_OF_ATTORNEY_READY',
+            entityType:
+              'Task',
+            entityId:
+              task.id,
+          },
+        });
+
+
+        return updated;
+      },
+    );
+  }
+
+
+  async completeBalanceCorrection(
+    id: string,
+    actorId: string,
+  ) {
+
+    return this.prisma.$transaction(
+      async (tx) => {
+
+        const task =
+          await tx.task
+            .findUniqueOrThrow({
+              where: { id },
+            });
+
+        const payload =
+          task.payload as
+            | Record<string, unknown>
+            | null;
+
+
+        if (
+          task.type !== TaskType.OTHER ||
+          payload?.kind !==
+            'SUPPLIER_BALANCE_CORRECTION'
+        ) {
+          throw new BadRequestException(
+            'Это не задача на корректировку оплаты с остатка',
+          );
+        }
+
+
+        const paymentId =
+          typeof payload.paymentId === 'string'
+            ? payload.paymentId
+            : '';
+
+        const requestedAmount =
+          Number(
+            payload.requestedAmount,
+          );
+
+
+        if (
+          !paymentId ||
+          !Number.isFinite(
+            requestedAmount,
+          ) ||
+          requestedAmount < 0
+        ) {
+          throw new BadRequestException(
+            'Некорректные данные корректировки',
+          );
+        }
+
+
+        const payment =
+          await tx.supplierPayment
+            .findUniqueOrThrow({
+              where: {
+                id: paymentId,
+              },
+              include: {
+                purchase: true,
+              },
+            });
+
+
+        if (!payment.paidFromBalance) {
+          throw new BadRequestException(
+            'Корректировать этим способом можно только оплату с остатка',
+          );
+        }
+
+
+        const oldAmount =
+          payment.amount.toString();
+
+
+        const updatedPayment =
+          await tx.supplierPayment.update({
+            where: {
+              id: payment.id,
+            },
+            data: {
+              amount:
+                requestedAmount,
+            },
+          });
+
+
+        const allPayments =
+          await tx.supplierPayment.findMany({
+            where: {
+              purchaseId:
+                payment.purchaseId,
+            },
+          });
+
+        const totalPaid =
+          allPayments.reduce(
+            (sum, item) =>
+              sum + Number(item.amount),
+            0,
+          );
+
+        const target =
+          payment.purchase.requestedAmount
+            ? Number(
+                payment.purchase
+                  .requestedAmount
+              )
+            : payment.purchase
+                .incomingInvoiceAmount
+              ? Number(
+                  payment.purchase
+                    .incomingInvoiceAmount
+                )
+              : null;
+
+        const nextPurchaseStatus =
+          target !== null &&
+          totalPaid >= target
+            ? SupplierPurchaseStatus.PAID
+            : totalPaid > 0
+              ? SupplierPurchaseStatus.PARTIALLY_PAID
+              : SupplierPurchaseStatus.DRAFT;
+
+
+        await tx.supplierPurchase.update({
+          where: {
+            id: payment.purchaseId,
+          },
+          data: {
+            status:
+              nextPurchaseStatus,
+          },
+        });
+
+
+        const updatedTask =
+          await tx.task.update({
+            where: { id },
+            data: {
+              status:
+                TaskStatus.DONE,
+              assigneeId:
+                actorId,
+              completedAt:
+                new Date(),
+            },
+          });
+
+
+        await tx.auditEvent.create({
+          data: {
+            dealId:
+              task.dealId,
+            actorId,
+            action:
+              'SUPPLIER_BALANCE_CORRECTED',
+            entityType:
+              'SupplierPayment',
+            entityId:
+              payment.id,
+            oldValue: {
+              amount:
+                oldAmount,
+            },
+            newValue: {
+              amount:
+                updatedPayment.amount
+                  .toString(),
+              supplierName:
+                payment.purchase
+                  .supplierName,
+              paidFromBalance:
+                true,
+            },
+            reason:
+              task.description ||
+              undefined,
+          },
+        });
+
+
+        return updatedTask;
       },
     );
   }

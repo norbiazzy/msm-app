@@ -3396,3 +3396,788 @@ html[data-theme='dark'] .dealMetric,html[data-theme='dark'] .dealInfoRow { backg
 html[data-theme='dark'] .dealMetricMuted { background:#1d1d1f; }
 html[data-theme='dark'] .dealQuickClose { background:#303033; color:#f5f5f4; }
 @media (max-width:520px){ .dealOverviewGrid{grid-template-columns:1fr 1fr;} .dealOverviewHead{align-items:flex-start;} .dealOverviewHead h2{font-size:23px;} .dealOverviewInvoiceStatus{max-width:42%;} .dealInfoView{grid-template-columns:1fr 1fr;} .dealQuickActions{grid-template-columns:1fr 1fr 36px;} }
+
+/* MSM v0.5.6 workflow + incoming invoice */
+
+.dealOverviewInvoiceStatus {
+  min-width: 180px;
+  padding: 9px 11px;
+  border: 1px solid #e7e5e4;
+  border-radius: 13px;
+  background: #fafaf9;
+}
+
+.dealInvoiceStatus-creating {
+  background: #fafaf9;
+}
+
+.dealInvoiceStatus-working {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.dealInvoiceStatus-review {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.dealInvoiceStatus-customer {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+}
+
+.dealInvoiceStatus-correction,
+.dealInvoiceStatus-needs-data {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.dealInvoiceStatus-agreed {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.supplierBadgeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.supplierBadge {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #e7e5e4;
+  font-size: 11px !important;
+  line-height: 1.2;
+}
+
+.dealIncomingInvoiceCard {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid #e7e5e4;
+  border-radius: 17px;
+  background: #fff;
+}
+
+.dealIncomingInvoiceHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dealIncomingInvoiceHead > div:first-child {
+  min-width: 0;
+}
+
+.dealIncomingInvoiceHead span,
+.dealIncomingInvoiceHead strong {
+  display: block;
+}
+
+.dealIncomingInvoiceHead span {
+  color: #78716c;
+  font-size: 10px;
+}
+
+.dealIncomingInvoiceHead strong {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.dealIncomingInvoiceActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.dealIncomingInvoiceActions > a,
+.dealIncomingInvoiceHistoryRow > a {
+  color: #171717;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.dealIncomingInvoiceHistory {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f0efed;
+}
+
+.dealIncomingInvoiceHistoryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: #fafaf9;
+}
+
+.dealIncomingInvoiceHistoryRow > div {
+  min-width: 0;
+}
+
+.dealIncomingInvoiceHistoryRow b,
+.dealIncomingInvoiceHistoryRow span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.dealIncomingInvoiceHistoryRow b {
+  font-size: 11px;
+}
+
+.dealIncomingInvoiceHistoryRow span {
+  margin-top: 2px;
+  color: #a8a29e;
+  font-size: 9px;
+}
+
+.purchaseSelectedInvoice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e7e5e4;
+  border-radius: 12px;
+  background: #fafaf9;
+}
+
+.purchaseSelectedInvoice > div {
+  min-width: 0;
+}
+
+.purchaseSelectedInvoice b,
+.purchaseSelectedInvoice span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.purchaseSelectedInvoice b {
+  font-size: 12px;
+}
+
+.purchaseSelectedInvoice span {
+  margin-top: 2px;
+  color: #78716c;
+  font-size: 10px;
+}
+
+.purchaseSelectedInvoice > a {
+  flex-shrink: 0;
+  color: #171717;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.purchaseInvoiceCurrent {
+  display: grid;
+  gap: 7px;
+}
+
+.purchaseInvoiceCurrentHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.purchaseInvoiceCurrentHead > span {
+  color: #78716c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.purchaseInvoiceEditButton {
+  border: 0;
+  background: transparent;
+  color: #57534e;
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.purchaseInvoiceMissing {
+  padding: 10px;
+  border: 1px dashed #d6d3d1;
+  border-radius: 11px;
+  color: #78716c;
+  font-size: 11px;
+  text-align: center;
+}
+
+.purchaseInvoiceEditor {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid #e7e5e4;
+  border-radius: 13px;
+  background: #fff;
+  animation: msmFadeUp 160ms ease-out both;
+}
+
+.purchaseInvoiceWarning {
+  padding: 9px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.purchaseInvoiceEditorActions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+}
+
+html[data-theme='dark'] .dealOverviewInvoiceStatus,
+html[data-theme='dark'] .dealIncomingInvoiceCard,
+html[data-theme='dark'] .purchaseInvoiceEditor {
+  background: #1d1d1f;
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .dealInvoiceStatus-working {
+  background: #172238;
+  border-color: #1d4ed8;
+}
+
+html[data-theme='dark'] .dealInvoiceStatus-review {
+  background: #292317;
+  border-color: #854d0e;
+}
+
+html[data-theme='dark'] .dealInvoiceStatus-customer {
+  background: #221c34;
+  border-color: #6d28d9;
+}
+
+html[data-theme='dark'] .dealInvoiceStatus-correction,
+html[data-theme='dark'] .dealInvoiceStatus-needs-data {
+  background: #2d2118;
+  border-color: #9a3412;
+}
+
+html[data-theme='dark'] .dealInvoiceStatus-agreed {
+  background: #16281d;
+  border-color: #166534;
+}
+
+html[data-theme='dark'] .supplierBadge {
+  background: #303033;
+}
+
+html[data-theme='dark'] .dealIncomingInvoiceHistory {
+  border-color: #303033;
+}
+
+html[data-theme='dark'] .dealIncomingInvoiceHistoryRow,
+html[data-theme='dark'] .purchaseSelectedInvoice {
+  background: #242426;
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .dealIncomingInvoiceActions > a,
+html[data-theme='dark'] .dealIncomingInvoiceHistoryRow > a,
+html[data-theme='dark'] .purchaseSelectedInvoice > a {
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .purchaseInvoiceMissing {
+  border-color: #444447;
+  color: #a8a29e;
+}
+
+html[data-theme='dark'] .purchaseInvoiceEditButton {
+  color: #d6d3d1;
+}
+
+html[data-theme='dark'] .purchaseInvoiceWarning {
+  background: #292317;
+  border-color: #854d0e;
+  color: #fde68a;
+}
+
+@media (max-width: 520px) {
+  .dealOverviewInvoiceStatus {
+    min-width: 0;
+    max-width: 48%;
+  }
+
+  .dealIncomingInvoiceHead {
+    align-items: flex-start;
+  }
+
+  .dealIncomingInvoiceActions {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .purchaseInvoiceEditorActions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.dealIncomingWorkflow-empty {
+  background: #fafaf9;
+}
+
+.dealIncomingWorkflow-unpaid {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.dealIncomingWorkflow-paying {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.dealIncomingWorkflow-paid {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+html[data-theme='dark'] .dealIncomingWorkflow-unpaid {
+  background: #292317;
+  border-color: #854d0e;
+}
+
+html[data-theme='dark'] .dealIncomingWorkflow-paying {
+  background: #172238;
+  border-color: #1d4ed8;
+}
+
+html[data-theme='dark'] .dealIncomingWorkflow-paid {
+  background: #16281d;
+  border-color: #166534;
+}
+
+/* MSM stabilization: invoice documents + supplier payment docs v0.5.7 */
+
+.dealOverviewInvoiceLink {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  color: #171717;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dealIncomingSupplierList {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dealIncomingSupplierRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: #fafaf9;
+}
+
+.dealIncomingSupplierList .dealIncomingSupplierRow {
+  margin-top: 0;
+}
+
+.dealIncomingSupplierRow > div {
+  min-width: 0;
+}
+
+.dealIncomingSupplierRow b,
+.dealIncomingSupplierRow span {
+  display: block;
+}
+
+.dealIncomingSupplierRow span {
+  margin-top: 3px;
+  color: #78716c;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.dealIncomingSupplierRow a {
+  flex-shrink: 0;
+  color: #171717;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.purchasePaymentDocuments {
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #e7e5e4;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.purchasePaymentDocumentsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.purchasePaymentDocumentsHead span,
+.purchasePaymentDocumentsHead b {
+  display: block;
+}
+
+.purchasePaymentDocumentsHead span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.purchasePaymentDocumentsHead b {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.purchasePaymentFileList {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f0efed;
+}
+
+.purchasePaymentFileList a {
+  color: #171717;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.purchasePaymentFileMissing {
+  color: #a8a29e;
+  font-size: 11px;
+}
+
+html[data-theme='dark'] .dealOverviewInvoiceLink,
+html[data-theme='dark'] .dealIncomingSupplierRow a,
+html[data-theme='dark'] .purchasePaymentFileList a {
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .dealIncomingSupplierRow,
+html[data-theme='dark'] .purchasePaymentDocuments {
+  background: #242426;
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .purchasePaymentFileList {
+  border-color: #343437;
+}
+
+@media (max-width: 520px) {
+  .purchasePaymentDocumentsHead {
+    align-items: flex-start;
+  }
+
+  .purchasePaymentDocumentsHead .compactButton {
+    width: auto;
+  }
+}
+
+/* MSM v0.5.8 - correction / balance / power of attorney */
+
+.correctionPendingHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.correctionPendingHead > div {
+  min-width: 0;
+}
+
+.correctionPendingHead p {
+  max-width: 560px;
+}
+
+.balanceCorrectionBlock {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid #dbeafe;
+  border-radius: 13px;
+  background: #f8fbff;
+}
+
+.balanceCorrectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.balanceCorrectionHead span,
+.balanceCorrectionHead b {
+  display: block;
+}
+
+.balanceCorrectionHead span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.balanceCorrectionHead b {
+  margin-top: 2px;
+}
+
+.balanceCorrectionForm {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #dbeafe;
+}
+
+.balanceCorrectionTaskSummary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e7e5e4;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.balanceCorrectionTaskSummary span,
+.balanceCorrectionTaskSummary b {
+  display: block;
+}
+
+.balanceCorrectionTaskSummary span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.balanceCorrectionTaskSummary b {
+  margin-top: 3px;
+  font-size: 17px;
+}
+
+.powerBox {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e7e5e4;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.powerHead,
+.powerCardHead,
+.powerCardHead > div {
+  min-width: 0;
+}
+
+.powerHead,
+.powerCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.powerHead span,
+.powerHead strong,
+.powerCardHead span,
+.powerCardHead strong {
+  display: block;
+}
+
+.powerHead span,
+.powerCardHead span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.powerHead strong,
+.powerCardHead strong {
+  margin-top: 2px;
+  font-size: 16px;
+}
+
+.powerHead > b {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f5f5f4;
+  font-size: 11px;
+}
+
+.powerList {
+  display: grid;
+  gap: 9px;
+}
+
+.powerCard {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #e7e5e4;
+  border-radius: 14px;
+  background: #fafaf9;
+}
+
+.powerStatus {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #e7e5e4;
+  color: #57534e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.powerStatus-new {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.powerStatus-in_progress {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.powerStatus-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.powerMeta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #57534e;
+  font-size: 11px;
+}
+
+.powerFiles {
+  display: grid;
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid #e7e5e4;
+}
+
+.powerFiles > span {
+  color: #78716c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.powerFiles a {
+  color: #171717;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.powerSourceFiles {
+  opacity: .82;
+}
+
+.powerForm {
+  display: grid;
+  gap: 11px;
+  padding-top: 11px;
+  border-top: 1px solid #f0efed;
+  animation: msmFadeUp 180ms ease-out both;
+}
+
+.powerTaskGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e7e5e4;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.powerTaskGrid span,
+.powerTaskGrid b {
+  display: block;
+}
+
+.powerTaskGrid span {
+  color: #78716c;
+  font-size: 11px;
+}
+
+.powerTaskGrid b {
+  margin-top: 3px;
+}
+
+html[data-theme='dark'] .balanceCorrectionBlock {
+  background: #172033;
+  border-color: #263f66;
+}
+
+html[data-theme='dark'] .balanceCorrectionForm {
+  border-color: #263f66;
+}
+
+html[data-theme='dark'] .balanceCorrectionTaskSummary,
+html[data-theme='dark'] .powerBox,
+html[data-theme='dark'] .powerTaskGrid {
+  background: #1d1d1f;
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .powerCard {
+  background: #242426;
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .powerFiles {
+  border-color: #343437;
+}
+
+html[data-theme='dark'] .powerFiles a {
+  color: #f5f5f4;
+}
+
+html[data-theme='dark'] .powerHead > b {
+  background: #303033;
+}
+
+@media (max-width: 520px) {
+  .correctionPendingHead,
+  .balanceCorrectionHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .correctionPendingHead button,
+  .balanceCorrectionHead button {
+    width: 100%;
+  }
+
+  .balanceCorrectionTaskSummary,
+  .powerTaskGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -40,6 +40,7 @@ export type DealTask = {
   urgent: boolean;
   status: string;
   description?: string;
+  payload?: Record<string, unknown>;
   type?: string;
 };
 
@@ -92,6 +93,13 @@ export type SupplierPurchase = {
   comment?: string;
   status: SupplierPurchaseStatus;
   payments: SupplierPayment[];
+  tasks?: {
+    id: string;
+    type: string;
+    status: string;
+    title: string;
+    payload?: Record<string, unknown>;
+  }[];
   createdAt: string;
   updatedAt: string;
 };

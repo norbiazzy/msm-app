@@ -1,0 +1,1206 @@
+diff --git a/backend/src/purchases/purchases.controller.ts b/backend/src/purchases/purchases.controller.ts
+index 1e982d5..c1b5e94 100644
+--- a/backend/src/purchases/purchases.controller.ts
++++ b/backend/src/purchases/purchases.controller.ts
+@@ -113,6 +113,29 @@ export class PurchasesController {
+   }
+ 
+ 
++  @Post(':purchaseId/request-stamped-payment')
++  requestStampedPayment(
++    @Param('dealId')
++    dealId: string,
++
++    @Param('purchaseId')
++    purchaseId: string,
++
++    @Body()
++    body: {
++      actorId: string;
++    },
++  ) {
++
++    return this.purchases
++      .requestStampedPayment(
++        dealId,
++        purchaseId,
++        body.actorId,
++      );
++  }
++
++
+   @Patch(
+     ':purchaseId/payments/:paymentId/stamped'
+   )
+diff --git a/backend/src/purchases/purchases.service.ts b/backend/src/purchases/purchases.service.ts
+index 1a525a1..6d72505 100644
+--- a/backend/src/purchases/purchases.service.ts
++++ b/backend/src/purchases/purchases.service.ts
+@@ -62,6 +62,25 @@ export class PurchasesService {
+               },
+             },
+           },
++
++
++          tasks: {
++            where: {
++              type: TaskType.PAY_SUPPLIER,
++              status: {
++                notIn: [
++                  TaskStatus.DONE,
++                  TaskStatus.CANCELLED,
++                ],
++              },
++            },
++            select: {
++              id: true,
++              type: true,
++              status: true,
++              title: true,
++            },
++          },
+         },
+       });
+   }
+@@ -560,9 +579,12 @@ export class PurchasesService {
+       );
+ 
+ 
++    // Оплата и наличие платёжки — разные этапы.
++    // Как только нужная сумма оплачена, закупка считается
++    // оплаченной и задача оплаты закрывается. Документ с
++    // печатью можно запросить отдельно позже.
+     const complete =
+-      financiallyComplete &&
+-      allDocumentsSatisfied;
++      financiallyComplete;
+ 
+ 
+     return {
+@@ -790,6 +812,101 @@ export class PurchasesService {
+   }
+ 
+ 
++  async requestStampedPayment(
++    dealId: string,
++    purchaseId: string,
++    actorId: string,
++  ) {
++
++    const purchase =
++      await this.prisma
++        .supplierPurchase
++        .findFirstOrThrow({
++          where: {
++            id: purchaseId,
++            dealId,
++          },
++          include: {
++            payments: true,
++          },
++        });
++
++
++    const needsStampedDocument =
++      purchase.payments.some(
++        (payment) =>
++          !payment.paymentOrderStamped &&
++          !payment.paidFromBalance
++      );
++
++
++    if (!needsStampedDocument) {
++      throw new BadRequestException(
++        'По этой закупке нет оплаты, для которой нужна платёжка с печатью',
++      );
++    }
++
++
++    const existing =
++      await this.prisma.task.findFirst({
++        where: {
++          supplierPurchaseId: purchaseId,
++          type: TaskType.PAY_SUPPLIER,
++          status: {
++            notIn: [
++              TaskStatus.DONE,
++              TaskStatus.CANCELLED,
++            ],
++          },
++        },
++      });
++
++
++    if (existing) {
++      throw new BadRequestException(
++        'Запрос платёжки с печатью уже передан бухгалтерии',
++      );
++    }
++
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const task = await tx.task.create({
++          data: {
++            dealId,
++            supplierPurchaseId: purchaseId,
++            type: TaskType.PAY_SUPPLIER,
++            title:
++              'Приложить платёжку с печатью: ' +
++              purchase.supplierName,
++            description:
++              'Оплата уже проведена. Нужна платёжка с печатью.',
++            createdById: actorId,
++          },
++        });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId,
++            actorId,
++            action: 'SUPPLIER_STAMP_REQUESTED',
++            entityType: 'SupplierPurchase',
++            entityId: purchaseId,
++            newValue: {
++              supplierName: purchase.supplierName,
++            },
++          },
++        });
++
++
++        return task;
++      },
++    );
++  }
++
++
+   async markPaymentStamped(
+     dealId: string,
+     purchaseId: string,
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index b980b3d..387029b 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -30,7 +30,6 @@ import {
+ import { FormEvent, useEffect, useMemo, useState } from 'react';
+ import {
+   addClientPayment,
+-  approveInvoice,
+   confirmInvoice,
+   createDeal,
+   createInvoice,
+@@ -275,10 +274,10 @@ function dealInvoiceWorkflowLabel(
+         'Счёт ожидает проверку',
+ 
+       CONFIRMED:
+-        'Счёт на согласовании с заказчиком',
++        'Счёт готов',
+ 
+       AGREED:
+-        'Счёт согласован',
++        'Счёт готов',
+ 
+       CORRECTION_REQUESTED:
+         'Счёт на корректировке',
+@@ -346,14 +345,13 @@ function dealInvoiceWorkflowTone(
+ 
+ 
+   if (invoice) {
+-    if (invoice.status === 'AGREED') {
++    if (
++      invoice.status === 'AGREED' ||
++      invoice.status === 'CONFIRMED'
++    ) {
+       return 'agreed';
+     }
+ 
+-    if (invoice.status === 'CONFIRMED') {
+-      return 'customer';
+-    }
+-
+     if (
+       invoice.status ===
+         'CORRECTION_REQUESTED'
+@@ -1271,6 +1269,52 @@ function DealDetail({
+     );
+ 
+ 
++  const supplierIncomingRows =
++    supplierPurchases
++      .map((purchase) => {
++
++        const purchaseFiles =
++          (deal.files || [])
++            .filter(
++              (file) =>
++                file.category ===
++                'SUPPLIER_INVOICE_' +
++                purchase.id
++            )
++            .sort(
++              (a, b) =>
++                new Date(
++                  a.createdAt || 0
++                ).getTime() -
++                new Date(
++                  b.createdAt || 0
++                ).getTime()
++            );
++
++
++        const file =
++          purchaseFiles[
++            purchaseFiles.length - 1
++          ];
++
++
++        return file
++          ? { purchase, file }
++          : null;
++      })
++      .filter(
++        (item): item is {
++          purchase: (typeof supplierPurchases)[number];
++          file: NonNullable<Deal['files']>[number];
++        } => Boolean(item)
++      );
++
++
++  const showDealIncomingInvoices =
++    supplierIncomingRows.length > 0 ||
++    Boolean(currentCustomerInvoice);
++
++
+   const incomingWorkflowStatus =
+     supplierIncomingWorkflowLabel(
+       deal
+@@ -1317,12 +1361,6 @@ function DealDetail({
+       'WAITING_MANAGER_REVIEW';
+ 
+ 
+-  const canApproveCustomer =
+-    canManageInvoice &&
+-    current?.status ===
+-      'CONFIRMED';
+-
+-
+   function parsedManagerAmount() {
+ 
+     return parseMoneyInput(
+@@ -2116,43 +2154,6 @@ function DealDetail({
+   }
+ 
+ 
+-  async function approveCustomer() {
+-
+-    if (!current) {
+-      return;
+-    }
+-
+-
+-    setSaving(true);
+-    setError('');
+-
+-
+-    try {
+-
+-      await approveInvoice(
+-        dealId,
+-        current.id,
+-        user.id,
+-      );
+-
+-
+-      await reload(false);
+-
+-
+-    } catch (e) {
+-
+-      setError(
+-        e instanceof Error
+-          ? e.message
+-          : String(e)
+-      );
+-
+-
+-    } finally {
+-
+-      setSaving(false);
+-    }
+-  }
+ 
+ 
+   async function sendCorrection() {
+@@ -2395,6 +2396,22 @@ function DealDetail({
+                   : 'Счёт готовится'
+               }
+             </h2>
++
++            {(current?.fileId || current?.file?.id) && (
++              <a
++                className="dealOverviewInvoiceLink"
++                href={
++                  dealFileUrl(
++                    current.fileId ||
++                    current.file!.id
++                  )
++                }
++                target="_blank"
++                rel="noreferrer"
++              >
++                Открыть готовый счёт
++              </a>
++            )}
+           </div>
+ 
+           <div
+@@ -2557,19 +2574,6 @@ function DealDetail({
+             </b>
+           </div>
+ 
+-
+-          <div className="dealMetric dealMetricMuted">
+-            <span>От кого выставлен</span>
+-            <b>
+-              {
+-                sellerLabels[
+-                  current?.sellerType ||
+-                  deal.sellerType
+-                ]
+-              }
+-            </b>
+-          </div>
+-
+         </div>
+ 
+ 
+@@ -2796,39 +2800,28 @@ function DealDetail({
+       </div>
+ 
+ 
+-      <div className="dealIncomingInvoiceCard">
+-
+-        <div className="dealIncomingInvoiceHead">
+-          <div>
+-            <span>Входящий счёт</span>
+-            <strong>
+-              {
+-                currentCustomerInvoice
+-                  ? currentCustomerInvoice.originalName
+-                  : 'Не прикреплён'
+-              }
+-            </strong>
+-          </div>
+-
++      {showDealIncomingInvoices && (
+ 
+-          <div className="dealIncomingInvoiceActions">
++        <div className="dealIncomingInvoiceCard">
+ 
+-            {currentCustomerInvoice && (
+-              <a
+-                href={
+-                  dealFileUrl(
+-                    currentCustomerInvoice.id
+-                  )
++          <div className="dealIncomingInvoiceHead">
++            <div>
++              <span>Входящие счета</span>
++              <strong>
++                {
++                  supplierIncomingRows.length > 0
++                    ? 'По поставщикам · ' +
++                      supplierIncomingRows.length
++                    : currentCustomerInvoice
++                      ? currentCustomerInvoice.originalName
++                      : ''
+                 }
+-                target="_blank"
+-                rel="noreferrer"
+-              >
+-                Открыть
+-              </a>
+-            )}
++              </strong>
++            </div>
+ 
+ 
+-            {previousCustomerInvoices.length > 0 && (
++            {supplierIncomingRows.length === 0 &&
++              previousCustomerInvoices.length > 0 && (
+               <button
+                 type="button"
+                 className="secondary compactButton"
+@@ -2846,41 +2839,22 @@ function DealDetail({
+                 }
+               </button>
+             )}
+-
+           </div>
+-        </div>
+ 
+ 
+-        {incomingHistoryOpen &&
+-          previousCustomerInvoices.length > 0 && (
++          {supplierIncomingRows.length > 0 ? (
+ 
+-          <div className="dealIncomingInvoiceHistory">
+-
+-            {[...previousCustomerInvoices]
+-              .reverse()
+-              .map(
+-                (file, index) => (
++            <div className="dealIncomingSupplierList">
++              {supplierIncomingRows.map(
++                ({ purchase, file }) => (
+ 
+                 <div
+-                  className="dealIncomingInvoiceHistoryRow"
+-                  key={file.id}
++                  className="dealIncomingSupplierRow"
++                  key={purchase.id}
+                 >
+                   <div>
+-                    <b>{file.originalName}</b>
+-                    <span>
+-                      Версия {
+-                        previousCustomerInvoices.length -
+-                        index
+-                      }
+-                      {file.createdAt
+-                        ? ' · ' +
+-                          new Date(
+-                            file.createdAt
+-                          ).toLocaleDateString(
+-                            'ru-RU'
+-                          )
+-                        : ''}
+-                    </span>
++                    <b>{purchase.supplierName}</b>
++                    <span>{file.originalName}</span>
+                   </div>
+ 
+                   <a
+@@ -2893,14 +2867,78 @@ function DealDetail({
+                 </div>
+ 
+               ))}
++            </div>
+ 
+-          </div>
++          ) : currentCustomerInvoice ? (
+ 
+-        )}
++            <div className="dealIncomingSupplierRow">
++              <div>
++                <b>Из запроса на счёт</b>
++                <span>{currentCustomerInvoice.originalName}</span>
++              </div>
+ 
+-      </div>
++              <a
++                href={dealFileUrl(currentCustomerInvoice.id)}
++                target="_blank"
++                rel="noreferrer"
++              >
++                Открыть
++              </a>
++            </div>
++
++          ) : null}
+ 
+ 
++          {supplierIncomingRows.length === 0 &&
++            incomingHistoryOpen &&
++            previousCustomerInvoices.length > 0 && (
++
++            <div className="dealIncomingInvoiceHistory">
++              {[...previousCustomerInvoices]
++                .reverse()
++                .map(
++                  (file, index) => (
++
++                  <div
++                    className="dealIncomingInvoiceHistoryRow"
++                    key={file.id}
++                  >
++                    <div>
++                      <b>{file.originalName}</b>
++                      <span>
++                        Версия {
++                          previousCustomerInvoices.length -
++                          index
++                        }
++                        {file.createdAt
++                          ? ' · ' +
++                            new Date(
++                              file.createdAt
++                            ).toLocaleDateString(
++                              'ru-RU'
++                            )
++                          : ''}
++                      </span>
++                    </div>
++
++                    <a
++                      href={dealFileUrl(file.id)}
++                      target="_blank"
++                      rel="noreferrer"
++                    >
++                      Открыть
++                    </a>
++                  </div>
++
++                ))}
++            </div>
++
++          )}
++
++        </div>
++
++      )}
++
+       <div className="dealInfoBox">
+ 
+         <div className="dealInfoHead">
+@@ -3974,7 +4012,7 @@ function DealDetail({
+         <div
+           className={
+             'invoiceDecisionBar' +
+-            (!(canConfirm || canApproveCustomer)
++            (!canConfirm
+               ? ' invoiceDecisionBarSingle'
+               : '')
+           }
+@@ -3999,22 +4037,7 @@ function DealDetail({
+               {
+                 saving
+                   ? 'Сохраняем…'
+-                  : 'На согласование заказчику'
+-              }
+-            </button>
+-          )}
+-
+-          {canApproveCustomer && (
+-            <button
+-              type="button"
+-              className="primary"
+-              disabled={saving}
+-              onClick={approveCustomer}
+-            >
+-              {
+-                saving
+-                  ? 'Сохраняем…'
+-                  : 'Заказчик согласовал'
++                  : 'Всё верно'
+               }
+             </button>
+           )}
+@@ -4452,21 +4475,22 @@ function InvoiceBlock({
+       </div>
+ 
+ 
+-      {invoice.fileId && (
++      {(invoice.fileId || invoice.file?.id) && (
+ 
+         <a
+           className="fileButton"
+ 
+           href={
+             dealFileUrl(
+-              invoice.fileId
++              invoice.fileId ||
++              invoice.file!.id
+             )
+           }
+ 
+           target="_blank"
+           rel="noreferrer"
+         >
+-          Открыть PDF
++          Открыть готовый счёт
+         </a>
+ 
+       )}
+@@ -4491,20 +4515,12 @@ function InvoiceVersion({
+   if (invoice.isCurrent) {
+ 
+     if (
+-      invoice.status ===
+-      'AGREED'
+-    ) {
+-
+-      stateLabel =
+-        'Текущая · согласован';
+-
+-    } else if (
+-      invoice.status ===
+-      'CONFIRMED'
++      invoice.status === 'AGREED' ||
++      invoice.status === 'CONFIRMED'
+     ) {
+ 
+       stateLabel =
+-        'Текущая · у заказчика';
++        'Текущая · готов';
+ 
+     } else if (
+       invoice.status ===
+@@ -4604,12 +4620,13 @@ function InvoiceVersion({
+       </div>
+ 
+ 
+-      {invoice.fileId && (
++      {(invoice.fileId || invoice.file?.id) && (
+ 
+         <a
+           href={
+             dealFileUrl(
+-              invoice.fileId
++              invoice.fileId ||
++              invoice.file!.id
+             )
+           }
+ 
+@@ -7759,10 +7776,10 @@ function auditLabel(
+       'Загружен счёт',
+ 
+     CONFIRM:
+-      'Счёт отправлен на согласование заказчику',
++      'Счёт проверен менеджером',
+ 
+     CUSTOMER_APPROVED:
+-      'Счёт согласован заказчиком',
++      'Счёт готов',
+ 
+     REQUEST_CORRECTION:
+       'Запрошена корректировка',
+@@ -7805,6 +7822,9 @@ function auditLabel(
+     SUPPLIER_PAYMENT_STAMPED:
+       'Добавлена платёжка с печатью',
+ 
++    SUPPLIER_STAMP_REQUESTED:
++      'Запрошена платёжка с печатью',
++
+     MANAGER_COMMENT_CHANGED:
+       'Изменён комментарий менеджера',
+ 
+@@ -7969,6 +7989,6 @@ function ThemeToggle() {
+ function Field({ title, children }: { title: string; children: React.ReactNode }) { return <label className="field"><span>{title}</span>{children}</label>; }
+ function ScreenMessage({ children }: { children: React.ReactNode }) { return <div className="screenMessage">{children}</div>; }
+ function roleName(role: CurrentUser['role']) { return ({ MANAGER: 'Менеджер', ACCOUNTANT: 'Бухгалтер', LEADER: 'Руководитель', ADMIN: 'Админ' } as const)[role]; }
+-function statusLabel(status: string) { return ({ WAITING_MANAGER_REVIEW: 'Счёт ожидает проверку', CONFIRMED: 'Счёт на согласовании с заказчиком', AGREED: 'Счёт согласован', CORRECTION_REQUESTED: 'Счёт на корректировке', WAITING_ACCOUNTING: 'Счёт на создании' } as Record<string, string>)[status] || status; }
++function statusLabel(status: string) { return ({ WAITING_MANAGER_REVIEW: 'Счёт ожидает проверку', CONFIRMED: 'Счёт готов', AGREED: 'Счёт готов', CORRECTION_REQUESTED: 'Счёт на корректировке', WAITING_ACCOUNTING: 'Счёт на создании' } as Record<string, string>)[status] || status; }
+ 
+ export default App;
+diff --git a/frontend/src/PurchasesBlock.tsx b/frontend/src/PurchasesBlock.tsx
+index 3d7bd6d..f47a22d 100644
+--- a/frontend/src/PurchasesBlock.tsx
++++ b/frontend/src/PurchasesBlock.tsx
+@@ -15,6 +15,7 @@ import {
+   dealFileUrl,
+   listSupplierPurchases,
+   requestSupplierPayment,
++  requestSupplierStampedPayment,
+   updateSupplierPurchase,
+   updateTaskStatus,
+   type Task,
+@@ -997,6 +998,97 @@ function PurchaseCard({
+     );
+ 
+ 
++  const paymentFiles =
++    (deal.files || []).filter(
++      (file) =>
++        file.category ===
++        'SUPPLIER_PAYMENT_' +
++        purchase.id
++    );
++
++
++  const paymentIds =
++    new Set(
++      purchase.payments.map(
++        (payment) => payment.id
++      )
++    );
++
++
++  const stampedPaymentFiles =
++    (deal.files || []).filter(
++      (file) => {
++        const prefix =
++          'SUPPLIER_PAYMENT_STAMP_';
++
++        if (
++          !file.category?.startsWith(
++            prefix
++          )
++        ) {
++          return false;
++        }
++
++        return paymentIds.has(
++          file.category.slice(
++            prefix.length
++          )
++        );
++      }
++    );
++
++
++  const paymentTarget =
++    purchase.requestedAmount
++      ? Number(purchase.requestedAmount)
++      : purchase.incomingInvoiceAmount
++        ? Number(purchase.incomingInvoiceAmount)
++        : null;
++
++
++  const financiallyPaid =
++    paymentTarget === null
++      ? paid > 0
++      : paid >= paymentTarget;
++
++
++  const needsStampedDocument =
++    financiallyPaid &&
++    purchase.payments.some(
++      (payment) =>
++        !payment.paymentOrderStamped &&
++        !payment.paidFromBalance
++    );
++
++
++  const paidOnlyFromBalance =
++    purchase.payments.length > 0 &&
++    purchase.payments.every(
++      (payment) =>
++        payment.paidFromBalance
++    );
++
++
++  const activeStampRequest =
++    (purchase.tasks || []).some(
++      (task) =>
++        ![
++          'DONE',
++          'CANCELLED',
++        ].includes(task.status)
++    );
++
++
++  const paymentDocumentStatus =
++    paidOnlyFromBalance
++      ? 'Оплачено с остатка'
++      : needsStampedDocument
++        ? 'Платёжка без печати'
++        : purchase.payments.length > 0
++          ? 'Платёжка с печатью'
++          : '';
++
++
+   const dealIncomingFiles =
+     (
+       deal.files || []
+@@ -1024,7 +1116,7 @@ function PurchaseCard({
+   const supplierInvoiceStatus =
+     !currentPurchaseInvoice
+       ? 'Нет входящего'
+-      : purchase.status === 'PAID'
++      : financiallyPaid
+         ? 'Входящий оплачен'
+         : (
+             purchase.status ===
+@@ -1139,6 +1231,40 @@ function PurchaseCard({
+ 
+ 
+ 
++  async function requestStampedDocument() {
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++
++      await requestSupplierStampedPayment(
++        deal.id,
++        purchase.id,
++        user.id,
++      );
++
++
++      await onChanged();
++
++
++    } catch (e) {
++
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++
++    } finally {
++
++      setSaving(false);
++    }
++  }
++
++
+   async function cancelPurchase() {
+ 
+     setSaving(true);
+@@ -1507,6 +1633,81 @@ function PurchaseCard({
+       )}
+ 
+ 
++      {purchase.payments.length > 0 && (
++
++        <div className="purchasePaymentDocuments">
++
++          <div className="purchasePaymentDocumentsHead">
++            <div>
++              <span>Документы оплаты</span>
++              <b>{paymentDocumentStatus}</b>
++            </div>
++
++            {needsStampedDocument &&
++              canManage && (
++              <button
++                type="button"
++                className="secondary compactButton"
++                disabled={
++                  saving ||
++                  activeStampRequest
++                }
++                onClick={requestStampedDocument}
++              >
++                {
++                  activeStampRequest
++                    ? 'Запрос с печатью отправлен'
++                    : 'Запросить с печатью'
++                }
++              </button>
++            )}
++          </div>
++
++
++          {!paidOnlyFromBalance && (
++            <div className="purchasePaymentFileList">
++
++              {paymentFiles.length === 0 &&
++                stampedPaymentFiles.length === 0 && (
++                <span className="purchasePaymentFileMissing">
++                  Файл платёжки не приложен
++                </span>
++              )}
++
++
++              {paymentFiles.map(
++                (file) => (
++                <a
++                  key={file.id}
++                  href={dealFileUrl(file.id)}
++                  target="_blank"
++                  rel="noreferrer"
++                >
++                  {file.originalName}
++                </a>
++              ))}
++
++
++              {stampedPaymentFiles.map(
++                (file) => (
++                <a
++                  key={file.id}
++                  href={dealFileUrl(file.id)}
++                  target="_blank"
++                  rel="noreferrer"
++                >
++                  {file.originalName} · с печатью
++                </a>
++              ))}
++
++            </div>
++          )}
++
++        </div>
++
++      )}
++
++
+       {canManage &&
+         purchase.status ===
+           'DRAFT' && (
+@@ -1692,6 +1893,12 @@ export function SupplierPaymentTask({
+     task.supplierPurchase!;
+ 
+ 
++  const stampOnlyTask =
++    task.title.startsWith(
++      'Приложить платёжку с печатью'
++    );
++
++
+   const [status, setStatus] =
+     useState(task.status);
+ 
+@@ -2142,7 +2349,11 @@ export function SupplierPaymentTask({
+ 
+ 
+         <h2>
+-          Оплатить поставщику
++          {
++            stampOnlyTask
++              ? 'Платёжка с печатью'
++              : 'Оплатить поставщику'
++          }
+         </h2>
+ 
+ 
+@@ -2210,15 +2421,21 @@ export function SupplierPaymentTask({
+           <div>
+ 
+             <span>
+-              Нужно оплатить
++              {
++                stampOnlyTask
++                  ? 'Оплачено'
++                  : 'Нужно оплатить'
++              }
+             </span>
+ 
+             <b>
+               {
+-                money(
+-                  purchase
+-                    .requestedAmount
+-                )
++                stampOnlyTask
++                  ? money(paidAlready)
++                  : money(
++                      purchase
++                        .requestedAmount
++                    )
+               }
+             </b>
+ 
+diff --git a/frontend/src/RecentActivityPanel.tsx b/frontend/src/RecentActivityPanel.tsx
+index 0381fd8..8439db9 100644
+--- a/frontend/src/RecentActivityPanel.tsx
++++ b/frontend/src/RecentActivityPanel.tsx
+@@ -231,10 +231,10 @@ function actionLabel(
+       'Загрузил счёт',
+ 
+     CONFIRM:
+-      'Отправил счёт на согласование заказчику',
++      'Проверил готовый счёт',
+ 
+     CUSTOMER_APPROVED:
+-      'Отметил счёт согласованным',
++      'Отметил счёт готовым',
+ 
+     REQUEST_CORRECTION:
+       'Отправил счёт на корректировку',
+@@ -272,6 +272,9 @@ function actionLabel(
+     SUPPLIER_PAYMENT_STAMPED:
+       'Добавил платёжку с печатью',
+ 
++    SUPPLIER_STAMP_REQUESTED:
++      'Запросил платёжку с печатью',
++
+     MANAGER_COMMENT_CHANGED:
+       'Изменил комментарий менеджера',
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 41e3291..5d025eb 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -393,6 +393,24 @@ export async function addSupplierPayment(
+ 
+ 
+ 
++export async function requestSupplierStampedPayment(
++  dealId: string,
++  purchaseId: string,
++  actorId: string,
++) {
++
++  return json(
++    `/deals/${dealId}/suppliers/${purchaseId}/request-stamped-payment`,
++    {
++      method: 'POST',
++      body: JSON.stringify({
++        actorId,
++      }),
++    },
++  );
++}
++
++
+ export async function markSupplierPaymentStamped(
+   dealId: string,
+   purchaseId: string,
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 2098c1e..3b02185 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3762,3 +3762,136 @@ html[data-theme='dark'] .dealIncomingWorkflow-paid {
+   background: #16281d;
+   border-color: #166534;
+ }
++
++/* MSM stabilization: invoice documents + supplier payment docs v0.5.7 */
++
++.dealOverviewInvoiceLink {
++  display: inline-flex;
++  align-items: center;
++  margin-top: 8px;
++  color: #171717;
++  font-size: 12px;
++  font-weight: 800;
++  text-decoration: underline;
++  text-underline-offset: 3px;
++}
++
++.dealIncomingSupplierList {
++  display: grid;
++  gap: 8px;
++  margin-top: 10px;
++}
++
++.dealIncomingSupplierRow {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  margin-top: 10px;
++  padding: 11px 12px;
++  border-radius: 12px;
++  background: #fafaf9;
++}
++
++.dealIncomingSupplierList .dealIncomingSupplierRow {
++  margin-top: 0;
++}
++
++.dealIncomingSupplierRow > div {
++  min-width: 0;
++}
++
++.dealIncomingSupplierRow b,
++.dealIncomingSupplierRow span {
++  display: block;
++}
++
++.dealIncomingSupplierRow span {
++  margin-top: 3px;
++  color: #78716c;
++  font-size: 11px;
++  overflow-wrap: anywhere;
++}
++
++.dealIncomingSupplierRow a {
++  flex-shrink: 0;
++  color: #171717;
++  font-size: 12px;
++  font-weight: 800;
++}
++
++.purchasePaymentDocuments {
++  display: grid;
++  gap: 9px;
++  padding: 11px 12px;
++  border: 1px solid #e7e5e4;
++  border-radius: 12px;
++  background: #fff;
++}
++
++.purchasePaymentDocumentsHead {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.purchasePaymentDocumentsHead span,
++.purchasePaymentDocumentsHead b {
++  display: block;
++}
++
++.purchasePaymentDocumentsHead span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.purchasePaymentDocumentsHead b {
++  margin-top: 2px;
++  font-size: 13px;
++}
++
++.purchasePaymentFileList {
++  display: grid;
++  gap: 6px;
++  padding-top: 8px;
++  border-top: 1px solid #f0efed;
++}
++
++.purchasePaymentFileList a {
++  color: #171717;
++  font-size: 12px;
++  font-weight: 800;
++  overflow-wrap: anywhere;
++}
++
++.purchasePaymentFileMissing {
++  color: #a8a29e;
++  font-size: 11px;
++}
++
++html[data-theme='dark'] .dealOverviewInvoiceLink,
++html[data-theme='dark'] .dealIncomingSupplierRow a,
++html[data-theme='dark'] .purchasePaymentFileList a {
++  color: #f5f5f4;
++}
++
++html[data-theme='dark'] .dealIncomingSupplierRow,
++html[data-theme='dark'] .purchasePaymentDocuments {
++  background: #242426;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .purchasePaymentFileList {
++  border-color: #343437;
++}
++
++@media (max-width: 520px) {
++  .purchasePaymentDocumentsHead {
++    align-items: flex-start;
++  }
++
++  .purchasePaymentDocumentsHead .compactButton {
++    width: auto;
++  }
++}
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index 0efd42d..610bcdf 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -92,6 +92,12 @@ export type SupplierPurchase = {
+   comment?: string;
+   status: SupplierPurchaseStatus;
+   payments: SupplierPayment[];
++  tasks?: {
++    id: string;
++    type: string;
++    status: string;
++    title: string;
++  }[];
+   createdAt: string;
+   updatedAt: string;
+ };

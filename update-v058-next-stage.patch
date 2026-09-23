@@ -1,0 +1,3660 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 8aae34b..3773efc 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -167,6 +167,7 @@ model Task {
+   urgent             Boolean           @default(false)
+   title              String
+   description        String?
++  payload            Json?
+   dueAt              DateTime?
+   createdById        String
+   createdBy          User              @relation("TaskCreator", fields: [createdById], references: [id])
+diff --git a/backend/src/deals/deals.controller.ts b/backend/src/deals/deals.controller.ts
+index d705923..14fced7 100644
+--- a/backend/src/deals/deals.controller.ts
++++ b/backend/src/deals/deals.controller.ts
+@@ -1,4 +1,5 @@
+ import { Body, Controller, Patch, Get, Param, Post, Query } from '@nestjs/common';
++import { SellerType } from '@prisma/client';
+ import { CreateDealDto } from './dto';
+ import { DealsService } from './deals.service';
+ 
+@@ -25,6 +26,22 @@ export class DealsController {
+     return this.deals.submitInvoiceRequest(id, body);
+   }
+ 
++  @Post(':id/invoice-request/resubmit')
++  resubmitInvoiceRequest(
++    @Param('id') id: string,
++    @Body() body: {
++      actorId: string;
++      urgent?: boolean;
++      sellerType: SellerType;
++      clientName: string;
++      accountingComment?: string;
++      marginMode?: string;
++      marginValue?: number;
++    },
++  ) {
++    return this.deals.resubmitInvoiceRequest(id, body);
++  }
++
+   @Post(':id/invoice-request/withdraw')
+   withdrawInvoiceRequest(
+     @Param('id') id: string,
+@@ -60,7 +77,7 @@ export class DealsController {
+ 
+     @Body()
+     body: {
+-      sellerType?: 'ST' | 'MSM' | 'IP';
++      sellerType?: SellerType;
+       clientName?: string;
+       contactName?: string;
+       clientPhone?: string;
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index 17400b8..1633c57 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -452,6 +452,222 @@ export class DealsService {
+   }
+ 
+ 
++  async resubmitInvoiceRequest(
++    id: string,
++    body: {
++      actorId: string;
++      urgent?: boolean;
++      sellerType: SellerType;
++      clientName: string;
++      accountingComment?: string;
++      marginMode?: string;
++      marginValue?: number;
++    },
++  ) {
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const deal =
++          await tx.deal.findUniqueOrThrow({
++            where: { id },
++          });
++
++
++        const active =
++          await tx.task.findFirst({
++            where: {
++              dealId: id,
++              type: TaskType.ISSUE_CLIENT_INVOICE,
++              status: {
++                notIn: [
++                  TaskStatus.DONE,
++                  TaskStatus.CANCELLED,
++                ],
++              },
++            },
++            orderBy: {
++              createdAt: 'desc',
++            },
++          });
++
++
++        if (active?.status === TaskStatus.IN_PROGRESS) {
++          throw new BadRequestException(
++            'Бухгалтер уже взял запрос в работу',
++          );
++        }
++
++
++        const latestReturned =
++          active
++            ? await tx.auditEvent.findFirst({
++                where: {
++                  dealId: id,
++                  entityId: active.id,
++                  action: 'INVOICE_REQUEST_RETURNED',
++                },
++                orderBy: {
++                  createdAt: 'desc',
++                },
++              })
++            : null;
++
++
++        const returnData =
++          latestReturned?.newValue as
++            | Record<string, unknown>
++            | null
++            | undefined;
++
++        const reasonCode =
++          typeof returnData?.reasonCode === 'string'
++            ? returnData.reasonCode
++            : undefined;
++
++
++        if (
++          reasonCode === 'NO_TERMS' &&
++          body.marginValue === undefined
++        ) {
++          throw new BadRequestException(
++            'Укажите условия перед повторной отправкой',
++          );
++        }
++
++
++        if (reasonCode === 'NO_INCOMING_INVOICE') {
++          const incoming =
++            await tx.storedFile.findFirst({
++              where: {
++                dealId: id,
++                OR: [
++                  {
++                    category:
++                      'CUSTOMER_INVOICE_PRIMARY',
++                  },
++                  {
++                    category: {
++                      startsWith:
++                        'CORRECTION_PRIMARY_',
++                    },
++                  },
++                ],
++              },
++              select: { id: true },
++            });
++
++          if (!incoming) {
++            throw new BadRequestException(
++              'Прикрепите входящий счёт перед повторной отправкой',
++            );
++          }
++        }
++
++
++        const nextClientName =
++          body.clientName?.trim() ||
++          deal.clientName;
++
++        const nextAccountingComment =
++          body.accountingComment?.trim() ||
++          null;
++
++
++        await tx.deal.update({
++          where: { id },
++          data: {
++            sellerType: body.sellerType,
++            clientName: nextClientName,
++            accountingComment:
++              nextAccountingComment,
++            marginMode:
++              body.marginMode || null,
++            marginValue:
++              body.marginValue ?? null,
++          },
++        });
++
++
++        if (deal.sellerType !== body.sellerType) {
++          await tx.auditEvent.create({
++            data: {
++              dealId: id,
++              actorId: body.actorId,
++              action: 'DEAL_SELLER_CHANGED',
++              entityType: 'Deal',
++              entityId: id,
++              oldValue: {
++                sellerType: deal.sellerType,
++              },
++              newValue: {
++                sellerType: body.sellerType,
++              },
++              reason:
++                'Изменено при повторной отправке запроса на счёт',
++            },
++          });
++        }
++
++
++        const task = active
++          ? await tx.task.update({
++              where: { id: active.id },
++              data: {
++                status: TaskStatus.NEW,
++                assigneeId: null,
++                completedAt: null,
++                urgent:
++                  body.urgent !== undefined
++                    ? Boolean(body.urgent)
++                    : active.urgent,
++                description:
++                  nextAccountingComment ||
++                  active.description,
++              },
++            })
++          : await tx.task.create({
++              data: {
++                dealId: id,
++                type:
++                  TaskType.ISSUE_CLIENT_INVOICE,
++                title: 'Выставить счёт',
++                description:
++                  nextAccountingComment ||
++                  undefined,
++                urgent:
++                  Boolean(body.urgent),
++                createdById:
++                  body.actorId,
++              },
++            });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId: id,
++            actorId: body.actorId,
++            action:
++              'INVOICE_REQUEST_RESUBMITTED',
++            entityType: 'Task',
++            entityId: task.id,
++            newValue: {
++              status: TaskStatus.NEW,
++              marginMode:
++                body.marginMode || null,
++              marginValue:
++                body.marginValue ?? null,
++            },
++          },
++        });
++
++
++        return task;
++      },
++    );
++  }
++
++
+   async withdrawInvoiceRequest(
+     id: string,
+     actorId: string,
+diff --git a/backend/src/invoices/invoices.controller.ts b/backend/src/invoices/invoices.controller.ts
+index 3c90831..1c0717e 100644
+--- a/backend/src/invoices/invoices.controller.ts
++++ b/backend/src/invoices/invoices.controller.ts
+@@ -1,4 +1,5 @@
+ import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
++import { SellerType } from '@prisma/client';
+ import { InvoicesService } from './invoices.service';
+ 
+ @Controller('deals/:dealId/invoices')
+@@ -55,11 +56,24 @@ export class InvoicesController {
+     return this.invoices.approve(dealId, invoiceId, body.actorId);
+   }
+ 
++  @Post(':invoiceId/correction/withdraw')
++  withdrawCorrection(
++    @Param('dealId') dealId: string,
++    @Param('invoiceId') invoiceId: string,
++    @Body() body: { actorId: string },
++  ) {
++    return this.invoices.withdrawCorrection(
++      dealId,
++      invoiceId,
++      body.actorId,
++    );
++  }
++
+   @Post(':invoiceId/correction')
+   requestCorrection(
+     @Param('dealId') dealId: string,
+     @Param('invoiceId') invoiceId: string,
+-    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: 'ST' | 'MSM' | 'IP' },
++    @Body() body: { actorId: string; comment: string; urgent?: boolean; sellerType?: SellerType },
+   ) {
+     return this.invoices.requestCorrection(dealId, invoiceId, body);
+   }
+diff --git a/backend/src/invoices/invoices.service.ts b/backend/src/invoices/invoices.service.ts
+index d6166db..5afc044 100644
+--- a/backend/src/invoices/invoices.service.ts
++++ b/backend/src/invoices/invoices.service.ts
+@@ -13,6 +13,12 @@ export class InvoicesService {
+     fileId?: string;
+     actorId: string;
+   }) {
++    if (!body.fileId) {
++      throw new BadRequestException(
++        'Прикрепите файл готового счёта',
++      );
++    }
++
+     return this.prisma.$transaction(async (tx) => {
+       const deal = await tx.deal.findUniqueOrThrow({ where: { id: dealId } });
+       const latest = await tx.clientInvoice.findFirst({
+@@ -217,6 +223,221 @@ export class InvoicesService {
+     });
+   }
+ 
++  async withdrawCorrection(
++    dealId: string,
++    invoiceId: string,
++    actorId: string,
++  ) {
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const invoice =
++          await tx.clientInvoice
++            .findFirstOrThrow({
++              where: {
++                id: invoiceId,
++                dealId,
++              },
++            });
++
++
++        if (!invoice.isCurrent) {
++          throw new BadRequestException(
++            'Отозвать можно только корректировку актуальной версии счёта',
++          );
++        }
++
++
++        if (
++          invoice.status !==
++          InvoiceStatus.CORRECTION_REQUESTED
++        ) {
++          throw new BadRequestException(
++            'По этому счёту нет активной корректировки',
++          );
++        }
++
++
++        const task =
++          await tx.task.findFirst({
++            where: {
++              dealId,
++              type:
++                TaskType.CORRECT_CLIENT_INVOICE,
++              status: {
++                notIn: [
++                  TaskStatus.DONE,
++                  TaskStatus.CANCELLED,
++                ],
++              },
++            },
++            orderBy: {
++              createdAt: 'desc',
++            },
++          });
++
++
++        if (!task) {
++          throw new BadRequestException(
++            'Активная задача на корректировку не найдена',
++          );
++        }
++
++
++        if (
++          task.status ===
++          TaskStatus.IN_PROGRESS
++        ) {
++          throw new BadRequestException(
++            'Бухгалтер уже взял корректировку в работу. Автоматически отозвать её нельзя.',
++          );
++        }
++
++
++        const requestEvent =
++          await tx.auditEvent.findFirst({
++            where: {
++              dealId,
++              action:
++                'REQUEST_CORRECTION',
++              entityId:
++                invoiceId,
++            },
++            orderBy: {
++              createdAt: 'desc',
++            },
++          });
++
++
++        const oldValue =
++          requestEvent?.oldValue as
++            | Record<string, unknown>
++            | null
++            | undefined;
++
++        const previousStatus =
++          oldValue?.status ===
++            InvoiceStatus.CONFIRMED
++            ? InvoiceStatus.CONFIRMED
++            : InvoiceStatus
++                .WAITING_MANAGER_REVIEW;
++
++
++        const updated =
++          await tx.clientInvoice.update({
++            where: {
++              id: invoiceId,
++            },
++            data: {
++              status:
++                previousStatus,
++            },
++          });
++
++
++        const sellerChange =
++          await tx.auditEvent.findFirst({
++            where: {
++              dealId,
++              action:
++                'DEAL_SELLER_CHANGED',
++              reason:
++                'Изменено при отправке счёта на корректировку',
++              createdAt: {
++                gte: task.createdAt,
++              },
++            },
++            orderBy: {
++              createdAt: 'desc',
++            },
++          });
++
++
++        const sellerOldValue =
++          sellerChange?.oldValue as
++            | Record<string, unknown>
++            | null
++            | undefined;
++
++        const previousSeller =
++          sellerOldValue?.sellerType;
++
++
++        if (
++          previousSeller === SellerType.ST ||
++          previousSeller === SellerType.MSM ||
++          previousSeller === SellerType.IP
++        ) {
++          await tx.deal.update({
++            where: { id: dealId },
++            data: {
++              sellerType:
++                previousSeller,
++            },
++          });
++        }
++
++
++        await tx.task.update({
++          where: {
++            id: task.id,
++          },
++          data: {
++            status:
++              TaskStatus.CANCELLED,
++            completedAt:
++              new Date(),
++          },
++        });
++
++
++        await tx.storedFile.deleteMany({
++          where: {
++            dealId,
++            category: {
++              in: [
++                'CORRECTION_PRIMARY_' +
++                  task.id,
++                'CORRECTION_ATTACHMENT_' +
++                  task.id,
++                'CORRECTION_TASK_' +
++                  task.id,
++              ],
++            },
++          },
++        });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId,
++            actorId,
++            action:
++              'CORRECTION_WITHDRAWN',
++            entityType:
++              'ClientInvoice',
++            entityId:
++              invoiceId,
++            oldValue: {
++              status:
++                InvoiceStatus
++                  .CORRECTION_REQUESTED,
++            },
++            newValue: {
++              status:
++                previousStatus,
++            },
++          },
++        });
++
++
++        return updated;
++      },
++    );
++  }
++
++
+   async requestCorrection(
+     dealId: string,
+     invoiceId: string,
+diff --git a/backend/src/purchases/purchases.controller.ts b/backend/src/purchases/purchases.controller.ts
+index c1b5e94..15fccc7 100644
+--- a/backend/src/purchases/purchases.controller.ts
++++ b/backend/src/purchases/purchases.controller.ts
+@@ -113,6 +113,28 @@ export class PurchasesController {
+   }
+ 
+ 
++  @Post(':purchaseId/balance-correction')
++  requestBalanceCorrection(
++    @Param('dealId')
++    dealId: string,
++
++    @Param('purchaseId')
++    purchaseId: string,
++
++    @Body()
++    body: {
++      actualAmount: number;
++      comment?: string;
++      actorId: string;
++    },
++  ) {
++    return this.purchases.requestBalanceCorrection(
++      dealId,
++      purchaseId,
++      body,
++    );
++  }
++
+   @Post(':purchaseId/request-stamped-payment')
+   requestStampedPayment(
+     @Param('dealId')
+diff --git a/backend/src/purchases/purchases.service.ts b/backend/src/purchases/purchases.service.ts
+index 6d72505..57ef1cb 100644
+--- a/backend/src/purchases/purchases.service.ts
++++ b/backend/src/purchases/purchases.service.ts
+@@ -66,7 +66,6 @@ export class PurchasesService {
+ 
+           tasks: {
+             where: {
+-              type: TaskType.PAY_SUPPLIER,
+               status: {
+                 notIn: [
+                   TaskStatus.DONE,
+@@ -79,6 +78,7 @@ export class PurchasesService {
+               type: true,
+               status: true,
+               title: true,
++              payload: true,
+             },
+           },
+         },
+@@ -441,6 +441,8 @@ export class PurchasesService {
+               data: {
+ 
+                 requestedAmount:
++                  purchase.requestedAmount ??
++                  purchase.incomingInvoiceAmount ??
+                   body.amount,
+ 
+                 status:
+@@ -478,6 +480,13 @@ export class PurchasesService {
+                     body.urgent
+                   ),
+ 
++                payload: {
++                  kind:
++                    'PAY_SUPPLIER',
++                  amountToPay:
++                    body.amount ?? null,
++                },
++
+                 createdById:
+                   body.actorId,
+               },
+@@ -812,6 +821,176 @@ export class PurchasesService {
+   }
+ 
+ 
++  async requestBalanceCorrection(
++    dealId: string,
++    purchaseId: string,
++    body: {
++      actualAmount: number;
++      comment?: string;
++      actorId: string;
++    },
++  ) {
++
++    const actualAmount =
++      Number(body.actualAmount);
++
++
++    if (
++      !Number.isFinite(actualAmount) ||
++      actualAmount < 0
++    ) {
++      throw new BadRequestException(
++        'Укажите фактическую сумму списания с остатка',
++      );
++    }
++
++
++    const purchase =
++      await this.prisma
++        .supplierPurchase
++        .findFirstOrThrow({
++          where: {
++            id: purchaseId,
++            dealId,
++          },
++          include: {
++            payments: {
++              orderBy: {
++                paidAt: 'desc',
++              },
++            },
++            tasks: {
++              where: {
++                type:
++                  TaskType.OTHER,
++                status: {
++                  notIn: [
++                    TaskStatus.DONE,
++                    TaskStatus.CANCELLED,
++                  ],
++                },
++              },
++            },
++          },
++        });
++
++
++    const balancePayment =
++      purchase.payments.find(
++        (payment) =>
++          payment.paidFromBalance,
++      );
++
++
++    if (!balancePayment) {
++      throw new BadRequestException(
++        'По этой закупке нет оплаты с остатка',
++      );
++    }
++
++
++    const existing =
++      purchase.tasks.find(
++        (task) => {
++          const payload =
++            task.payload as
++              | Record<string, unknown>
++              | null;
++
++          return payload?.kind ===
++            'SUPPLIER_BALANCE_CORRECTION';
++        },
++      );
++
++
++    if (existing) {
++      throw new BadRequestException(
++        'Корректировка оплаты с остатка уже отправлена бухгалтерии',
++      );
++    }
++
++
++    const oldAmount =
++      Number(balancePayment.amount);
++
++
++    if (
++      Math.abs(
++        oldAmount - actualAmount,
++      ) < 0.001
++    ) {
++      throw new BadRequestException(
++        'Фактическая сумма не изменилась',
++      );
++    }
++
++
++    const task =
++      await this.prisma.task.create({
++        data: {
++          dealId,
++          supplierPurchaseId:
++            purchaseId,
++          type:
++            TaskType.OTHER,
++          title:
++            'Уточнить списание с остатка: ' +
++            purchase.supplierName,
++          description:
++            body.comment?.trim() ||
++            undefined,
++          createdById:
++            body.actorId,
++          payload: {
++            kind:
++              'SUPPLIER_BALANCE_CORRECTION',
++            paymentId:
++              balancePayment.id,
++            oldAmount,
++            requestedAmount:
++              actualAmount,
++            supplierName:
++              purchase.supplierName,
++          },
++        },
++      });
++
++
++    await this.prisma.auditEvent.create({
++      data: {
++        dealId,
++        actorId:
++          body.actorId,
++        action:
++          'SUPPLIER_BALANCE_CORRECTION_REQUESTED',
++        entityType:
++          'SupplierPayment',
++        entityId:
++          balancePayment.id,
++        oldValue: {
++          amount:
++            balancePayment.amount
++              .toString(),
++        },
++        newValue: {
++          amount:
++            actualAmount,
++          supplierName:
++            purchase.supplierName,
++          paidFromBalance:
++            true,
++        },
++        reason:
++          body.comment?.trim() ||
++          undefined,
++      },
++    });
++
++
++    return task;
++  }
++
++
+   async requestStampedPayment(
+     dealId: string,
+     purchaseId: string,
+diff --git a/backend/src/tasks/tasks.controller.ts b/backend/src/tasks/tasks.controller.ts
+index 2a71ac9..59b2d31 100644
+--- a/backend/src/tasks/tasks.controller.ts
++++ b/backend/src/tasks/tasks.controller.ts
+@@ -11,6 +11,47 @@ export class TasksController {
+     return this.tasks.list();
+   }
+ 
++  @Post('power-of-attorney')
++  createPowerOfAttorney(
++    @Body() body: {
++      dealId: string;
++      actorId: string;
++      urgent?: boolean;
++      requestKey: string;
++      supplierName: string;
++      organization: 'ST' | 'MSM' | 'IP';
++      recipientName: string;
++      invoiceNumber?: string;
++      requestDate?: string;
++      goodsDescription: string;
++      comment?: string;
++    },
++  ) {
++    return this.tasks.createPowerOfAttorney(body);
++  }
++
++  @Post(':id/complete-power-of-attorney')
++  completePowerOfAttorney(
++    @Param('id') id: string,
++    @Body() body: { actorId: string },
++  ) {
++    return this.tasks.completePowerOfAttorney(
++      id,
++      body.actorId,
++    );
++  }
++
++  @Post(':id/complete-balance-correction')
++  completeBalanceCorrection(
++    @Param('id') id: string,
++    @Body() body: { actorId: string },
++  ) {
++    return this.tasks.completeBalanceCorrection(
++      id,
++      body.actorId,
++    );
++  }
++
+ 
+   @Post(':id/return')
+   returnInvoiceRequest(
+diff --git a/backend/src/tasks/tasks.service.ts b/backend/src/tasks/tasks.service.ts
+index c8f5de6..09f03c6 100644
+--- a/backend/src/tasks/tasks.service.ts
++++ b/backend/src/tasks/tasks.service.ts
+@@ -1,5 +1,5 @@
+ import { BadRequestException, Injectable } from '@nestjs/common';
+-import { TaskStatus, TaskType } from '@prisma/client';
++import { SupplierPurchaseStatus, TaskStatus, TaskType } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
+ 
+ @Injectable()
+@@ -217,6 +217,406 @@ export class TasksService {
+   }
+ 
+ 
++  async createPowerOfAttorney(
++    body: {
++      dealId: string;
++      actorId: string;
++      urgent?: boolean;
++      requestKey: string;
++      supplierName: string;
++      organization: 'ST' | 'MSM' | 'IP';
++      recipientName: string;
++      invoiceNumber?: string;
++      requestDate?: string;
++      goodsDescription: string;
++      comment?: string;
++    },
++  ) {
++
++    const supplierName =
++      body.supplierName?.trim();
++
++    const recipientName =
++      body.recipientName?.trim();
++
++    const goodsDescription =
++      body.goodsDescription?.trim();
++
++
++    if (!supplierName) {
++      throw new BadRequestException(
++        'Укажите поставщика / завод',
++      );
++    }
++
++    if (!recipientName) {
++      throw new BadRequestException(
++        'Укажите, на кого нужна доверенность',
++      );
++    }
++
++    if (!goodsDescription) {
++      throw new BadRequestException(
++        'Укажите, что получаем',
++      );
++    }
++
++
++    const deal =
++      await this.prisma.deal
++        .findUniqueOrThrow({
++          where: {
++            id: body.dealId,
++          },
++        });
++
++
++    const task =
++      await this.prisma.task.create({
++        data: {
++          dealId: body.dealId,
++          type:
++            TaskType.POWER_OF_ATTORNEY,
++          status:
++            TaskStatus.NEW,
++          urgent:
++            Boolean(body.urgent),
++          title:
++            'Сделать доверенность: ' +
++            supplierName,
++          description:
++            body.comment?.trim() ||
++            undefined,
++          createdById:
++            body.actorId,
++          payload: {
++            kind:
++              'POWER_OF_ATTORNEY',
++            requestKey:
++              body.requestKey,
++            supplierName,
++            organization:
++              body.organization,
++            recipientName,
++            invoiceNumber:
++              body.invoiceNumber?.trim() ||
++              null,
++            requestDate:
++              body.requestDate || null,
++            goodsDescription,
++            comment:
++              body.comment?.trim() ||
++              null,
++          },
++        },
++      });
++
++
++    await this.prisma.auditEvent.create({
++      data: {
++        dealId:
++          body.dealId,
++        actorId:
++          body.actorId,
++        action:
++          'POWER_OF_ATTORNEY_REQUESTED',
++        entityType:
++          'Task',
++        entityId:
++          task.id,
++        newValue: {
++          supplierName,
++          organization:
++            body.organization,
++          recipientName,
++        },
++        reason:
++          body.comment?.trim() ||
++          undefined,
++      },
++    });
++
++
++    return {
++      ...task,
++      deal,
++    };
++  }
++
++
++  async completePowerOfAttorney(
++    id: string,
++    actorId: string,
++  ) {
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const task =
++          await tx.task
++            .findUniqueOrThrow({
++              where: { id },
++            });
++
++
++        if (
++          task.type !==
++          TaskType.POWER_OF_ATTORNEY
++        ) {
++          throw new BadRequestException(
++            'Это не задача на доверенность',
++          );
++        }
++
++
++        const resultFile =
++          await tx.storedFile.findFirst({
++            where: {
++              dealId:
++                task.dealId,
++              category:
++                'POWER_OF_ATTORNEY_RESULT_' +
++                task.id,
++            },
++            select: {
++              id: true,
++            },
++          });
++
++
++        if (!resultFile) {
++          throw new BadRequestException(
++            'Прикрепите готовую доверенность',
++          );
++        }
++
++
++        const updated =
++          await tx.task.update({
++            where: { id },
++            data: {
++              status:
++                TaskStatus.DONE,
++              assigneeId:
++                actorId,
++              completedAt:
++                new Date(),
++            },
++          });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId:
++              task.dealId,
++            actorId,
++            action:
++              'POWER_OF_ATTORNEY_READY',
++            entityType:
++              'Task',
++            entityId:
++              task.id,
++          },
++        });
++
++
++        return updated;
++      },
++    );
++  }
++
++
++  async completeBalanceCorrection(
++    id: string,
++    actorId: string,
++  ) {
++
++    return this.prisma.$transaction(
++      async (tx) => {
++
++        const task =
++          await tx.task
++            .findUniqueOrThrow({
++              where: { id },
++            });
++
++        const payload =
++          task.payload as
++            | Record<string, unknown>
++            | null;
++
++
++        if (
++          task.type !== TaskType.OTHER ||
++          payload?.kind !==
++            'SUPPLIER_BALANCE_CORRECTION'
++        ) {
++          throw new BadRequestException(
++            'Это не задача на корректировку оплаты с остатка',
++          );
++        }
++
++
++        const paymentId =
++          typeof payload.paymentId === 'string'
++            ? payload.paymentId
++            : '';
++
++        const requestedAmount =
++          Number(
++            payload.requestedAmount,
++          );
++
++
++        if (
++          !paymentId ||
++          !Number.isFinite(
++            requestedAmount,
++          ) ||
++          requestedAmount < 0
++        ) {
++          throw new BadRequestException(
++            'Некорректные данные корректировки',
++          );
++        }
++
++
++        const payment =
++          await tx.supplierPayment
++            .findUniqueOrThrow({
++              where: {
++                id: paymentId,
++              },
++              include: {
++                purchase: true,
++              },
++            });
++
++
++        if (!payment.paidFromBalance) {
++          throw new BadRequestException(
++            'Корректировать этим способом можно только оплату с остатка',
++          );
++        }
++
++
++        const oldAmount =
++          payment.amount.toString();
++
++
++        const updatedPayment =
++          await tx.supplierPayment.update({
++            where: {
++              id: payment.id,
++            },
++            data: {
++              amount:
++                requestedAmount,
++            },
++          });
++
++
++        const allPayments =
++          await tx.supplierPayment.findMany({
++            where: {
++              purchaseId:
++                payment.purchaseId,
++            },
++          });
++
++        const totalPaid =
++          allPayments.reduce(
++            (sum, item) =>
++              sum + Number(item.amount),
++            0,
++          );
++
++        const target =
++          payment.purchase.requestedAmount
++            ? Number(
++                payment.purchase
++                  .requestedAmount
++              )
++            : payment.purchase
++                .incomingInvoiceAmount
++              ? Number(
++                  payment.purchase
++                    .incomingInvoiceAmount
++                )
++              : null;
++
++        const nextPurchaseStatus =
++          target !== null &&
++          totalPaid >= target
++            ? SupplierPurchaseStatus.PAID
++            : totalPaid > 0
++              ? SupplierPurchaseStatus.PARTIALLY_PAID
++              : SupplierPurchaseStatus.DRAFT;
++
++
++        await tx.supplierPurchase.update({
++          where: {
++            id: payment.purchaseId,
++          },
++          data: {
++            status:
++              nextPurchaseStatus,
++          },
++        });
++
++
++        const updatedTask =
++          await tx.task.update({
++            where: { id },
++            data: {
++              status:
++                TaskStatus.DONE,
++              assigneeId:
++                actorId,
++              completedAt:
++                new Date(),
++            },
++          });
++
++
++        await tx.auditEvent.create({
++          data: {
++            dealId:
++              task.dealId,
++            actorId,
++            action:
++              'SUPPLIER_BALANCE_CORRECTED',
++            entityType:
++              'SupplierPayment',
++            entityId:
++              payment.id,
++            oldValue: {
++              amount:
++                oldAmount,
++            },
++            newValue: {
++              amount:
++                updatedPayment.amount
++                  .toString(),
++              supplierName:
++                payment.purchase
++                  .supplierName,
++              paidFromBalance:
++                true,
++            },
++            reason:
++              task.description ||
++              undefined,
++          },
++        });
++
++
++        return updatedTask;
++      },
++    );
++  }
++
++
+   async updateStatus(
+     id: string,
+     status: TaskStatus,
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 387029b..b3e115c 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -25,8 +25,13 @@ import {
+ 
+ import {
+   PurchasesBlock,
++  SupplierBalanceCorrectionTask,
+   SupplierPaymentTask,
+ } from './PurchasesBlock';
++import {
++  PowerOfAttorneyBlock,
++  PowerOfAttorneyTask,
++} from './PowerOfAttorneyBlock';
+ import { FormEvent, useEffect, useMemo, useState } from 'react';
+ import {
+   addClientPayment,
+@@ -39,9 +44,11 @@ import {
+   listTasks,
+   login,
+   requestInvoiceCorrection,
++  resubmitInvoiceRequest,
+   returnInvoiceRequest,
+   submitInvoiceRequest,
+   withdrawInvoiceRequest,
++  withdrawInvoiceCorrection,
+   updatePaymentStatus,
+   updateTaskStatus,
+   uploadDealFile,
+@@ -909,6 +916,11 @@ function DealDetail({
+     setWithdrawConfirmOpen,
+   ] = useState(false);
+ 
++  const [
++    correctionWithdrawOpen,
++    setCorrectionWithdrawOpen,
++  ] = useState(false);
++
+   const [
+     invoiceRequestEditOpen,
+     setInvoiceRequestEditOpen,
+@@ -1232,6 +1244,29 @@ function DealDetail({
+     );
+ 
+ 
++  const correctionTask =
++    deal.tasks.find(
++      (task) =>
++        task.type ===
++          'CORRECT_CLIENT_INVOICE' &&
++        !['DONE', 'CANCELLED'].includes(
++          task.status
++        )
++    );
++
++
++  const correctionUploadRunning =
++    Boolean(
++      correctionTask &&
++      backgroundUploads.some(
++        (job) =>
++          job.taskId ===
++            correctionTask.id &&
++          job.status === 'RUNNING'
++      )
++    );
++
++
+   const latestInvoiceReturn =
+     deal.auditEvents?.find(
+       (event) =>
+@@ -1752,32 +1787,28 @@ function DealDetail({
+     setError('');
+ 
+ 
+-    try {
+-
+-      await updateDealInfo(
+-        dealId,
+-        {
+-          sellerType:
+-            requestSellerType,
+-          clientName:
+-            requestClientName.trim() ||
+-            activeDeal.clientName,
+-          accountingComment:
+-            requestAccountingComment
+-              .trim() ||
+-            undefined,
+-          marginMode:
+-            requestMarginMode,
+-          marginValue:
+-            parsedMargin,
+-          actorId:
+-            user.id,
+-        },
+-      );
+-
++    const requestPayload = {
++      actorId:
++        user.id,
++      urgent:
++        requestUrgent,
++      sellerType:
++        requestSellerType,
++      clientName:
++        requestClientName.trim() ||
++        activeDeal.clientName,
++      accountingComment:
++        requestAccountingComment
++          .trim() ||
++        undefined,
++      marginMode:
++        requestMarginMode,
++      marginValue:
++        parsedMargin,
++    };
+ 
+-      await reload(false);
+ 
++    try {
+ 
+       const primaryFile =
+         requestIncomingInvoice;
+@@ -1816,7 +1847,6 @@ function DealDetail({
+ 
+ 
+               if (primaryFile) {
+-
+                 await upload(
+                   dealId,
+                   primaryFile,
+@@ -1834,7 +1864,6 @@ function DealDetail({
+                 index < extraFiles.length;
+                 index++
+               ) {
+-
+                 await upload(
+                   dealId,
+                   extraFiles[index],
+@@ -1847,41 +1876,31 @@ function DealDetail({
+               }
+ 
+ 
+-              setProgress(96);
++              setProgress(95);
+ 
+-              await submitInvoiceRequest(
++              await resubmitInvoiceRequest(
+                 dealId,
+-                {
+-                  actorId:
+-                    user.id,
+-                  urgent:
+-                    requestUrgent,
+-                },
++                requestPayload,
+               );
+ 
+               setProgress(99);
+-
+               await reload(false);
+             },
+         });
+ 
++
+         setRequestIncomingInvoice(null);
+         setRequestExtraFiles([]);
+         setRequestUrgent(false);
+         setInvoiceRequestEditOpen(false);
+-
++        setSaving(false);
+         return;
+       }
+ 
+ 
+-      await submitInvoiceRequest(
++      await resubmitInvoiceRequest(
+         dealId,
+-        {
+-          actorId:
+-            user.id,
+-          urgent:
+-            requestUrgent,
+-        },
++        requestPayload,
+       );
+ 
+ 
+@@ -2156,6 +2175,40 @@ function DealDetail({
+ 
+ 
+ 
++  async function withdrawCorrectionRequest() {
++
++    if (!current) {
++      return;
++    }
++
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++      await withdrawInvoiceCorrection(
++        dealId,
++        current.id,
++        user.id,
++      );
++
++      setCorrectionWithdrawOpen(false);
++      await reload(false);
++
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
+   async function sendCorrection() {
+ 
+     if (!current) {
+@@ -4052,17 +4105,88 @@ function DealDetail({
+ 
+         <div className="infoBox correctionPending">
+ 
+-          <strong>
+-            Счёт отправлен на корректировку
+-          </strong>
++          <div className="correctionPendingHead">
++            <div>
++              <strong>
++                Счёт отправлен на корректировку
++              </strong>
+ 
+-          <p>
+-            Текущая версия остаётся
+-            видна в истории, но после
+-            загрузки новой версии станет
+-            неактуальной.
+-          </p>
++              <p>
++                Текущая версия остаётся видна в истории. Пока бухгалтер не взял корректировку в работу, её можно отозвать.
++              </p>
++            </div>
+ 
++            {canManageInvoice && (
++              <button
++                type="button"
++                className="secondary compactButton"
++                disabled={
++                  saving ||
++                  correctionUploadRunning
++                }
++                onClick={() =>
++                  setCorrectionWithdrawOpen(true)
++                }
++              >
++                {correctionUploadRunning
++                  ? 'Загружаем документы…'
++                  : 'Отозвать корректировку'}
++              </button>
++            )}
++          </div>
++
++        </div>
++
++      )}
++
++
++      {correctionWithdrawOpen &&
++        current && (
++
++        <div
++          className="appModalBackdrop"
++          onClick={() =>
++            setCorrectionWithdrawOpen(false)
++          }
++        >
++          <div
++            className="appModal"
++            onClick={(event) =>
++              event.stopPropagation()
++            }
++          >
++            <strong>
++              Отозвать корректировку?
++            </strong>
++
++            <p>
++              Если бухгалтер ещё не начал работу, задача на корректировку будет отменена, а текущая версия счёта вернётся в предыдущее состояние.
++            </p>
++
++            <div className="appModalActions">
++              <button
++                type="button"
++                className="secondary"
++                disabled={saving}
++                onClick={() =>
++                  setCorrectionWithdrawOpen(false)
++                }
++              >
++                Не отзывать
++              </button>
++
++              <button
++                type="button"
++                className="dangerButton"
++                disabled={saving}
++                onClick={withdrawCorrectionRequest}
++              >
++                {saving
++                  ? 'Отзываем…'
++                  : 'Отозвать'}
++              </button>
++            </div>
++          </div>
+         </div>
+ 
+       )}
+@@ -4244,6 +4368,15 @@ function DealDetail({
+       />
+ 
+ 
++      <PowerOfAttorneyBlock
++        deal={deal}
++        user={user}
++        onChanged={() =>
++          reload(false)
++        }
++      />
++
++
+       <div className="infoBox">
+ 
+         <strong>
+@@ -5996,7 +6129,39 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+ 
+   if (selected) {
+ 
+-    return selected.type === 'PAY_SUPPLIER' &&
++    return selected.type === 'POWER_OF_ATTORNEY' ? (
++
++      <PowerOfAttorneyTask
++        task={selected}
++        user={user}
++        onBack={() => {
++          window.location.hash =
++            '#tasks';
++
++          setSelected(null);
++          void reloadTasks(false);
++          onChanged();
++        }}
++      />
++
++    ) : selected.type === 'OTHER' &&
++      selected.payload?.kind ===
++        'SUPPLIER_BALANCE_CORRECTION' ? (
++
++      <SupplierBalanceCorrectionTask
++        task={selected}
++        user={user}
++        onBack={() => {
++          window.location.hash =
++            '#tasks';
++
++          setSelected(null);
++          void reloadTasks(false);
++          onChanged();
++        }}
++      />
++
++    ) : selected.type === 'PAY_SUPPLIER' &&
+       selected.supplierPurchase ? (
+ 
+       <SupplierPaymentTask
+@@ -6387,6 +6552,14 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       [...invoiceFiles];
+ 
+ 
++    if (filesToUpload.length === 0) {
++      setError(
++        'Прикрепите файл готового счёта.'
++      );
++      return;
++    }
++
++
+     const numberToSave =
+       number.trim();
+ 
+@@ -7825,6 +7998,21 @@ function auditLabel(
+     SUPPLIER_STAMP_REQUESTED:
+       'Запрошена платёжка с печатью',
+ 
++    SUPPLIER_BALANCE_CORRECTION_REQUESTED:
++      'Запрошена корректировка оплаты с остатка',
++
++    SUPPLIER_BALANCE_CORRECTED:
++      'Скорректирована оплата с остатка',
++
++    POWER_OF_ATTORNEY_REQUESTED:
++      'Запрошена доверенность',
++
++    POWER_OF_ATTORNEY_READY:
++      'Доверенность готова',
++
++    CORRECTION_WITHDRAWN:
++      'Корректировка счёта отозвана',
++
+     MANAGER_COMMENT_CHANGED:
+       'Изменён комментарий менеджера',
+ 
+diff --git a/frontend/src/PowerOfAttorneyBlock.tsx b/frontend/src/PowerOfAttorneyBlock.tsx
+new file mode 100644
+index 0000000..e33109b
+--- /dev/null
++++ b/frontend/src/PowerOfAttorneyBlock.tsx
+@@ -0,0 +1,929 @@
++import {
++  useMemo,
++  useState,
++} from 'react';
++
++import {
++  completePowerOfAttorneyTask,
++  createPowerOfAttorneyTask,
++  dealFileUrl,
++  updateTaskStatus,
++  type Task,
++} from './api';
++
++import {
++  MultiFilePicker,
++} from './MultiFilePicker';
++
++import {
++  startBackgroundUploadJob,
++} from './backgroundUploads';
++
++import type {
++  CurrentUser,
++  Deal,
++  SellerType,
++} from './types';
++
++
++const sellerLabels:
++  Record<SellerType, string> = {
++    ST: 'СТ',
++    MSM: 'МСМ',
++    IP: 'ИП',
++  };
++
++
++function todayLocalDate() {
++  const now = new Date();
++  const local = new Date(
++    now.getTime() -
++    now.getTimezoneOffset() * 60000
++  );
++
++  return local
++    .toISOString()
++    .slice(0, 10);
++}
++
++
++function taskStatusLabel(
++  status: string,
++) {
++  return ({
++    NEW: 'Новая',
++    IN_PROGRESS: 'В работе',
++    NEED_DATA: 'Нужны данные',
++    DONE: 'Готова',
++    CANCELLED: 'Отменена',
++  } as Record<string, string>)[status] || status;
++}
++
++
++export function PowerOfAttorneyBlock({
++  deal,
++  user,
++  onChanged,
++}: {
++  deal: Deal;
++  user: CurrentUser;
++  onChanged:
++    () => void | Promise<void>;
++}) {
++
++  const [open, setOpen] =
++    useState(false);
++
++  const [supplierName, setSupplierName] =
++    useState('');
++
++  const [organization, setOrganization] =
++    useState<SellerType>(deal.sellerType);
++
++  const [recipientName, setRecipientName] =
++    useState('');
++
++  const [invoiceNumber, setInvoiceNumber] =
++    useState('');
++
++  const [requestDate, setRequestDate] =
++    useState(todayLocalDate());
++
++  const [goodsDescription, setGoodsDescription] =
++    useState('');
++
++  const [comment, setComment] =
++    useState('');
++
++  const [files, setFiles] =
++    useState<File[]>([]);
++
++  const [urgent, setUrgent] =
++    useState(false);
++
++  const [saving, setSaving] =
++    useState(false);
++
++  const [error, setError] =
++    useState('');
++
++
++  const requests = useMemo(
++    () =>
++      (deal.tasks || [])
++        .filter(
++          (task) =>
++            task.type ===
++            'POWER_OF_ATTORNEY'
++        ),
++    [deal.tasks],
++  );
++
++
++  const supplierOptions = useMemo(
++    () =>
++      Array.from(
++        new Set(
++          (deal.supplierPurchases || [])
++            .map(
++              (purchase) =>
++                purchase.supplierName
++            )
++            .filter(Boolean)
++        )
++      ),
++    [deal.supplierPurchases],
++  );
++
++
++  function resetForm() {
++    setSupplierName('');
++    setOrganization(deal.sellerType);
++    setRecipientName('');
++    setInvoiceNumber('');
++    setRequestDate(todayLocalDate());
++    setGoodsDescription('');
++    setComment('');
++    setFiles([]);
++    setUrgent(false);
++    setOpen(false);
++  }
++
++
++  async function createTask(
++    requestKey: string,
++  ) {
++    await createPowerOfAttorneyTask({
++      dealId: deal.id,
++      actorId: user.id,
++      urgent,
++      requestKey,
++      supplierName:
++        supplierName.trim(),
++      organization,
++      recipientName:
++        recipientName.trim(),
++      invoiceNumber:
++        invoiceNumber.trim() ||
++        undefined,
++      requestDate:
++        requestDate || undefined,
++      goodsDescription:
++        goodsDescription.trim(),
++      comment:
++        comment.trim() ||
++        undefined,
++    });
++  }
++
++
++  async function submit() {
++    setError('');
++
++    if (!supplierName.trim()) {
++      setError(
++        'Укажите поставщика / завод.'
++      );
++      return;
++    }
++
++    if (!recipientName.trim()) {
++      setError(
++        'Укажите, на кого нужна доверенность.'
++      );
++      return;
++    }
++
++    if (!goodsDescription.trim()) {
++      setError(
++        'Укажите, что получаем.'
++      );
++      return;
++    }
++
++
++    const requestKey =
++      'poa-' +
++      Date.now() +
++      '-' +
++      Math.random()
++        .toString(36)
++        .slice(2, 8);
++
++    const filesToUpload =
++      [...files];
++
++
++    if (filesToUpload.length > 0) {
++      startBackgroundUploadJob({
++        dealId: deal.id,
++        title:
++          'Отправляем запрос на доверенность',
++        successTitle:
++          'Запрос на доверенность отправлен',
++        subtitle:
++          supplierName.trim(),
++        files: filesToUpload,
++
++        run: async ({
++          upload,
++          setProgress,
++        }) => {
++          for (
++            let index = 0;
++            index < filesToUpload.length;
++            index++
++          ) {
++            await upload(
++              deal.id,
++              filesToUpload[index],
++              'POWER_OF_ATTORNEY_SOURCE_' +
++              requestKey,
++              index,
++              filesToUpload.length,
++            );
++          }
++
++          setProgress(95);
++          await createTask(requestKey);
++          setProgress(99);
++          await onChanged();
++        },
++      });
++
++      resetForm();
++      return;
++    }
++
++
++    setSaving(true);
++
++    try {
++      await createTask(requestKey);
++      resetForm();
++      await onChanged();
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  return (
++    <div className="powerBox">
++
++      <div className="powerHead">
++        <div>
++          <span>Документы</span>
++          <strong>Доверенности</strong>
++        </div>
++
++        <b>{requests.length}</b>
++      </div>
++
++
++      {requests.length > 0 && (
++        <div className="powerList">
++          {requests.map(
++            (task) => {
++              const payload =
++                task.payload || {};
++
++              const requestKey =
++                String(
++                  payload.requestKey || ''
++                );
++
++              const resultFiles =
++                (deal.files || []).filter(
++                  (file) =>
++                    file.category ===
++                    'POWER_OF_ATTORNEY_RESULT_' +
++                    task.id
++                );
++
++              const sourceFiles =
++                requestKey
++                  ? (deal.files || []).filter(
++                      (file) =>
++                        file.category ===
++                        'POWER_OF_ATTORNEY_SOURCE_' +
++                        requestKey
++                    )
++                  : [];
++
++              return (
++                <div
++                  className="powerCard"
++                  key={task.id}
++                >
++                  <div className="powerCardHead">
++                    <div>
++                      <strong>
++                        {String(
++                          payload.supplierName ||
++                          'Доверенность'
++                        )}
++                      </strong>
++
++                      <span>
++                        На кого: {' '}
++                        {String(
++                          payload.recipientName ||
++                          'не указано'
++                        )}
++                      </span>
++                    </div>
++
++                    <b className={
++                      'powerStatus powerStatus-' +
++                      task.status.toLowerCase()
++                    }>
++                      {taskStatusLabel(
++                        task.status
++                      )}
++                    </b>
++                  </div>
++
++
++                  <div className="powerMeta">
++                    <span>
++                      От: {' '}
++                      {sellerLabels[
++                        String(
++                          payload.organization ||
++                          deal.sellerType
++                        ) as SellerType
++                      ] ||
++                      String(
++                        payload.organization ||
++                        deal.sellerType
++                      )}
++                    </span>
++
++                    {payload.invoiceNumber && (
++                      <span>
++                        Счёт: {' '}
++                        {String(
++                          payload.invoiceNumber
++                        )}
++                      </span>
++                    )}
++                  </div>
++
++
++                  {resultFiles.length > 0 && (
++                    <div className="powerFiles">
++                      <span>
++                        Готовая доверенность
++                      </span>
++
++                      {resultFiles.map(
++                        (file) => (
++                        <a
++                          key={file.id}
++                          href={dealFileUrl(
++                            file.id
++                          )}
++                          target="_blank"
++                          rel="noreferrer"
++                        >
++                          {file.originalName}
++                        </a>
++                      ))}
++                    </div>
++                  )}
++
++
++                  {sourceFiles.length > 0 &&
++                    resultFiles.length === 0 && (
++                    <div className="powerFiles powerSourceFiles">
++                      <span>
++                        Приложено к запросу
++                      </span>
++
++                      {sourceFiles.map(
++                        (file) => (
++                        <a
++                          key={file.id}
++                          href={dealFileUrl(
++                            file.id
++                          )}
++                          target="_blank"
++                          rel="noreferrer"
++                        >
++                          {file.originalName}
++                        </a>
++                      ))}
++                    </div>
++                  )}
++                </div>
++              );
++            }
++          )}
++        </div>
++      )}
++
++
++      {user.role !== 'ACCOUNTANT' && (
++        <button
++          type="button"
++          className={
++            open
++              ? 'secondary wide'
++              : 'primary wide'
++          }
++          onClick={() =>
++            setOpen(
++              (value) => !value
++            )
++          }
++        >
++          {open
++            ? 'Закрыть'
++            : '+ Запросить доверенность'}
++        </button>
++      )}
++
++
++      {open && (
++        <div className="powerForm">
++
++          <label className="field">
++            <span>Поставщик / завод</span>
++            <input
++              list="power-suppliers"
++              value={supplierName}
++              onChange={(e) =>
++                setSupplierName(
++                  e.target.value
++                )
++              }
++              placeholder="Например: ДЗГИ"
++            />
++            <datalist id="power-suppliers">
++              {supplierOptions.map(
++                (name) => (
++                <option
++                  key={name}
++                  value={name}
++                />
++              ))}
++            </datalist>
++          </label>
++
++
++          <label className="field">
++            <span>От какой организации</span>
++            <div className="segmented">
++              {(['ST', 'MSM', 'IP'] as SellerType[])
++                .map(
++                  (type) => (
++                  <button
++                    key={type}
++                    type="button"
++                    className={
++                      organization === type
++                        ? 'selected'
++                        : ''
++                    }
++                    onClick={() =>
++                      setOrganization(type)
++                    }
++                  >
++                    {sellerLabels[type]}
++                  </button>
++                ))}
++            </div>
++          </label>
++
++
++          <label className="field">
++            <span>На кого</span>
++            <input
++              value={recipientName}
++              onChange={(e) =>
++                setRecipientName(
++                  e.target.value
++                )
++              }
++              placeholder="ФИО получателя"
++            />
++          </label>
++
++
++          <div className="inline">
++            <label className="field">
++              <span>Входящий счёт</span>
++              <input
++                value={invoiceNumber}
++                onChange={(e) =>
++                  setInvoiceNumber(
++                    e.target.value
++                  )
++                }
++                placeholder="Номер, если есть"
++              />
++            </label>
++
++            <label className="field">
++              <span>Дата</span>
++              <input
++                type="date"
++                value={requestDate}
++                onChange={(e) =>
++                  setRequestDate(
++                    e.target.value
++                  )
++                }
++              />
++            </label>
++          </div>
++
++
++          <label className="field">
++            <span>Что получаем</span>
++            <textarea
++              rows={3}
++              value={goodsDescription}
++              onChange={(e) =>
++                setGoodsDescription(
++                  e.target.value
++                )
++              }
++              placeholder="Материал, объём, позиции"
++            />
++          </label>
++
++
++          <label className="field">
++            <span>Комментарий</span>
++            <textarea
++              rows={2}
++              value={comment}
++              onChange={(e) =>
++                setComment(
++                  e.target.value
++                )
++              }
++              placeholder="Необязательно"
++            />
++          </label>
++
++
++          <label className="field">
++            <span>Документы к доверенности</span>
++            <MultiFilePicker
++              files={files}
++              onChange={setFiles}
++              title="+ Прикрепить документы"
++            />
++          </label>
++
++
++          <label className="urgentToggle">
++            <input
++              type="checkbox"
++              checked={urgent}
++              onChange={(e) =>
++                setUrgent(
++                  e.target.checked
++                )
++              }
++            />
++            <span>Срочно</span>
++          </label>
++
++
++          <button
++            type="button"
++            className="primary wide"
++            disabled={saving}
++            onClick={submit}
++          >
++            {saving
++              ? 'Отправляем…'
++              : 'Отправить бухгалтерии'}
++          </button>
++        </div>
++      )}
++
++
++      {error && (
++        <div className="error">{error}</div>
++      )}
++
++    </div>
++  );
++}
++
++
++export function PowerOfAttorneyTask({
++  task,
++  user,
++  onBack,
++}: {
++  task: Task;
++  user: CurrentUser;
++  onBack: () => void;
++}) {
++
++  const [status, setStatus] =
++    useState(task.status);
++
++  const [files, setFiles] =
++    useState<File[]>([]);
++
++  const [saving, setSaving] =
++    useState(false);
++
++  const [error, setError] =
++    useState('');
++
++  const payload =
++    task.payload || {};
++
++  const requestKey =
++    String(
++      payload.requestKey || ''
++    );
++
++  const sourceFiles =
++    requestKey
++      ? (task.deal.files || [])
++          .filter(
++            (file) =>
++              file.category ===
++              'POWER_OF_ATTORNEY_SOURCE_' +
++              requestKey
++          )
++      : [];
++
++
++  async function take() {
++    setSaving(true);
++    setError('');
++
++    try {
++      await updateTaskStatus(
++        task.id,
++        'IN_PROGRESS',
++        user.id,
++      );
++      setStatus('IN_PROGRESS');
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  function finish() {
++    setError('');
++
++    if (files.length === 0) {
++      setError(
++        'Прикрепите готовую доверенность.'
++      );
++      return;
++    }
++
++    const filesToUpload =
++      [...files];
++
++    setFiles([]);
++
++    startBackgroundUploadJob({
++      taskId: task.id,
++      dealId: task.deal.id,
++      title:
++        'Загружаем доверенность',
++      successTitle:
++        'Доверенность готова',
++      subtitle:
++        String(
++          payload.supplierName ||
++          task.deal.clientName
++        ),
++      files: filesToUpload,
++
++      run: async ({
++        upload,
++        setProgress,
++      }) => {
++        for (
++          let index = 0;
++          index < filesToUpload.length;
++          index++
++        ) {
++          await upload(
++            task.deal.id,
++            filesToUpload[index],
++            'POWER_OF_ATTORNEY_RESULT_' +
++            task.id,
++            index,
++            filesToUpload.length,
++          );
++        }
++
++        setProgress(95);
++        await completePowerOfAttorneyTask(
++          task.id,
++          user.id,
++        );
++        setProgress(99);
++      },
++    });
++
++    onBack();
++  }
++
++
++  return (
++    <section className="content form">
++
++      <button
++        className="backLink"
++        onClick={onBack}
++      >
++        ← К задачам
++      </button>
++
++
++      <div className="detailHero">
++        <div className="eyebrow">
++          ЗК-{task.deal.internalNumber}
++        </div>
++
++        <h2>Сделать доверенность</h2>
++
++        <p>
++          {String(
++            payload.supplierName ||
++            task.deal.clientName
++          )}
++        </p>
++
++        <div className="statusPill">
++          {taskStatusLabel(status)}
++        </div>
++
++        {task.urgent && (
++          <b className="urgent">
++            СРОЧНО
++          </b>
++        )}
++      </div>
++
++
++      <div className="powerTaskGrid">
++        <div>
++          <span>От организации</span>
++          <b>
++            {sellerLabels[
++              String(
++                payload.organization ||
++                task.deal.sellerType
++              ) as SellerType
++            ] ||
++            String(
++              payload.organization ||
++              task.deal.sellerType
++            )}
++          </b>
++        </div>
++
++        <div>
++          <span>На кого</span>
++          <b>
++            {String(
++              payload.recipientName || '—'
++            )}
++          </b>
++        </div>
++
++        <div>
++          <span>Входящий счёт</span>
++          <b>
++            {String(
++              payload.invoiceNumber || '—'
++            )}
++          </b>
++        </div>
++
++        <div>
++          <span>Дата</span>
++          <b>
++            {payload.requestDate
++              ? new Date(
++                  String(
++                    payload.requestDate
++                  ) + 'T12:00:00'
++                ).toLocaleDateString(
++                  'ru-RU'
++                )
++              : '—'}
++          </b>
++        </div>
++      </div>
++
++
++      <div className="infoBox">
++        <strong>Что получаем</strong>
++        <p>
++          {String(
++            payload.goodsDescription || '—'
++          )}
++        </p>
++      </div>
++
++
++      {task.description && (
++        <div className="infoBox">
++          <strong>Комментарий менеджера</strong>
++          <p>{task.description}</p>
++        </div>
++      )}
++
++
++      {sourceFiles.length > 0 && (
++        <div className="infoBox">
++          <strong>Документы к запросу</strong>
++          <div className="versionList">
++            {sourceFiles.map(
++              (file) => (
++              <div
++                key={file.id}
++                className="versionRow"
++              >
++                <div>
++                  <b>{file.originalName}</b>
++                </div>
++                <a
++                  href={dealFileUrl(
++                    file.id
++                  )}
++                  target="_blank"
++                  rel="noreferrer"
++                >
++                  Открыть
++                </a>
++              </div>
++            ))}
++          </div>
++        </div>
++      )}
++
++
++      {status === 'NEW' && (
++        <button
++          type="button"
++          className="primary wide"
++          disabled={saving}
++          onClick={take}
++        >
++          {saving ? 'Сохраняем…' : 'В работу'}
++        </button>
++      )}
++
++
++      {status === 'IN_PROGRESS' && (
++        <>
++          <label className="field">
++            <span>Готовая доверенность</span>
++            <MultiFilePicker
++              files={files}
++              onChange={setFiles}
++              title="+ Прикрепить доверенность"
++            />
++          </label>
++
++          <button
++            type="button"
++            className="primary wide"
++            disabled={saving}
++            onClick={finish}
++          >
++            Доверенность готова
++          </button>
++        </>
++      )}
++
++
++      {error && (
++        <div className="error">{error}</div>
++      )}
++
++    </section>
++  );
++}
+diff --git a/frontend/src/PurchasesBlock.tsx b/frontend/src/PurchasesBlock.tsx
+index f47a22d..eb5ffcc 100644
+--- a/frontend/src/PurchasesBlock.tsx
++++ b/frontend/src/PurchasesBlock.tsx
+@@ -16,6 +16,8 @@ import {
+   listSupplierPurchases,
+   requestSupplierPayment,
+   requestSupplierStampedPayment,
++  requestSupplierBalanceCorrection,
++  completeSupplierBalanceCorrection,
+   updateSupplierPurchase,
+   updateTaskStatus,
+   type Task,
+@@ -937,6 +939,21 @@ function PurchaseCard({
+     setCancelConfirmOpen,
+   ] = useState(false);
+ 
++  const [
++    balanceCorrectionOpen,
++    setBalanceCorrectionOpen,
++  ] = useState(false);
++
++  const [
++    balanceCorrectionAmount,
++    setBalanceCorrectionAmount,
++  ] = useState('');
++
++  const [
++    balanceCorrectionComment,
++    setBalanceCorrectionComment,
++  ] = useState('');
++
+ 
+   const paid =
+     purchase.payments
+@@ -1069,9 +1086,31 @@ function PurchaseCard({
+     );
+ 
+ 
++  const balancePayment =
++    [...purchase.payments]
++      .reverse()
++      .find(
++        (payment) =>
++          payment.paidFromBalance
++      );
++
++
++  const activeBalanceCorrection =
++    (purchase.tasks || []).find(
++      (task) =>
++        task.type === 'OTHER' &&
++        task.payload?.kind ===
++          'SUPPLIER_BALANCE_CORRECTION' &&
++        !['DONE', 'CANCELLED'].includes(
++          task.status
++        )
++    );
++
++
+   const activeStampRequest =
+     (purchase.tasks || []).some(
+       (task) =>
++        task.type === 'PAY_SUPPLIER' &&
+         ![
+           'DONE',
+           'CANCELLED',
+@@ -1113,6 +1152,16 @@ function PurchaseCard({
+       );
+ 
+ 
++  const activePaymentRequest =
++    (purchase.tasks || []).some(
++      (task) =>
++        task.type === 'PAY_SUPPLIER' &&
++        !['DONE', 'CANCELLED'].includes(
++          task.status
++        )
++    );
++
++
+   const supplierInvoiceStatus =
+     !currentPurchaseInvoice
+       ? 'Нет входящего'
+@@ -1121,8 +1170,7 @@ function PurchaseCard({
+         : (
+             purchase.status ===
+               'PAYMENT_REQUESTED' ||
+-            purchase.status ===
+-              'PARTIALLY_PAID'
++            activePaymentRequest
+           )
+           ? 'Входящий на оплате'
+           : 'Входящий не оплачен';
+@@ -1265,6 +1313,67 @@ function PurchaseCard({
+   }
+ 
+ 
++  async function requestBalanceCorrection() {
++
++    const actualAmount =
++      parseMoney(
++        balanceCorrectionAmount
++      );
++
++
++    if (
++      actualAmount === undefined
++    ) {
++      setError(
++        'Укажите фактическую сумму списания с остатка.'
++      );
++      return;
++    }
++
++
++    setSaving(true);
++    setError('');
++
++
++    try {
++
++      await requestSupplierBalanceCorrection(
++        deal.id,
++        purchase.id,
++        {
++          actualAmount,
++          comment:
++            balanceCorrectionComment
++              .trim() ||
++            undefined,
++          actorId:
++            user.id,
++        },
++      );
++
++
++      setBalanceCorrectionOpen(false);
++      setBalanceCorrectionAmount('');
++      setBalanceCorrectionComment('');
++
++      await onChanged();
++
++
++    } catch (e) {
++
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++
++
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
+   async function cancelPurchase() {
+ 
+     setSaving(true);
+@@ -1308,14 +1417,25 @@ function PurchaseCard({
+     setError('');
+ 
+ 
+-    const amount =
+-      purchase.incomingInvoiceAmount
++    const targetAmount =
++      purchase.requestedAmount
+         ? Number(
+-            purchase
+-              .incomingInvoiceAmount
++            purchase.requestedAmount
+           )
++        : purchase.incomingInvoiceAmount
++          ? Number(
++              purchase.incomingInvoiceAmount
++            )
++          : undefined;
+ 
+-        : undefined;
++
++    const amount =
++      targetAmount === undefined
++        ? undefined
++        : Math.max(
++            targetAmount - paid,
++            0
++          );
+ 
+ 
+     if (
+@@ -1709,8 +1829,116 @@ function PurchaseCard({
+ 
+ 
+       {canManage &&
+-        purchase.status ===
+-          'DRAFT' && (
++        purchase.status === 'PAID' &&
++        balancePayment && (
++
++        <div className="balanceCorrectionBlock">
++
++          <div className="balanceCorrectionHead">
++            <div>
++              <span>Оплата с остатка</span>
++              <b>
++                {money(balancePayment.amount)}
++              </b>
++            </div>
++
++            <button
++              type="button"
++              className="secondary compactButton"
++              disabled={
++                saving ||
++                Boolean(activeBalanceCorrection)
++              }
++              onClick={() => {
++                setBalanceCorrectionOpen(
++                  (value) => !value
++                );
++
++                setBalanceCorrectionAmount(
++                  formatMoneyInput(
++                    String(balancePayment.amount)
++                  )
++                );
++              }}
++            >
++              {activeBalanceCorrection
++                ? 'Корректировка отправлена'
++                : balanceCorrectionOpen
++                  ? 'Закрыть'
++                  : 'Скорректировать'}
++            </button>
++          </div>
++
++
++          {balanceCorrectionOpen &&
++            !activeBalanceCorrection && (
++
++            <div className="balanceCorrectionForm">
++
++              <label className="field">
++                <span>
++                  По факту списали с остатка
++                </span>
++
++                <input
++                  inputMode="decimal"
++                  value={balanceCorrectionAmount}
++                  onChange={(e) =>
++                    setBalanceCorrectionAmount(
++                      formatMoneyInput(
++                        e.target.value
++                      )
++                    )
++                  }
++                  placeholder="Например: 95 000"
++                />
++              </label>
++
++
++              <label className="field">
++                <span>Комментарий бухгалтерии</span>
++
++                <textarea
++                  rows={2}
++                  value={balanceCorrectionComment}
++                  onChange={(e) =>
++                    setBalanceCorrectionComment(
++                      e.target.value
++                    )
++                  }
++                  placeholder="Например: завод списал по факту меньше"
++                />
++              </label>
++
++
++              <button
++                type="button"
++                className="primary wide"
++                disabled={saving}
++                onClick={requestBalanceCorrection}
++              >
++                {saving
++                  ? 'Отправляем…'
++                  : 'Отправить бухгалтерии'}
++              </button>
++
++            </div>
++
++          )}
++
++        </div>
++
++      )}
++
++
++      {canManage &&
++        (
++          purchase.status === 'DRAFT' ||
++          (
++            purchase.status === 'PARTIALLY_PAID' &&
++            !activePaymentRequest
++          )
++        ) && (
+ 
+         <div className="purchaseCardActions">
+ 
+@@ -1722,7 +1950,9 @@ function PurchaseCard({
+               requestPayment
+             }
+           >
+-            Отправить в оплату
++            {purchase.status === 'PARTIALLY_PAID'
++              ? 'Отправить остаток в оплату'
++              : 'Отправить в оплату'}
+           </button>
+ 
+ 
+@@ -1875,6 +2105,179 @@ function PurchaseCard({
+ }
+ 
+ 
++// ======================================================
++// BALANCE CORRECTION TASK
++// ======================================================
++
++export function SupplierBalanceCorrectionTask({
++  task,
++  user,
++  onBack,
++}: {
++  task: Task;
++  user: CurrentUser;
++  onBack: () => void;
++}) {
++
++  const [status, setStatus] =
++    useState(task.status);
++
++  const [saving, setSaving] =
++    useState(false);
++
++  const [error, setError] =
++    useState('');
++
++  const payload =
++    task.payload || {};
++
++  const oldAmount =
++    Number(payload.oldAmount || 0);
++
++  const requestedAmount =
++    Number(payload.requestedAmount || 0);
++
++  const supplierName =
++    String(
++      payload.supplierName ||
++      task.supplierPurchase?.supplierName ||
++      'Поставщик'
++    );
++
++
++  async function take() {
++    setSaving(true);
++    setError('');
++
++    try {
++      await updateTaskStatus(
++        task.id,
++        'IN_PROGRESS',
++        user.id,
++      );
++      setStatus('IN_PROGRESS');
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  async function complete() {
++    setSaving(true);
++    setError('');
++
++    try {
++      await completeSupplierBalanceCorrection(
++        task.id,
++        user.id,
++      );
++      onBack();
++    } catch (e) {
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++
++  return (
++    <section className="content form">
++
++      <button
++        className="backLink"
++        onClick={onBack}
++      >
++        ← К задачам
++      </button>
++
++
++      <div className="detailHero">
++        <div className="eyebrow">
++          ЗК-{task.deal.internalNumber}
++        </div>
++
++        <h2>
++          Скорректировать оплату с остатка
++        </h2>
++
++        <p>{supplierName}</p>
++
++        <div className="statusPill">
++          {status === 'NEW'
++            ? 'Новая'
++            : status === 'IN_PROGRESS'
++              ? 'В работе'
++              : status}
++        </div>
++      </div>
++
++
++      <div className="balanceCorrectionTaskSummary">
++        <div>
++          <span>Было отмечено</span>
++          <b>{money(oldAmount)}</b>
++        </div>
++
++        <div>
++          <span>По факту списано</span>
++          <b>{money(requestedAmount)}</b>
++        </div>
++      </div>
++
++
++      {task.description && (
++        <div className="infoBox">
++          <strong>Комментарий менеджера</strong>
++          <p>{task.description}</p>
++        </div>
++      )}
++
++
++      {status === 'NEW' && (
++        <button
++          type="button"
++          className="primary wide"
++          disabled={saving}
++          onClick={take}
++        >
++          {saving ? 'Сохраняем…' : 'В работу'}
++        </button>
++      )}
++
++
++      {status === 'IN_PROGRESS' && (
++        <button
++          type="button"
++          className="primary wide"
++          disabled={saving}
++          onClick={complete}
++        >
++          {saving
++            ? 'Сохраняем…'
++            : 'Подтвердить фактическую сумму'}
++        </button>
++      )}
++
++
++      {error && (
++        <div className="error">{error}</div>
++      )}
++
++    </section>
++  );
++}
++
++
+ // ======================================================
+ // ACCOUNTANT TASK
+ // ======================================================
+@@ -1903,13 +2306,20 @@ export function SupplierPaymentTask({
+     useState(task.status);
+ 
+ 
++  const amountToPay =
++    task.payload?.amountToPay !== undefined &&
++    task.payload?.amountToPay !== null
++      ? Number(task.payload.amountToPay)
++      : purchase.requestedAmount
++        ? Number(purchase.requestedAmount)
++        : 0;
++
++
+   const [amount, setAmount] =
+     useState(
+-      purchase.requestedAmount
++      amountToPay
+         ? formatMoneyInput(
+-            String(
+-              purchase.requestedAmount
+-            )
++            String(amountToPay)
+           )
+         : ''
+     );
+@@ -2432,10 +2842,7 @@ export function SupplierPaymentTask({
+               {
+                 stampOnlyTask
+                   ? money(paidAlready)
+-                  : money(
+-                      purchase
+-                        .requestedAmount
+-                    )
++                  : money(amountToPay)
+               }
+             </b>
+ 
+diff --git a/frontend/src/RecentActivityPanel.tsx b/frontend/src/RecentActivityPanel.tsx
+index 8439db9..6baa9ec 100644
+--- a/frontend/src/RecentActivityPanel.tsx
++++ b/frontend/src/RecentActivityPanel.tsx
+@@ -275,6 +275,21 @@ function actionLabel(
+     SUPPLIER_STAMP_REQUESTED:
+       'Запросил платёжку с печатью',
+ 
++    SUPPLIER_BALANCE_CORRECTION_REQUESTED:
++      'Запросил корректировку оплаты с остатка',
++
++    SUPPLIER_BALANCE_CORRECTED:
++      'Скорректировал оплату с остатка',
++
++    POWER_OF_ATTORNEY_REQUESTED:
++      'Запросил доверенность',
++
++    POWER_OF_ATTORNEY_READY:
++      'Доверенность готова',
++
++    CORRECTION_WITHDRAWN:
++      'Отозвал корректировку счёта',
++
+     MANAGER_COMMENT_CHANGED:
+       'Изменил комментарий менеджера',
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 5d025eb..9ad9415 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -41,6 +41,7 @@ export type Task = {
+   urgent: boolean;
+   title: string;
+   description?: string;
++  payload?: Record<string, unknown>;
+   createdAt?: string;
+   updatedAt?: string;
+   deal: Deal;
+@@ -257,6 +258,20 @@ export async function requestInvoiceCorrection(
+   });
+ }
+ 
++export async function withdrawInvoiceCorrection(
++  dealId: string,
++  invoiceId: string,
++  actorId: string,
++) {
++  return json(
++    `/deals/${dealId}/invoices/${invoiceId}/correction/withdraw`,
++    {
++      method: 'POST',
++      body: JSON.stringify({ actorId }),
++    },
++  );
++}
++
+ export async function addClientPayment(
+   dealId: string,
+   payload: {
+@@ -410,6 +425,37 @@ export async function requestSupplierStampedPayment(
+   );
+ }
+ 
++export async function requestSupplierBalanceCorrection(
++  dealId: string,
++  purchaseId: string,
++  payload: {
++    actualAmount: number;
++    comment?: string;
++    actorId: string;
++  },
++) {
++  return json(
++    `/deals/${dealId}/suppliers/${purchaseId}/balance-correction`,
++    {
++      method: 'POST',
++      body: JSON.stringify(payload),
++    },
++  );
++}
++
++export async function completeSupplierBalanceCorrection(
++  taskId: string,
++  actorId: string,
++) {
++  return json(
++    `/tasks/${taskId}/complete-balance-correction`,
++    {
++      method: 'POST',
++      body: JSON.stringify({ actorId }),
++    },
++  );
++}
++
+ 
+ export async function markSupplierPaymentStamped(
+   dealId: string,
+@@ -541,6 +587,27 @@ export async function submitInvoiceRequest(
+   );
+ }
+ 
++export async function resubmitInvoiceRequest(
++  dealId: string,
++  payload: {
++    actorId: string;
++    urgent?: boolean;
++    sellerType: 'ST' | 'MSM' | 'IP';
++    clientName: string;
++    accountingComment?: string;
++    marginMode?: string;
++    marginValue?: number;
++  },
++) {
++  return json(
++    `/deals/${dealId}/invoice-request/resubmit`,
++    {
++      method: 'POST',
++      body: JSON.stringify(payload),
++    },
++  );
++}
++
+ 
+ export async function withdrawInvoiceRequest(
+   dealId: string,
+@@ -556,6 +623,43 @@ export async function withdrawInvoiceRequest(
+ }
+ 
+ 
++export async function createPowerOfAttorneyTask(
++  payload: {
++    dealId: string;
++    actorId: string;
++    urgent?: boolean;
++    requestKey: string;
++    supplierName: string;
++    organization: 'ST' | 'MSM' | 'IP';
++    recipientName: string;
++    invoiceNumber?: string;
++    requestDate?: string;
++    goodsDescription: string;
++    comment?: string;
++  },
++) {
++  return json<Task>(
++    '/tasks/power-of-attorney',
++    {
++      method: 'POST',
++      body: JSON.stringify(payload),
++    },
++  );
++}
++
++export async function completePowerOfAttorneyTask(
++  taskId: string,
++  actorId: string,
++) {
++  return json(
++    `/tasks/${taskId}/complete-power-of-attorney`,
++    {
++      method: 'POST',
++      body: JSON.stringify({ actorId }),
++    },
++  );
++}
++
+ export async function updateShipmentDate(
+   dealId: string,
+ 
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 3b02185..9c98533 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3895,3 +3895,289 @@ html[data-theme='dark'] .purchasePaymentFileList {
+     width: auto;
+   }
+ }
++
++/* MSM v0.5.8 - correction / balance / power of attorney */
++
++.correctionPendingHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 14px;
++}
++
++.correctionPendingHead > div {
++  min-width: 0;
++}
++
++.correctionPendingHead p {
++  max-width: 560px;
++}
++
++.balanceCorrectionBlock {
++  display: grid;
++  gap: 10px;
++  padding: 11px;
++  border: 1px solid #dbeafe;
++  border-radius: 13px;
++  background: #f8fbff;
++}
++
++.balanceCorrectionHead {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.balanceCorrectionHead span,
++.balanceCorrectionHead b {
++  display: block;
++}
++
++.balanceCorrectionHead span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.balanceCorrectionHead b {
++  margin-top: 2px;
++}
++
++.balanceCorrectionForm {
++  display: grid;
++  gap: 10px;
++  padding-top: 10px;
++  border-top: 1px solid #dbeafe;
++}
++
++.balanceCorrectionTaskSummary {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 10px;
++  padding: 14px;
++  border: 1px solid #e7e5e4;
++  border-radius: 16px;
++  background: #fff;
++}
++
++.balanceCorrectionTaskSummary span,
++.balanceCorrectionTaskSummary b {
++  display: block;
++}
++
++.balanceCorrectionTaskSummary span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.balanceCorrectionTaskSummary b {
++  margin-top: 3px;
++  font-size: 17px;
++}
++
++.powerBox {
++  display: grid;
++  gap: 12px;
++  padding: 14px;
++  border: 1px solid #e7e5e4;
++  border-radius: 18px;
++  background: #fff;
++}
++
++.powerHead,
++.powerCardHead,
++.powerCardHead > div {
++  min-width: 0;
++}
++
++.powerHead,
++.powerCardHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.powerHead span,
++.powerHead strong,
++.powerCardHead span,
++.powerCardHead strong {
++  display: block;
++}
++
++.powerHead span,
++.powerCardHead span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.powerHead strong,
++.powerCardHead strong {
++  margin-top: 2px;
++  font-size: 16px;
++}
++
++.powerHead > b {
++  display: grid;
++  place-items: center;
++  min-width: 26px;
++  height: 26px;
++  padding: 0 7px;
++  border-radius: 999px;
++  background: #f5f5f4;
++  font-size: 11px;
++}
++
++.powerList {
++  display: grid;
++  gap: 9px;
++}
++
++.powerCard {
++  display: grid;
++  gap: 9px;
++  padding: 12px;
++  border: 1px solid #e7e5e4;
++  border-radius: 14px;
++  background: #fafaf9;
++}
++
++.powerStatus {
++  flex-shrink: 0;
++  padding: 5px 8px;
++  border-radius: 999px;
++  background: #e7e5e4;
++  color: #57534e;
++  font-size: 10px;
++  font-weight: 800;
++}
++
++.powerStatus-new {
++  background: #fef3c7;
++  color: #92400e;
++}
++
++.powerStatus-in_progress {
++  background: #dbeafe;
++  color: #1d4ed8;
++}
++
++.powerStatus-done {
++  background: #dcfce7;
++  color: #166534;
++}
++
++.powerMeta {
++  display: flex;
++  gap: 12px;
++  flex-wrap: wrap;
++  color: #57534e;
++  font-size: 11px;
++}
++
++.powerFiles {
++  display: grid;
++  gap: 5px;
++  padding-top: 7px;
++  border-top: 1px solid #e7e5e4;
++}
++
++.powerFiles > span {
++  color: #78716c;
++  font-size: 10px;
++  font-weight: 700;
++}
++
++.powerFiles a {
++  color: #171717;
++  font-size: 12px;
++  font-weight: 800;
++  overflow-wrap: anywhere;
++}
++
++.powerSourceFiles {
++  opacity: .82;
++}
++
++.powerForm {
++  display: grid;
++  gap: 11px;
++  padding-top: 11px;
++  border-top: 1px solid #f0efed;
++  animation: msmFadeUp 180ms ease-out both;
++}
++
++.powerTaskGrid {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 10px;
++  padding: 14px;
++  border: 1px solid #e7e5e4;
++  border-radius: 16px;
++  background: #fff;
++}
++
++.powerTaskGrid span,
++.powerTaskGrid b {
++  display: block;
++}
++
++.powerTaskGrid span {
++  color: #78716c;
++  font-size: 11px;
++}
++
++.powerTaskGrid b {
++  margin-top: 3px;
++}
++
++html[data-theme='dark'] .balanceCorrectionBlock {
++  background: #172033;
++  border-color: #263f66;
++}
++
++html[data-theme='dark'] .balanceCorrectionForm {
++  border-color: #263f66;
++}
++
++html[data-theme='dark'] .balanceCorrectionTaskSummary,
++html[data-theme='dark'] .powerBox,
++html[data-theme='dark'] .powerTaskGrid {
++  background: #1d1d1f;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .powerCard {
++  background: #242426;
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .powerFiles {
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .powerFiles a {
++  color: #f5f5f4;
++}
++
++html[data-theme='dark'] .powerHead > b {
++  background: #303033;
++}
++
++@media (max-width: 520px) {
++  .correctionPendingHead,
++  .balanceCorrectionHead {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .correctionPendingHead button,
++  .balanceCorrectionHead button {
++    width: 100%;
++  }
++
++  .balanceCorrectionTaskSummary,
++  .powerTaskGrid {
++    grid-template-columns: 1fr;
++  }
++}
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index 610bcdf..3b391e7 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -40,6 +40,7 @@ export type DealTask = {
+   urgent: boolean;
+   status: string;
+   description?: string;
++  payload?: Record<string, unknown>;
+   type?: string;
+ };
+ 
+@@ -97,6 +98,7 @@ export type SupplierPurchase = {
+     type: string;
+     status: string;
+     title: string;
++    payload?: Record<string, unknown>;
+   }[];
+   createdAt: string;
+   updatedAt: string;

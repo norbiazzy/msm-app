@@ -41,6 +41,7 @@ export type Task = {
   urgent: boolean;
   title: string;
   description?: string;
+  payload?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
   deal: Deal;
@@ -239,6 +240,13 @@ export async function confirmInvoice(dealId: string, invoiceId: string, actorId:
   });
 }
 
+export async function approveInvoice(dealId: string, invoiceId: string, actorId: string) {
+  return json(`/deals/${dealId}/invoices/${invoiceId}/approve`, {
+    method: 'PATCH',
+    body: JSON.stringify({ actorId }),
+  });
+}
+
 export async function requestInvoiceCorrection(
   dealId: string,
   invoiceId: string,
@@ -248,6 +256,20 @@ export async function requestInvoiceCorrection(
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function withdrawInvoiceCorrection(
+  dealId: string,
+  invoiceId: string,
+  actorId: string,
+) {
+  return json(
+    `/deals/${dealId}/invoices/${invoiceId}/correction/withdraw`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ actorId }),
+    },
+  );
 }
 
 export async function addClientPayment(
@@ -325,6 +347,7 @@ export async function updateSupplierPurchase(
     supplierName?: string;
     incomingInvoiceAmount?: number;
     comment?: string;
+    sourceFileId?: string;
     actorId?: string;
   },
 ) {
@@ -383,6 +406,55 @@ export async function addSupplierPayment(
   );
 }
 
+
+
+export async function requestSupplierStampedPayment(
+  dealId: string,
+  purchaseId: string,
+  actorId: string,
+) {
+
+  return json(
+    `/deals/${dealId}/suppliers/${purchaseId}/request-stamped-payment`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        actorId,
+      }),
+    },
+  );
+}
+
+export async function requestSupplierBalanceCorrection(
+  dealId: string,
+  purchaseId: string,
+  payload: {
+    actualAmount: number;
+    comment?: string;
+    actorId: string;
+  },
+) {
+  return json(
+    `/deals/${dealId}/suppliers/${purchaseId}/balance-correction`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function completeSupplierBalanceCorrection(
+  taskId: string,
+  actorId: string,
+) {
+  return json(
+    `/tasks/${taskId}/complete-balance-correction`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ actorId }),
+    },
+  );
+}
 
 
 export async function markSupplierPaymentStamped(
@@ -515,6 +587,27 @@ export async function submitInvoiceRequest(
   );
 }
 
+export async function resubmitInvoiceRequest(
+  dealId: string,
+  payload: {
+    actorId: string;
+    urgent?: boolean;
+    sellerType: 'ST' | 'MSM' | 'IP';
+    clientName: string;
+    accountingComment?: string;
+    marginMode?: string;
+    marginValue?: number;
+  },
+) {
+  return json(
+    `/deals/${dealId}/invoice-request/resubmit`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 
 export async function withdrawInvoiceRequest(
   dealId: string,
@@ -529,6 +622,43 @@ export async function withdrawInvoiceRequest(
   );
 }
 
+
+export async function createPowerOfAttorneyTask(
+  payload: {
+    dealId: string;
+    actorId: string;
+    urgent?: boolean;
+    requestKey: string;
+    supplierName: string;
+    organization: 'ST' | 'MSM' | 'IP';
+    recipientName: string;
+    invoiceNumber?: string;
+    requestDate?: string;
+    goodsDescription: string;
+    comment?: string;
+  },
+) {
+  return json<Task>(
+    '/tasks/power-of-attorney',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function completePowerOfAttorneyTask(
+  taskId: string,
+  actorId: string,
+) {
+  return json(
+    `/tasks/${taskId}/complete-power-of-attorney`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ actorId }),
+    },
+  );
+}
 
 export async function updateShipmentDate(
   dealId: string,

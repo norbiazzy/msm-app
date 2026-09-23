@@ -15,6 +15,10 @@ import {
   dealFileUrl,
   listSupplierPurchases,
   requestSupplierPayment,
+  requestSupplierStampedPayment,
+  requestSupplierBalanceCorrection,
+  completeSupplierBalanceCorrection,
+  updateSupplierPurchase,
   updateTaskStatus,
   type Task,
 } from './api';
@@ -23,11 +27,11 @@ import type {
   CurrentUser,
   Deal,
   SupplierPurchase,
-  SupplierPurchaseStatus,
 } from './types';
 
 import {
   MultiFilePicker,
+  SingleFilePicker,
 } from './MultiFilePicker';
 
 
@@ -125,112 +129,6 @@ function formatMoneyInput(
 }
 
 
-function statusLabel(
-  status:
-    SupplierPurchaseStatus,
-) {
-
-  const map:
-    Record<
-      SupplierPurchaseStatus,
-      string
-    > = {
-
-    DRAFT:
-      'Сохранён',
-
-    PAYMENT_REQUESTED:
-      'Передано бухгалтерии',
-
-    PARTIALLY_PAID:
-      'Частично оплачен',
-
-    PAID:
-      'Оплачен',
-
-    CANCELLED:
-      'Отменён',
-  };
-
-
-  return map[status];
-}
-
-
-function waitingForStampedDocument(
-  purchase: SupplierPurchase,
-) {
-
-  const paid =
-    purchase.payments.reduce(
-      (
-        sum,
-        payment,
-      ) =>
-        sum +
-        Number(
-          payment.amount
-        ),
-      0,
-    );
-
-
-  const target =
-    purchase.requestedAmount
-      ? Number(
-          purchase
-            .requestedAmount
-        )
-
-      : purchase
-          .incomingInvoiceAmount
-        ? Number(
-            purchase
-              .incomingInvoiceAmount
-          )
-
-        : null;
-
-
-  const financiallyPaid =
-    target === null
-      ? paid > 0
-      : paid >= target;
-
-
-  return (
-    financiallyPaid &&
-    purchase.payments.some(
-      (payment) =>
-        !payment
-          .paymentOrderStamped &&
-        !payment
-          .paidFromBalance
-    )
-  );
-}
-
-
-function purchaseDisplayStatus(
-  purchase: SupplierPurchase,
-) {
-
-  if (
-    waitingForStampedDocument(
-      purchase
-    )
-  ) {
-
-    return 'Оплачено · ждём платёжку с печатью';
-  }
-
-
-  return statusLabel(
-    purchase.status
-  );
-}
-
-
 function todayLocalDate() {
 
   const now =
@@ -298,6 +196,11 @@ export function PurchasesBlock({
     useState<File[]>([]);
 
   const [
+    newIncomingFile,
+    setNewIncomingFile,
+  ] = useState<File | null>(null);
+
+  const [
     selectedExistingFileId,
     setSelectedExistingFileId,
   ] = useState('');
@@ -347,6 +250,14 @@ export function PurchasesBlock({
     ]?.id || '';
 
 
+  const selectedExistingFile =
+    customerIncomingFiles.find(
+      (file) =>
+        file.id ===
+        selectedExistingFileId
+    );
+
+
   async function reload() {
 
     setPurchases(
@@ -389,6 +300,7 @@ export function PurchasesBlock({
     setInvoiceAmount('');
     setComment('');
     setFiles([]);
+    setNewIncomingFile(null);
     setSelectedExistingFileId(
       defaultIncomingFileId
     );
@@ -457,8 +369,10 @@ export function PurchasesBlock({
               undefined,
 
             sourceFileId:
-              selectedExistingFileId ||
-              undefined,
+              newIncomingFile
+                ? undefined
+                : selectedExistingFileId ||
+                  undefined,
 
             createdById:
               user.id,
@@ -466,8 +380,20 @@ export function PurchasesBlock({
         );
 
 
-      const filesToUpload =
+      const mainFileToUpload =
+        newIncomingFile;
+
+
+      const extraFilesToUpload =
         [...files];
+
+
+      const filesToUpload = [
+        ...(mainFileToUpload
+          ? [mainFileToUpload]
+          : []),
+        ...extraFilesToUpload,
+      ];
 
 
       const commentToSend =
@@ -507,27 +433,39 @@ export function PurchasesBlock({
               setProgress,
             }) => {
 
+              let uploadIndex = 0;
+
+
+              if (mainFileToUpload) {
+
+                await upload(
+                  deal.id,
+                  mainFileToUpload,
+                  'SUPPLIER_INVOICE_' +
+                  purchase.id,
+                  uploadIndex,
+                  filesToUpload.length,
+                );
+
+                uploadIndex++;
+              }
+
+
               for (
-                let index = 0;
-                index <
-                  filesToUpload.length;
-                index++
+                const extraFile of
+                  extraFilesToUpload
               ) {
 
                 await upload(
                   deal.id,
-
-                  filesToUpload[
-                    index
-                  ],
-
-                  'SUPPLIER_INVOICE_' +
+                  extraFile,
+                  'SUPPLIER_ATTACHMENT_' +
                   purchase.id,
-
-                  index,
-
+                  uploadIndex,
                   filesToUpload.length,
                 );
+
+                uploadIndex++;
               }
 
 
@@ -682,24 +620,29 @@ export function PurchasesBlock({
           </div>
 
 
-          {customerIncomingFiles.length > 0 && (
+          <div className="field purchaseExistingInvoiceField">
 
-            <label className="field purchaseExistingInvoiceField">
+            <span>
+              Основной входящий счёт
+            </span>
 
-              <span>
-                Входящий счёт из сделки
-              </span>
+
+            {customerIncomingFiles.length > 0 && (
 
               <select
                 value={selectedExistingFileId}
-                onChange={(e) =>
+                onChange={(e) => {
                   setSelectedExistingFileId(
                     e.target.value
-                  )
-                }
+                  );
+
+                  if (e.target.value) {
+                    setNewIncomingFile(null);
+                  }
+                }}
               >
                 <option value="">
-                  Не использовать
+                  Не выбран
                 </option>
 
                 {[...customerIncomingFiles]
@@ -716,28 +659,72 @@ export function PurchasesBlock({
                   ))}
               </select>
 
-              <small>
-                Выбранный счёт будет прикреплён к этому поставщику.
-              </small>
+            )}
 
-            </label>
 
-          )}
+            {selectedExistingFile &&
+              !newIncomingFile && (
+
+              <div className="purchaseSelectedInvoice">
+                <div>
+                  <b>
+                    {selectedExistingFile.originalName}
+                  </b>
+                  <span>
+                    Этот счёт будет привязан к поставщику
+                  </span>
+                </div>
+
+                <a
+                  href={
+                    dealFileUrl(
+                      selectedExistingFile.id
+                    )
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Открыть
+                </a>
+              </div>
+
+            )}
+
+
+            <SingleFilePicker
+              file={newIncomingFile}
+              onChange={(file) => {
+                setNewIncomingFile(file);
+
+                if (file) {
+                  setSelectedExistingFileId('');
+                }
+              }}
+              title={
+                selectedExistingFile
+                  ? '+ Заменить другим входящим счётом'
+                  : '+ Прикрепить входящий счёт'
+              }
+              accept="application/pdf,image/*"
+            />
+
+          </div>
 
 
           <label className="field purchaseFileField">
 
             <span>
-              Другой входящий счёт / документы
+              Дополнительные документы
             </span>
 
             <MultiFilePicker
               files={files}
               onChange={setFiles}
-              title="+ Прикрепить другой счёт"
+              title="+ Прикрепить документы"
             />
 
           </label>
+
 
 
           <label className="field">
@@ -933,9 +920,39 @@ function PurchaseCard({
     useState('');
 
   const [
+    invoiceEditOpen,
+    setInvoiceEditOpen,
+  ] = useState(false);
+
+  const [
+    selectedSourceFileId,
+    setSelectedSourceFileId,
+  ] = useState('');
+
+  const [
+    replacementInvoiceFile,
+    setReplacementInvoiceFile,
+  ] = useState<File | null>(null);
+
+  const [
     cancelConfirmOpen,
     setCancelConfirmOpen,
   ] = useState(false);
+
+  const [
+    balanceCorrectionOpen,
+    setBalanceCorrectionOpen,
+  ] = useState(false);
+
+  const [
+    balanceCorrectionAmount,
+    setBalanceCorrectionAmount,
+  ] = useState('');
+
+  const [
+    balanceCorrectionComment,
+    setBalanceCorrectionComment,
+  ] = useState('');
 
 
   const paid =
@@ -956,32 +973,405 @@ function PurchaseCard({
   const purchaseFiles =
     (
       deal.files || []
+    )
+      .filter(
+        (file) =>
+          file.category ===
+          'SUPPLIER_INVOICE_' +
+          purchase.id
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt || 0
+          ).getTime() -
+          new Date(
+            b.createdAt || 0
+          ).getTime()
+      );
+
+
+  const currentPurchaseInvoice =
+    purchaseFiles[
+      purchaseFiles.length - 1
+    ];
+
+
+  const previousPurchaseInvoices =
+    purchaseFiles.slice(
+      0,
+      -1,
+    );
+
+
+  const purchaseAttachments =
+    (
+      deal.files || []
     ).filter(
       (file) =>
         file.category ===
-        'SUPPLIER_INVOICE_' +
+        'SUPPLIER_ATTACHMENT_' +
         purchase.id
     );
 
 
-  const fallbackFiles =
-    purchaseFiles.length === 0
+  const paymentFiles =
+    (deal.files || []).filter(
+      (file) =>
+        file.category ===
+        'SUPPLIER_PAYMENT_' +
+        purchase.id
+    );
 
-      ? (
-          deal.files || []
-        ).filter(
-          (file) =>
-            file.category ===
-            'MANAGER_ATTACHMENT'
+
+  const paymentIds =
+    new Set(
+      purchase.payments.map(
+        (payment) => payment.id
+      )
+    );
+
+
+  const stampedPaymentFiles =
+    (deal.files || []).filter(
+      (file) => {
+        const prefix =
+          'SUPPLIER_PAYMENT_STAMP_';
+
+        if (
+          !file.category?.startsWith(
+            prefix
+          )
+        ) {
+          return false;
+        }
+
+        return paymentIds.has(
+          file.category.slice(
+            prefix.length
+          )
+        );
+      }
+    );
+
+
+  const paymentTarget =
+    purchase.requestedAmount
+      ? Number(purchase.requestedAmount)
+      : purchase.incomingInvoiceAmount
+        ? Number(purchase.incomingInvoiceAmount)
+        : null;
+
+
+  const financiallyPaid =
+    paymentTarget === null
+      ? paid > 0
+      : paid >= paymentTarget;
+
+
+  const needsStampedDocument =
+    financiallyPaid &&
+    purchase.payments.some(
+      (payment) =>
+        !payment.paymentOrderStamped &&
+        !payment.paidFromBalance
+    );
+
+
+  const paidOnlyFromBalance =
+    purchase.payments.length > 0 &&
+    purchase.payments.every(
+      (payment) =>
+        payment.paidFromBalance
+    );
+
+
+  const balancePayment =
+    [...purchase.payments]
+      .reverse()
+      .find(
+        (payment) =>
+          payment.paidFromBalance
+      );
+
+
+  const activeBalanceCorrection =
+    (purchase.tasks || []).find(
+      (task) =>
+        task.type === 'OTHER' &&
+        task.payload?.kind ===
+          'SUPPLIER_BALANCE_CORRECTION' &&
+        !['DONE', 'CANCELLED'].includes(
+          task.status
         )
+    );
 
-      : [];
+
+  const activeStampRequest =
+    (purchase.tasks || []).some(
+      (task) =>
+        task.type === 'PAY_SUPPLIER' &&
+        ![
+          'DONE',
+          'CANCELLED',
+        ].includes(task.status)
+    );
 
 
-  const visibleIncomingFiles =
-    purchaseFiles.length > 0
-      ? purchaseFiles
-      : fallbackFiles;
+  const paymentDocumentStatus =
+    paidOnlyFromBalance
+      ? 'Оплачено с остатка'
+      : needsStampedDocument
+        ? 'Платёжка без печати'
+        : purchase.payments.length > 0
+          ? 'Платёжка с печатью'
+          : '';
+
+
+  const dealIncomingFiles =
+    (
+      deal.files || []
+    )
+      .filter(
+        (file) =>
+          file.category ===
+            'CUSTOMER_INVOICE_PRIMARY' ||
+          file.category
+            ?.startsWith(
+              'CORRECTION_PRIMARY_'
+            )
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt || 0
+          ).getTime() -
+          new Date(
+            b.createdAt || 0
+          ).getTime()
+      );
+
+
+  const activePaymentRequest =
+    (purchase.tasks || []).some(
+      (task) =>
+        task.type === 'PAY_SUPPLIER' &&
+        !['DONE', 'CANCELLED'].includes(
+          task.status
+        )
+    );
+
+
+  const supplierInvoiceStatus =
+    !currentPurchaseInvoice
+      ? 'Нет входящего'
+      : financiallyPaid
+        ? 'Входящий оплачен'
+        : (
+            purchase.status ===
+              'PAYMENT_REQUESTED' ||
+            activePaymentRequest
+          )
+          ? 'Входящий на оплате'
+          : 'Входящий не оплачен';
+
+
+  function openInvoiceEditor() {
+
+    setSelectedSourceFileId('');
+    setReplacementInvoiceFile(null);
+    setInvoiceEditOpen(true);
+  }
+
+
+  async function savePurchaseInvoice() {
+
+    setError('');
+
+
+    if (replacementInvoiceFile) {
+
+      const fileToUpload =
+        replacementInvoiceFile;
+
+
+      setInvoiceEditOpen(false);
+      setReplacementInvoiceFile(null);
+
+
+      startBackgroundUploadJob({
+
+        title:
+          'Обновляем входящий счёт',
+
+        subtitle:
+          purchase.supplierName,
+
+        files: [fileToUpload],
+
+        run:
+          async ({
+            upload,
+            setProgress,
+          }) => {
+
+            await upload(
+              deal.id,
+              fileToUpload,
+              'SUPPLIER_INVOICE_' +
+              purchase.id,
+              0,
+              1,
+            );
+
+            setProgress(99);
+            await onChanged();
+          },
+      });
+
+      return;
+    }
+
+
+    if (!selectedSourceFileId) {
+      setError(
+        'Выберите входящий счёт или прикрепите новый.'
+      );
+      return;
+    }
+
+
+    setSaving(true);
+
+
+    try {
+
+      await updateSupplierPurchase(
+        deal.id,
+        purchase.id,
+        {
+          sourceFileId:
+            selectedSourceFileId,
+          actorId:
+            user.id,
+        },
+      );
+
+
+      setInvoiceEditOpen(false);
+      await onChanged();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+
+  async function requestStampedDocument() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await requestSupplierStampedPayment(
+        deal.id,
+        purchase.id,
+        user.id,
+      );
+
+
+      await onChanged();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  async function requestBalanceCorrection() {
+
+    const actualAmount =
+      parseMoney(
+        balanceCorrectionAmount
+      );
+
+
+    if (
+      actualAmount === undefined
+    ) {
+      setError(
+        'Укажите фактическую сумму списания с остатка.'
+      );
+      return;
+    }
+
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await requestSupplierBalanceCorrection(
+        deal.id,
+        purchase.id,
+        {
+          actualAmount,
+          comment:
+            balanceCorrectionComment
+              .trim() ||
+            undefined,
+          actorId:
+            user.id,
+        },
+      );
+
+
+      setBalanceCorrectionOpen(false);
+      setBalanceCorrectionAmount('');
+      setBalanceCorrectionComment('');
+
+      await onChanged();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+      setSaving(false);
+    }
+  }
 
 
   async function cancelPurchase() {
@@ -1027,14 +1417,25 @@ function PurchaseCard({
     setError('');
 
 
-    const amount =
-      purchase.incomingInvoiceAmount
+    const targetAmount =
+      purchase.requestedAmount
         ? Number(
-            purchase
-              .incomingInvoiceAmount
+            purchase.requestedAmount
           )
+        : purchase.incomingInvoiceAmount
+          ? Number(
+              purchase.incomingInvoiceAmount
+            )
+          : undefined;
 
-        : undefined;
+
+    const amount =
+      targetAmount === undefined
+        ? undefined
+        : Math.max(
+            targetAmount - paid,
+            0
+          );
 
 
     if (
@@ -1130,11 +1531,7 @@ function PurchaseCard({
           }
         >
 
-          {
-            purchaseDisplayStatus(
-              purchase
-            )
-          }
+          {supplierInvoiceStatus}
 
         </span>
 
@@ -1150,46 +1547,193 @@ function PurchaseCard({
       )}
 
 
-      {visibleIncomingFiles.length >
-        0 && (
+      <div className="purchaseInvoiceCurrent">
 
-        <div className="purchaseFiles purchaseFilesCompact">
+        <div className="purchaseInvoiceCurrentHead">
+          <span>Входящий счёт</span>
 
-          <span>
-            {
-              purchaseFiles.length >
-                0
-                ? 'Входящий счёт'
-                : 'Документы сделки'
-            }
-          </span>
+          {canManage &&
+            purchase.status !== 'PAID' && (
+            <button
+              type="button"
+              className="purchaseInvoiceEditButton"
+              onClick={() =>
+                invoiceEditOpen
+                  ? setInvoiceEditOpen(false)
+                  : openInvoiceEditor()
+              }
+            >
+              {invoiceEditOpen ? 'Закрыть' : 'Изменить'}
+            </button>
+          )}
+        </div>
 
 
-          {visibleIncomingFiles
-            .slice(0, 3)
-            .map(
-              (file) => (
+        {currentPurchaseInvoice ? (
 
-              <a
-                key={file.id}
+          <div className="purchaseSelectedInvoice purchaseSelectedInvoiceCurrent">
+            <div>
+              <b>
+                {currentPurchaseInvoice.originalName}
+              </b>
+              <span>
+                Текущий счёт
+                {previousPurchaseInvoices.length > 0
+                  ? ' · ранее ' +
+                    previousPurchaseInvoices.length
+                  : ''}
+              </span>
+            </div>
 
-                href={
-                  dealFileUrl(
-                    file.id
-                  )
-                }
+            <a
+              href={
+                dealFileUrl(
+                  currentPurchaseInvoice.id
+                )
+              }
+              target="_blank"
+              rel="noreferrer"
+            >
+              Открыть
+            </a>
+          </div>
 
-                target="_blank"
-                rel="noreferrer"
+        ) : (
+
+          <div className="purchaseInvoiceMissing">
+            Входящий счёт не выбран
+          </div>
+
+        )}
+
+      </div>
+
+
+      {invoiceEditOpen && (
+
+        <div className="purchaseInvoiceEditor">
+
+          {(
+            purchase.status ===
+              'PAYMENT_REQUESTED' ||
+            purchase.status ===
+              'PARTIALLY_PAID'
+          ) && (
+            <div className="purchaseInvoiceWarning">
+              Оплата уже передана бухгалтерии. Новый файл сразу появится в закупке, но задача на оплату останется активной.
+            </div>
+          )}
+
+
+          {dealIncomingFiles.length > 0 && (
+
+            <label className="field">
+              <span>Выбрать из входящих сделки</span>
+
+              <select
+                value={selectedSourceFileId}
+                onChange={(e) => {
+                  setSelectedSourceFileId(
+                    e.target.value
+                  );
+
+                  if (e.target.value) {
+                    setReplacementInvoiceFile(null);
+                  }
+                }}
               >
-                {file.originalName}
-              </a>
+                <option value="">
+                  Не выбран
+                </option>
 
-            ))}
+                {[...dealIncomingFiles]
+                  .reverse()
+                  .map(
+                    (file, index) => (
+                    <option
+                      key={file.id}
+                      value={file.id}
+                    >
+                      {index === 0 ? 'Актуальный · ' : ''}
+                      {file.originalName}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+          )}
+
+
+          <label className="field">
+            <span>Или прикрепить другой счёт</span>
+
+            <SingleFilePicker
+              file={replacementInvoiceFile}
+              onChange={(file) => {
+                setReplacementInvoiceFile(file);
+
+                if (file) {
+                  setSelectedSourceFileId('');
+                }
+              }}
+              title="+ Прикрепить новый входящий счёт"
+              accept="application/pdf,image/*"
+            />
+          </label>
+
+
+          <div className="purchaseInvoiceEditorActions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={saving}
+              onClick={() => {
+                setInvoiceEditOpen(false);
+                setReplacementInvoiceFile(null);
+              }}
+            >
+              Отмена
+            </button>
+
+            <button
+              type="button"
+              className="primary"
+              disabled={
+                saving ||
+                (!selectedSourceFileId &&
+                  !replacementInvoiceFile)
+              }
+              onClick={savePurchaseInvoice}
+            >
+              {saving ? 'Сохраняем…' : 'Сохранить счёт'}
+            </button>
+          </div>
 
         </div>
 
       )}
+
+
+      {purchaseAttachments.length > 0 && (
+
+        <div className="purchaseFiles purchaseFilesCompact">
+          <span>Дополнительные документы</span>
+
+          {purchaseAttachments.map(
+            (file) => (
+            <a
+              key={file.id}
+              href={dealFileUrl(file.id)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {file.originalName}
+            </a>
+          ))}
+        </div>
+
+      )}
+
 
 
       {paid > 0 && (
@@ -1209,9 +1753,192 @@ function PurchaseCard({
       )}
 
 
+      {purchase.payments.length > 0 && (
+
+        <div className="purchasePaymentDocuments">
+
+          <div className="purchasePaymentDocumentsHead">
+            <div>
+              <span>Документы оплаты</span>
+              <b>{paymentDocumentStatus}</b>
+            </div>
+
+            {needsStampedDocument &&
+              canManage && (
+              <button
+                type="button"
+                className="secondary compactButton"
+                disabled={
+                  saving ||
+                  activeStampRequest
+                }
+                onClick={requestStampedDocument}
+              >
+                {
+                  activeStampRequest
+                    ? 'Запрос с печатью отправлен'
+                    : 'Запросить с печатью'
+                }
+              </button>
+            )}
+          </div>
+
+
+          {!paidOnlyFromBalance && (
+            <div className="purchasePaymentFileList">
+
+              {paymentFiles.length === 0 &&
+                stampedPaymentFiles.length === 0 && (
+                <span className="purchasePaymentFileMissing">
+                  Файл платёжки не приложен
+                </span>
+              )}
+
+
+              {paymentFiles.map(
+                (file) => (
+                <a
+                  key={file.id}
+                  href={dealFileUrl(file.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {file.originalName}
+                </a>
+              ))}
+
+
+              {stampedPaymentFiles.map(
+                (file) => (
+                <a
+                  key={file.id}
+                  href={dealFileUrl(file.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {file.originalName} · с печатью
+                </a>
+              ))}
+
+            </div>
+          )}
+
+        </div>
+
+      )}
+
+
       {canManage &&
-        purchase.status ===
-          'DRAFT' && (
+        purchase.status === 'PAID' &&
+        balancePayment && (
+
+        <div className="balanceCorrectionBlock">
+
+          <div className="balanceCorrectionHead">
+            <div>
+              <span>Оплата с остатка</span>
+              <b>
+                {money(balancePayment.amount)}
+              </b>
+            </div>
+
+            <button
+              type="button"
+              className="secondary compactButton"
+              disabled={
+                saving ||
+                Boolean(activeBalanceCorrection)
+              }
+              onClick={() => {
+                setBalanceCorrectionOpen(
+                  (value) => !value
+                );
+
+                setBalanceCorrectionAmount(
+                  formatMoneyInput(
+                    String(balancePayment.amount)
+                  )
+                );
+              }}
+            >
+              {activeBalanceCorrection
+                ? 'Корректировка отправлена'
+                : balanceCorrectionOpen
+                  ? 'Закрыть'
+                  : 'Скорректировать'}
+            </button>
+          </div>
+
+
+          {balanceCorrectionOpen &&
+            !activeBalanceCorrection && (
+
+            <div className="balanceCorrectionForm">
+
+              <label className="field">
+                <span>
+                  По факту списали с остатка
+                </span>
+
+                <input
+                  inputMode="decimal"
+                  value={balanceCorrectionAmount}
+                  onChange={(e) =>
+                    setBalanceCorrectionAmount(
+                      formatMoneyInput(
+                        e.target.value
+                      )
+                    )
+                  }
+                  placeholder="Например: 95 000"
+                />
+              </label>
+
+
+              <label className="field">
+                <span>Комментарий бухгалтерии</span>
+
+                <textarea
+                  rows={2}
+                  value={balanceCorrectionComment}
+                  onChange={(e) =>
+                    setBalanceCorrectionComment(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Например: завод списал по факту меньше"
+                />
+              </label>
+
+
+              <button
+                type="button"
+                className="primary wide"
+                disabled={saving}
+                onClick={requestBalanceCorrection}
+              >
+                {saving
+                  ? 'Отправляем…'
+                  : 'Отправить бухгалтерии'}
+              </button>
+
+            </div>
+
+          )}
+
+        </div>
+
+      )}
+
+
+      {canManage &&
+        (
+          purchase.status === 'DRAFT' ||
+          (
+            purchase.status === 'PARTIALLY_PAID' &&
+            !activePaymentRequest
+          )
+        ) && (
 
         <div className="purchaseCardActions">
 
@@ -1223,7 +1950,9 @@ function PurchaseCard({
               requestPayment
             }
           >
-            Отправить в оплату
+            {purchase.status === 'PARTIALLY_PAID'
+              ? 'Отправить остаток в оплату'
+              : 'Отправить в оплату'}
           </button>
 
 
@@ -1377,6 +2106,179 @@ function PurchaseCard({
 
 
 // ======================================================
+// BALANCE CORRECTION TASK
+// ======================================================
+
+export function SupplierBalanceCorrectionTask({
+  task,
+  user,
+  onBack,
+}: {
+  task: Task;
+  user: CurrentUser;
+  onBack: () => void;
+}) {
+
+  const [status, setStatus] =
+    useState(task.status);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const payload =
+    task.payload || {};
+
+  const oldAmount =
+    Number(payload.oldAmount || 0);
+
+  const requestedAmount =
+    Number(payload.requestedAmount || 0);
+
+  const supplierName =
+    String(
+      payload.supplierName ||
+      task.supplierPurchase?.supplierName ||
+      'Поставщик'
+    );
+
+
+  async function take() {
+    setSaving(true);
+    setError('');
+
+    try {
+      await updateTaskStatus(
+        task.id,
+        'IN_PROGRESS',
+        user.id,
+      );
+      setStatus('IN_PROGRESS');
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  async function complete() {
+    setSaving(true);
+    setError('');
+
+    try {
+      await completeSupplierBalanceCorrection(
+        task.id,
+        user.id,
+      );
+      onBack();
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  return (
+    <section className="content form">
+
+      <button
+        className="backLink"
+        onClick={onBack}
+      >
+        ← К задачам
+      </button>
+
+
+      <div className="detailHero">
+        <div className="eyebrow">
+          ЗК-{task.deal.internalNumber}
+        </div>
+
+        <h2>
+          Скорректировать оплату с остатка
+        </h2>
+
+        <p>{supplierName}</p>
+
+        <div className="statusPill">
+          {status === 'NEW'
+            ? 'Новая'
+            : status === 'IN_PROGRESS'
+              ? 'В работе'
+              : status}
+        </div>
+      </div>
+
+
+      <div className="balanceCorrectionTaskSummary">
+        <div>
+          <span>Было отмечено</span>
+          <b>{money(oldAmount)}</b>
+        </div>
+
+        <div>
+          <span>По факту списано</span>
+          <b>{money(requestedAmount)}</b>
+        </div>
+      </div>
+
+
+      {task.description && (
+        <div className="infoBox">
+          <strong>Комментарий менеджера</strong>
+          <p>{task.description}</p>
+        </div>
+      )}
+
+
+      {status === 'NEW' && (
+        <button
+          type="button"
+          className="primary wide"
+          disabled={saving}
+          onClick={take}
+        >
+          {saving ? 'Сохраняем…' : 'В работу'}
+        </button>
+      )}
+
+
+      {status === 'IN_PROGRESS' && (
+        <button
+          type="button"
+          className="primary wide"
+          disabled={saving}
+          onClick={complete}
+        >
+          {saving
+            ? 'Сохраняем…'
+            : 'Подтвердить фактическую сумму'}
+        </button>
+      )}
+
+
+      {error && (
+        <div className="error">{error}</div>
+      )}
+
+    </section>
+  );
+}
+
+
+// ======================================================
 // ACCOUNTANT TASK
 // ======================================================
 
@@ -1394,17 +2296,30 @@ export function SupplierPaymentTask({
     task.supplierPurchase!;
 
 
+  const stampOnlyTask =
+    task.title.startsWith(
+      'Приложить платёжку с печатью'
+    );
+
+
   const [status, setStatus] =
     useState(task.status);
 
 
+  const amountToPay =
+    task.payload?.amountToPay !== undefined &&
+    task.payload?.amountToPay !== null
+      ? Number(task.payload.amountToPay)
+      : purchase.requestedAmount
+        ? Number(purchase.requestedAmount)
+        : 0;
+
+
   const [amount, setAmount] =
     useState(
-      purchase.requestedAmount
+      amountToPay
         ? formatMoneyInput(
-            String(
-              purchase.requestedAmount
-            )
+            String(amountToPay)
           )
         : ''
     );
@@ -1460,19 +2375,49 @@ export function SupplierPaymentTask({
   const purchaseIncomingFiles =
     (
       task.deal.files || []
+    )
+      .filter(
+        (file) =>
+
+          file.category ===
+          'SUPPLIER_INVOICE_' +
+          purchase.id
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt || 0
+          ).getTime() -
+          new Date(
+            b.createdAt || 0
+          ).getTime()
+      );
+
+
+  const purchaseAdditionalFiles =
+    (
+      task.deal.files || []
     ).filter(
       (file) =>
-
         file.category ===
-        'SUPPLIER_INVOICE_' +
+        'SUPPLIER_ATTACHMENT_' +
         purchase.id
     );
 
 
-  const incomingFiles =
-    purchaseIncomingFiles.length > 0
+  const currentPurchaseIncoming =
+    purchaseIncomingFiles[
+      purchaseIncomingFiles.length - 1
+    ];
 
-      ? purchaseIncomingFiles
+
+  const incomingFiles =
+    currentPurchaseIncoming
+
+      ? [
+          currentPurchaseIncoming,
+          ...purchaseAdditionalFiles,
+        ]
 
       : (
           task.deal.files || []
@@ -1814,7 +2759,11 @@ export function SupplierPaymentTask({
 
 
         <h2>
-          Оплатить поставщику
+          {
+            stampOnlyTask
+              ? 'Платёжка с печатью'
+              : 'Оплатить поставщику'
+          }
         </h2>
 
 
@@ -1882,15 +2831,18 @@ export function SupplierPaymentTask({
           <div>
 
             <span>
-              Нужно оплатить
+              {
+                stampOnlyTask
+                  ? 'Оплачено'
+                  : 'Нужно оплатить'
+              }
             </span>
 
             <b>
               {
-                money(
-                  purchase
-                    .requestedAmount
-                )
+                stampOnlyTask
+                  ? money(paidAlready)
+                  : money(amountToPay)
               }
             </b>
 

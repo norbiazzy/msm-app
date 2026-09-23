@@ -48,6 +48,7 @@ enum InvoiceStatus {
   WAITING_ACCOUNTING
   WAITING_MANAGER_REVIEW
   CONFIRMED
+  AGREED
   CORRECTION_REQUESTED
 }
 
@@ -166,6 +167,7 @@ model Task {
   urgent             Boolean           @default(false)
   title              String
   description        String?
+  payload            Json?
   dueAt              DateTime?
   createdById        String
   createdBy          User              @relation("TaskCreator", fields: [createdById], references: [id])

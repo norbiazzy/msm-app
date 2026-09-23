@@ -25,8 +25,13 @@ import {
 
 import {
   PurchasesBlock,
+  SupplierBalanceCorrectionTask,
   SupplierPaymentTask,
 } from './PurchasesBlock';
+import {
+  PowerOfAttorneyBlock,
+  PowerOfAttorneyTask,
+} from './PowerOfAttorneyBlock';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   addClientPayment,
@@ -39,9 +44,11 @@ import {
   listTasks,
   login,
   requestInvoiceCorrection,
+  resubmitInvoiceRequest,
   returnInvoiceRequest,
   submitInvoiceRequest,
   withdrawInvoiceRequest,
+  withdrawInvoiceCorrection,
   updatePaymentStatus,
   updateTaskStatus,
   uploadDealFile,
@@ -254,6 +261,222 @@ function invoiceRequestNeedsManager(
 }
 
 
+function dealInvoiceWorkflowLabel(
+  deal: Deal,
+) {
+
+  const invoice =
+    deal.invoices.find(
+      (item) => item.isCurrent
+    ) ??
+    deal.invoices[0];
+
+
+  if (invoice) {
+
+    const labels:
+      Record<string, string> = {
+
+      WAITING_MANAGER_REVIEW:
+        'Счёт ожидает проверку',
+
+      CONFIRMED:
+        'Счёт готов',
+
+      AGREED:
+        'Счёт готов',
+
+      CORRECTION_REQUESTED:
+        'Счёт на корректировке',
+
+      WAITING_ACCOUNTING:
+        'Счёт на создании',
+    };
+
+
+    return (
+      labels[invoice.status] ||
+      statusLabel(invoice.status)
+    );
+  }
+
+
+  const requestTask =
+    deal.tasks.find(
+      (task) =>
+        task.type ===
+          'ISSUE_CLIENT_INVOICE' &&
+        ![
+          'DONE',
+          'CANCELLED',
+        ].includes(
+          task.status
+        )
+    );
+
+
+  if (!requestTask) {
+    return 'Запрос на счёт не активен';
+  }
+
+
+  if (
+    requestTask.status ===
+      'IN_PROGRESS'
+  ) {
+    return 'Счёт в работе у бухгалтерии';
+  }
+
+
+  if (
+    requestTask.status ===
+      'NEED_DATA'
+  ) {
+    return 'Нужны данные';
+  }
+
+
+  return 'Счёт на создании';
+}
+
+
+function dealInvoiceWorkflowTone(
+  deal: Deal,
+) {
+
+  const invoice =
+    deal.invoices.find(
+      (item) => item.isCurrent
+    ) ??
+    deal.invoices[0];
+
+
+  if (invoice) {
+    if (
+      invoice.status === 'AGREED' ||
+      invoice.status === 'CONFIRMED'
+    ) {
+      return 'agreed';
+    }
+
+    if (
+      invoice.status ===
+        'CORRECTION_REQUESTED'
+    ) {
+      return 'correction';
+    }
+
+    if (
+      invoice.status ===
+        'WAITING_MANAGER_REVIEW'
+    ) {
+      return 'review';
+    }
+  }
+
+
+  const requestTask =
+    deal.tasks.find(
+      (task) =>
+        task.type ===
+          'ISSUE_CLIENT_INVOICE' &&
+        ![
+          'DONE',
+          'CANCELLED',
+        ].includes(
+          task.status
+        )
+    );
+
+
+  if (requestTask?.status === 'IN_PROGRESS') {
+    return 'working';
+  }
+
+  if (requestTask?.status === 'NEED_DATA') {
+    return 'needs-data';
+  }
+
+  return 'creating';
+}
+
+
+function supplierIncomingWorkflowLabel(
+  deal: Deal,
+) {
+
+  const purchases =
+    deal.supplierPurchases || [];
+
+
+  const files =
+    deal.files || [];
+
+
+  const hasDealIncoming =
+    files.some(
+      (file) =>
+        file.category ===
+          'CUSTOMER_INVOICE_PRIMARY' ||
+        file.category
+          ?.startsWith(
+            'CORRECTION_PRIMARY_'
+          )
+    );
+
+
+  const hasSupplierIncoming =
+    purchases.some(
+      (purchase) =>
+        files.some(
+          (file) =>
+            file.category ===
+              'SUPPLIER_INVOICE_' +
+              purchase.id
+        )
+    );
+
+
+  if (
+    !hasDealIncoming &&
+    !hasSupplierIncoming
+  ) {
+    return 'Нет входящего';
+  }
+
+
+  if (purchases.length === 0) {
+    return 'Входящий не оплачен';
+  }
+
+
+  if (
+    purchases.every(
+      (purchase) =>
+        purchase.status === 'PAID'
+    )
+  ) {
+    return 'Входящий оплачен';
+  }
+
+
+  if (
+    purchases.some(
+      (purchase) =>
+        purchase.status ===
+          'PAYMENT_REQUESTED' ||
+        purchase.status ===
+          'PARTIALLY_PAID'
+    )
+  ) {
+    return 'Входящий на оплате';
+  }
+
+
+  return 'Входящий не оплачен';
+}
+
+
 function Home({
   deals,
   onNew,
@@ -415,7 +638,7 @@ function DealCard({
     >
       <div className="dealTop">
         <div>
-          <strong>{invoice ? `${sellerLabels[deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
+          <strong>{invoice ? `${sellerLabels[invoice.sellerType || deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
           <span>{deal.clientName}</span>
         </div>
         {urgent && <b className="urgent">СРОЧНО</b>}
@@ -429,7 +652,14 @@ function DealCard({
             Нужны данные
           </b>
         ) : (
-          <span>{invoice ? statusLabel(invoice.status) : 'Ожидаем счёт'}</span>
+          <span>
+            {
+              uploadJob?.status === 'RUNNING' &&
+              !invoice
+                ? 'Счёт на создании'
+                : dealInvoiceWorkflowLabel(deal)
+            }
+          </span>
         )}
       </div>
 
@@ -612,6 +842,11 @@ function DealDetail({
   ] = useState(false);
 
   const [
+    incomingHistoryOpen,
+    setIncomingHistoryOpen,
+  ] = useState(false);
+
+  const [
     editClientName,
     setEditClientName,
   ] = useState('');
@@ -679,6 +914,11 @@ function DealDetail({
   const [
     withdrawConfirmOpen,
     setWithdrawConfirmOpen,
+  ] = useState(false);
+
+  const [
+    correctionWithdrawOpen,
+    setCorrectionWithdrawOpen,
   ] = useState(false);
 
   const [
@@ -1004,6 +1244,29 @@ function DealDetail({
     );
 
 
+  const correctionTask =
+    deal.tasks.find(
+      (task) =>
+        task.type ===
+          'CORRECT_CLIENT_INVOICE' &&
+        !['DONE', 'CANCELLED'].includes(
+          task.status
+        )
+    );
+
+
+  const correctionUploadRunning =
+    Boolean(
+      correctionTask &&
+      backgroundUploads.some(
+        (job) =>
+          job.taskId ===
+            correctionTask.id &&
+          job.status === 'RUNNING'
+      )
+    );
+
+
   const latestInvoiceReturn =
     deal.auditEvents?.find(
       (event) =>
@@ -1029,18 +1292,81 @@ function DealDetail({
 
 
   const supplierNames =
-    supplierPurchases
-      .map(
-        (purchase) =>
-          purchase.supplierName
+    Array.from(
+      new Set(
+        supplierPurchases
+          .map(
+            (purchase) =>
+              purchase.supplierName
+          )
+          .filter(Boolean)
       )
-      .filter(Boolean);
+    );
 
 
-  const supplierSummary =
-    supplierNames.length > 0
-      ? supplierNames.join(', ')
-      : 'Не указан';
+  const supplierIncomingRows =
+    supplierPurchases
+      .map((purchase) => {
+
+        const purchaseFiles =
+          (deal.files || [])
+            .filter(
+              (file) =>
+                file.category ===
+                'SUPPLIER_INVOICE_' +
+                purchase.id
+            )
+            .sort(
+              (a, b) =>
+                new Date(
+                  a.createdAt || 0
+                ).getTime() -
+                new Date(
+                  b.createdAt || 0
+                ).getTime()
+            );
+
+
+        const file =
+          purchaseFiles[
+            purchaseFiles.length - 1
+          ];
+
+
+        return file
+          ? { purchase, file }
+          : null;
+      })
+      .filter(
+        (item): item is {
+          purchase: (typeof supplierPurchases)[number];
+          file: NonNullable<Deal['files']>[number];
+        } => Boolean(item)
+      );
+
+
+  const showDealIncomingInvoices =
+    supplierIncomingRows.length > 0 ||
+    Boolean(currentCustomerInvoice);
+
+
+  const incomingWorkflowStatus =
+    supplierIncomingWorkflowLabel(
+      deal
+    );
+
+
+  const incomingWorkflowTone =
+    incomingWorkflowStatus ===
+      'Входящий оплачен'
+      ? 'paid'
+      : incomingWorkflowStatus ===
+          'Входящий на оплате'
+        ? 'paying'
+        : incomingWorkflowStatus ===
+            'Входящий не оплачен'
+          ? 'unpaid'
+          : 'empty';
 
 
   const editableIncomingPurchase =
@@ -1459,32 +1785,28 @@ function DealDetail({
     setError('');
 
 
+    const requestPayload = {
+      actorId:
+        user.id,
+      urgent:
+        requestUrgent,
+      sellerType:
+        requestSellerType,
+      clientName:
+        requestClientName.trim() ||
+        activeDeal.clientName,
+      accountingComment:
+        requestAccountingComment
+          .trim() ||
+        undefined,
+      marginMode:
+        requestMarginMode,
+      marginValue:
+        parsedMargin,
+    };
+
+
     try {
-
-      await updateDealInfo(
-        dealId,
-        {
-          sellerType:
-            requestSellerType,
-          clientName:
-            requestClientName.trim() ||
-            activeDeal.clientName,
-          accountingComment:
-            requestAccountingComment
-              .trim() ||
-            undefined,
-          marginMode:
-            requestMarginMode,
-          marginValue:
-            parsedMargin,
-          actorId:
-            user.id,
-        },
-      );
-
-
-      await reload(false);
-
 
       const primaryFile =
         requestIncomingInvoice;
@@ -1523,7 +1845,6 @@ function DealDetail({
 
 
               if (primaryFile) {
-
                 await upload(
                   dealId,
                   primaryFile,
@@ -1541,7 +1862,6 @@ function DealDetail({
                 index < extraFiles.length;
                 index++
               ) {
-
                 await upload(
                   dealId,
                   extraFiles[index],
@@ -1554,41 +1874,31 @@ function DealDetail({
               }
 
 
-              setProgress(96);
+              setProgress(95);
 
-              await submitInvoiceRequest(
+              await resubmitInvoiceRequest(
                 dealId,
-                {
-                  actorId:
-                    user.id,
-                  urgent:
-                    requestUrgent,
-                },
+                requestPayload,
               );
 
               setProgress(99);
-
               await reload(false);
             },
         });
+
 
         setRequestIncomingInvoice(null);
         setRequestExtraFiles([]);
         setRequestUrgent(false);
         setInvoiceRequestEditOpen(false);
-
+        setSaving(false);
         return;
       }
 
 
-      await submitInvoiceRequest(
+      await resubmitInvoiceRequest(
         dealId,
-        {
-          actorId:
-            user.id,
-          urgent:
-            requestUrgent,
-        },
+        requestPayload,
       );
 
 
@@ -1861,6 +2171,42 @@ function DealDetail({
   }
 
 
+
+
+  async function withdrawCorrectionRequest() {
+
+    if (!current) {
+      return;
+    }
+
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+      await withdrawInvoiceCorrection(
+        dealId,
+        current.id,
+        user.id,
+      );
+
+      setCorrectionWithdrawOpen(false);
+      await reload(false);
+
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
   async function sendCorrection() {
 
     if (!current) {
@@ -2101,22 +2447,44 @@ function DealDetail({
                   : 'Счёт готовится'
               }
             </h2>
+
+            {(current?.fileId || current?.file?.id) && (
+              <a
+                className="dealOverviewInvoiceLink"
+                href={
+                  dealFileUrl(
+                    current.fileId ||
+                    current.file!.id
+                  )
+                }
+                target="_blank"
+                rel="noreferrer"
+              >
+                Открыть готовый счёт
+              </a>
+            )}
           </div>
 
-          <div className="dealOverviewInvoiceStatus">
+          <div
+            className={
+              'dealOverviewInvoiceStatus dealInvoiceStatus-' +
+              (
+                invoiceRequestUploadJob?.status === 'RUNNING' &&
+                !current
+                  ? 'creating'
+                  : dealInvoiceWorkflowTone(deal)
+              )
+            }
+          >
             <span>
               Статус счёта
             </span>
             <b>
               {
-                current
-                  ? statusLabel(
-                      current.status
-                    )
-                  : invoiceRequestTask?.status ===
-                      'NEED_DATA'
-                    ? 'Нужны данные'
-                    : 'Ожидаем счёт'
+                invoiceRequestUploadJob?.status === 'RUNNING' &&
+                !current
+                  ? 'Счёт на создании'
+                  : dealInvoiceWorkflowLabel(deal)
               }
             </b>
           </div>
@@ -2216,30 +2584,43 @@ function DealDetail({
 
           <div className="dealMetric">
             <span>Поставщик</span>
-            <b>{supplierSummary}</b>
+
+            {supplierNames.length > 0 ? (
+              <div className="supplierBadgeList">
+                {supplierNames.map(
+                  (supplier, index) => (
+                  <b
+                    className="supplierBadge"
+                    key={supplier + index}
+                  >
+                    {supplier}
+                  </b>
+                ))}
+              </div>
+            ) : (
+              <b>Поставщик не выбран</b>
+            )}
+          </div>
+
+
+          <div
+            className={
+              'dealMetric dealIncomingWorkflow dealIncomingWorkflow-' +
+              incomingWorkflowTone
+            }
+          >
+            <span>Входящий</span>
+            <b>{incomingWorkflowStatus}</b>
           </div>
 
 
           <div className="dealMetric">
-            <span>Статус оплаты</span>
+            <span>Оплата клиента</span>
             <b>
               {
                 paymentStatusLabel(
                   deal.paymentStatus
                 )
-              }
-            </b>
-          </div>
-
-
-          <div className="dealMetric dealMetricMuted">
-            <span>От кого выставлен</span>
-            <b>
-              {
-                sellerLabels[
-                  current?.sellerType ||
-                  deal.sellerType
-                ]
               }
             </b>
           </div>
@@ -2469,6 +2850,145 @@ function DealDetail({
 
       </div>
 
+
+      {showDealIncomingInvoices && (
+
+        <div className="dealIncomingInvoiceCard">
+
+          <div className="dealIncomingInvoiceHead">
+            <div>
+              <span>Входящие счета</span>
+              <strong>
+                {
+                  supplierIncomingRows.length > 0
+                    ? 'По поставщикам · ' +
+                      supplierIncomingRows.length
+                    : currentCustomerInvoice
+                      ? currentCustomerInvoice.originalName
+                      : ''
+                }
+              </strong>
+            </div>
+
+
+            {supplierIncomingRows.length === 0 &&
+              previousCustomerInvoices.length > 0 && (
+              <button
+                type="button"
+                className="secondary compactButton"
+                onClick={() =>
+                  setIncomingHistoryOpen(
+                    (value) => !value
+                  )
+                }
+              >
+                {
+                  incomingHistoryOpen
+                    ? 'Скрыть историю'
+                    : 'История · ' +
+                      previousCustomerInvoices.length
+                }
+              </button>
+            )}
+          </div>
+
+
+          {supplierIncomingRows.length > 0 ? (
+
+            <div className="dealIncomingSupplierList">
+              {supplierIncomingRows.map(
+                ({ purchase, file }) => (
+
+                <div
+                  className="dealIncomingSupplierRow"
+                  key={purchase.id}
+                >
+                  <div>
+                    <b>{purchase.supplierName}</b>
+                    <span>{file.originalName}</span>
+                  </div>
+
+                  <a
+                    href={dealFileUrl(file.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Открыть
+                  </a>
+                </div>
+
+              ))}
+            </div>
+
+          ) : currentCustomerInvoice ? (
+
+            <div className="dealIncomingSupplierRow">
+              <div>
+                <b>Из запроса на счёт</b>
+                <span>{currentCustomerInvoice.originalName}</span>
+              </div>
+
+              <a
+                href={dealFileUrl(currentCustomerInvoice.id)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Открыть
+              </a>
+            </div>
+
+          ) : null}
+
+
+          {supplierIncomingRows.length === 0 &&
+            incomingHistoryOpen &&
+            previousCustomerInvoices.length > 0 && (
+
+            <div className="dealIncomingInvoiceHistory">
+              {[...previousCustomerInvoices]
+                .reverse()
+                .map(
+                  (file, index) => (
+
+                  <div
+                    className="dealIncomingInvoiceHistoryRow"
+                    key={file.id}
+                  >
+                    <div>
+                      <b>{file.originalName}</b>
+                      <span>
+                        Версия {
+                          previousCustomerInvoices.length -
+                          index
+                        }
+                        {file.createdAt
+                          ? ' · ' +
+                            new Date(
+                              file.createdAt
+                            ).toLocaleDateString(
+                              'ru-RU'
+                            )
+                          : ''}
+                      </span>
+                    </div>
+
+                    <a
+                      href={dealFileUrl(file.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Открыть
+                    </a>
+                  </div>
+
+                ))}
+            </div>
+
+          )}
+
+        </div>
+
+      )}
 
       <div className="dealInfoBox">
 
@@ -3071,40 +3591,7 @@ function DealDetail({
           )}
 
 
-          {currentCustomerInvoice &&
-            !invoiceRequestEditOpen &&
-            invoiceRequestTask?.status !== 'NEED_DATA' && (
 
-            <div className="requestPreviousIncoming invoiceRequestIncomingCompact">
-              <span>
-                Входящий счёт, отправленный бухгалтерии
-              </span>
-
-              <div className="versionRow">
-                <div>
-                  <b>
-                    {currentCustomerInvoice.originalName}
-                  </b>
-                  <span>
-                    Актуальный входящий документ
-                  </span>
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      currentCustomerInvoice.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-              </div>
-            </div>
-
-          )}
 
 
           {invoiceRequestUploadJob && (
@@ -3598,7 +4085,11 @@ function DealDetail({
               disabled={saving}
               onClick={confirm}
             >
-              {saving ? 'Сохраняем…' : 'Всё верно'}
+              {
+                saving
+                  ? 'Сохраняем…'
+                  : 'Всё верно'
+              }
             </button>
           )}
 
@@ -3612,17 +4103,88 @@ function DealDetail({
 
         <div className="infoBox correctionPending">
 
-          <strong>
-            Счёт отправлен на корректировку
-          </strong>
+          <div className="correctionPendingHead">
+            <div>
+              <strong>
+                Счёт отправлен на корректировку
+              </strong>
 
-          <p>
-            Текущая версия остаётся
-            видна в истории, но после
-            загрузки новой версии станет
-            неактуальной.
-          </p>
+              <p>
+                Текущая версия остаётся видна в истории. Пока бухгалтер не взял корректировку в работу, её можно отозвать.
+              </p>
+            </div>
 
+            {canManageInvoice && (
+              <button
+                type="button"
+                className="secondary compactButton"
+                disabled={
+                  saving ||
+                  correctionUploadRunning
+                }
+                onClick={() =>
+                  setCorrectionWithdrawOpen(true)
+                }
+              >
+                {correctionUploadRunning
+                  ? 'Загружаем документы…'
+                  : 'Отозвать корректировку'}
+              </button>
+            )}
+          </div>
+
+        </div>
+
+      )}
+
+
+      {correctionWithdrawOpen &&
+        current && (
+
+        <div
+          className="appModalBackdrop"
+          onClick={() =>
+            setCorrectionWithdrawOpen(false)
+          }
+        >
+          <div
+            className="appModal"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <strong>
+              Отозвать корректировку?
+            </strong>
+
+            <p>
+              Если бухгалтер ещё не начал работу, задача на корректировку будет отменена, а текущая версия счёта вернётся в предыдущее состояние.
+            </p>
+
+            <div className="appModalActions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={saving}
+                onClick={() =>
+                  setCorrectionWithdrawOpen(false)
+                }
+              >
+                Не отзывать
+              </button>
+
+              <button
+                type="button"
+                className="dangerButton"
+                disabled={saving}
+                onClick={withdrawCorrectionRequest}
+              >
+                {saving
+                  ? 'Отзываем…'
+                  : 'Отозвать'}
+              </button>
+            </div>
+          </div>
         </div>
 
       )}
@@ -3796,6 +4358,15 @@ function DealDetail({
 
 
       <PurchasesBlock
+        deal={deal}
+        user={user}
+        onChanged={() =>
+          reload(false)
+        }
+      />
+
+
+      <PowerOfAttorneyBlock
         deal={deal}
         user={user}
         onChanged={() =>
@@ -4035,21 +4606,22 @@ function InvoiceBlock({
       </div>
 
 
-      {invoice.fileId && (
+      {(invoice.fileId || invoice.file?.id) && (
 
         <a
           className="fileButton"
 
           href={
             dealFileUrl(
-              invoice.fileId
+              invoice.fileId ||
+              invoice.file!.id
             )
           }
 
           target="_blank"
           rel="noreferrer"
         >
-          Открыть PDF
+          Открыть готовый счёт
         </a>
 
       )}
@@ -4074,12 +4646,12 @@ function InvoiceVersion({
   if (invoice.isCurrent) {
 
     if (
-      invoice.status ===
-      'CONFIRMED'
+      invoice.status === 'AGREED' ||
+      invoice.status === 'CONFIRMED'
     ) {
 
       stateLabel =
-        'Текущая · подтверждён';
+        'Текущая · готов';
 
     } else if (
       invoice.status ===
@@ -4179,12 +4751,13 @@ function InvoiceVersion({
       </div>
 
 
-      {invoice.fileId && (
+      {(invoice.fileId || invoice.file?.id) && (
 
         <a
           href={
             dealFileUrl(
-              invoice.fileId
+              invoice.fileId ||
+              invoice.file!.id
             )
           }
 
@@ -5554,7 +6127,39 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
 
   if (selected) {
 
-    return selected.type === 'PAY_SUPPLIER' &&
+    return selected.type === 'POWER_OF_ATTORNEY' ? (
+
+      <PowerOfAttorneyTask
+        task={selected}
+        user={user}
+        onBack={() => {
+          window.location.hash =
+            '#tasks';
+
+          setSelected(null);
+          void reloadTasks(false);
+          onChanged();
+        }}
+      />
+
+    ) : selected.type === 'OTHER' &&
+      selected.payload?.kind ===
+        'SUPPLIER_BALANCE_CORRECTION' ? (
+
+      <SupplierBalanceCorrectionTask
+        task={selected}
+        user={user}
+        onBack={() => {
+          window.location.hash =
+            '#tasks';
+
+          setSelected(null);
+          void reloadTasks(false);
+          onChanged();
+        }}
+      />
+
+    ) : selected.type === 'PAY_SUPPLIER' &&
       selected.supplierPurchase ? (
 
       <SupplierPaymentTask
@@ -5943,6 +6548,14 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
     const filesToUpload =
       [...invoiceFiles];
+
+
+    if (filesToUpload.length === 0) {
+      setError(
+        'Прикрепите файл готового счёта.'
+      );
+      return;
+    }
 
 
     const numberToSave =
@@ -7334,7 +7947,10 @@ function auditLabel(
       'Загружен счёт',
 
     CONFIRM:
-      'Счёт подтверждён',
+      'Счёт проверен менеджером',
+
+    CUSTOMER_APPROVED:
+      'Счёт готов',
 
     REQUEST_CORRECTION:
       'Запрошена корректировка',
@@ -7363,6 +7979,9 @@ function auditLabel(
     SUPPLIER_PURCHASE_UPDATED:
       'Изменены данные закупки',
 
+    SUPPLIER_INVOICE_CHANGED:
+      'Изменён входящий счёт поставщика',
+
     SUPPLIER_PAYMENT_REQUESTED:
       'Запрошена оплата поставщику',
 
@@ -7373,6 +7992,24 @@ function auditLabel(
 
     SUPPLIER_PAYMENT_STAMPED:
       'Добавлена платёжка с печатью',
+
+    SUPPLIER_STAMP_REQUESTED:
+      'Запрошена платёжка с печатью',
+
+    SUPPLIER_BALANCE_CORRECTION_REQUESTED:
+      'Запрошена корректировка оплаты с остатка',
+
+    SUPPLIER_BALANCE_CORRECTED:
+      'Скорректирована оплата с остатка',
+
+    POWER_OF_ATTORNEY_REQUESTED:
+      'Запрошена доверенность',
+
+    POWER_OF_ATTORNEY_READY:
+      'Доверенность готова',
+
+    CORRECTION_WITHDRAWN:
+      'Корректировка счёта отозвана',
 
     MANAGER_COMMENT_CHANGED:
       'Изменён комментарий менеджера',
@@ -7538,6 +8175,6 @@ function ThemeToggle() {
 function Field({ title, children }: { title: string; children: React.ReactNode }) { return <label className="field"><span>{title}</span>{children}</label>; }
 function ScreenMessage({ children }: { children: React.ReactNode }) { return <div className="screenMessage">{children}</div>; }
 function roleName(role: CurrentUser['role']) { return ({ MANAGER: 'Менеджер', ACCOUNTANT: 'Бухгалтер', LEADER: 'Руководитель', ADMIN: 'Админ' } as const)[role]; }
-function statusLabel(status: string) { return ({ WAITING_MANAGER_REVIEW: 'Ожидает проверки', CONFIRMED: 'Счёт подтверждён', CORRECTION_REQUESTED: 'На корректировке', WAITING_ACCOUNTING: 'Ожидаем счёт' } as Record<string, string>)[status] || status; }
+function statusLabel(status: string) { return ({ WAITING_MANAGER_REVIEW: 'Счёт ожидает проверку', CONFIRMED: 'Счёт готов', AGREED: 'Счёт готов', CORRECTION_REQUESTED: 'Счёт на корректировке', WAITING_ACCOUNTING: 'Счёт на создании' } as Record<string, string>)[status] || status; }
 
 export default App;

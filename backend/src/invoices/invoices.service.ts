@@ -13,6 +13,12 @@ export class InvoicesService {
     fileId?: string;
     actorId: string;
   }) {
+    if (!body.fileId) {
+      throw new BadRequestException(
+        'Прикрепите файл готового счёта',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const deal = await tx.deal.findUniqueOrThrow({ where: { id: dealId } });
       const latest = await tx.clientInvoice.findFirst({
@@ -159,6 +165,10 @@ export class InvoicesService {
       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
       if (!invoice.isCurrent) throw new BadRequestException('Подтвердить можно только актуальную версию счёта');
 
+      if (invoice.status !== InvoiceStatus.WAITING_MANAGER_REVIEW) {
+        throw new BadRequestException('Счёт уже прошёл проверку менеджера');
+      }
+
       const updated = await tx.clientInvoice.update({
         where: { id: invoiceId },
         data: { status: InvoiceStatus.CONFIRMED },
@@ -179,6 +189,254 @@ export class InvoicesService {
       return updated;
     });
   }
+
+  async approve(dealId: string, invoiceId: string, actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
+
+      if (!invoice.isCurrent) {
+        throw new BadRequestException('Согласовать можно только актуальную версию счёта');
+      }
+
+      if (invoice.status !== InvoiceStatus.CONFIRMED) {
+        throw new BadRequestException('Счёт ещё не находится на согласовании с заказчиком');
+      }
+
+      const updated = await tx.clientInvoice.update({
+        where: { id: invoiceId },
+        data: { status: InvoiceStatus.AGREED },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          dealId,
+          actorId,
+          action: 'CUSTOMER_APPROVED',
+          entityType: 'ClientInvoice',
+          entityId: invoiceId,
+          oldValue: { status: invoice.status },
+          newValue: { status: InvoiceStatus.AGREED },
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  async withdrawCorrection(
+    dealId: string,
+    invoiceId: string,
+    actorId: string,
+  ) {
+
+    return this.prisma.$transaction(
+      async (tx) => {
+
+        const invoice =
+          await tx.clientInvoice
+            .findFirstOrThrow({
+              where: {
+                id: invoiceId,
+                dealId,
+              },
+            });
+
+
+        if (!invoice.isCurrent) {
+          throw new BadRequestException(
+            'Отозвать можно только корректировку актуальной версии счёта',
+          );
+        }
+
+
+        if (
+          invoice.status !==
+          InvoiceStatus.CORRECTION_REQUESTED
+        ) {
+          throw new BadRequestException(
+            'По этому счёту нет активной корректировки',
+          );
+        }
+
+
+        const task =
+          await tx.task.findFirst({
+            where: {
+              dealId,
+              type:
+                TaskType.CORRECT_CLIENT_INVOICE,
+              status: {
+                notIn: [
+                  TaskStatus.DONE,
+                  TaskStatus.CANCELLED,
+                ],
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+
+        if (!task) {
+          throw new BadRequestException(
+            'Активная задача на корректировку не найдена',
+          );
+        }
+
+
+        if (
+          task.status ===
+          TaskStatus.IN_PROGRESS
+        ) {
+          throw new BadRequestException(
+            'Бухгалтер уже взял корректировку в работу. Автоматически отозвать её нельзя.',
+          );
+        }
+
+
+        const requestEvent =
+          await tx.auditEvent.findFirst({
+            where: {
+              dealId,
+              action:
+                'REQUEST_CORRECTION',
+              entityId:
+                invoiceId,
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+
+        const oldValue =
+          requestEvent?.oldValue as
+            | Record<string, unknown>
+            | null
+            | undefined;
+
+        const previousStatus =
+          oldValue?.status ===
+            InvoiceStatus.CONFIRMED
+            ? InvoiceStatus.CONFIRMED
+            : InvoiceStatus
+                .WAITING_MANAGER_REVIEW;
+
+
+        const updated =
+          await tx.clientInvoice.update({
+            where: {
+              id: invoiceId,
+            },
+            data: {
+              status:
+                previousStatus,
+            },
+          });
+
+
+        const sellerChange =
+          await tx.auditEvent.findFirst({
+            where: {
+              dealId,
+              action:
+                'DEAL_SELLER_CHANGED',
+              reason:
+                'Изменено при отправке счёта на корректировку',
+              createdAt: {
+                gte: task.createdAt,
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+
+        const sellerOldValue =
+          sellerChange?.oldValue as
+            | Record<string, unknown>
+            | null
+            | undefined;
+
+        const previousSeller =
+          sellerOldValue?.sellerType;
+
+
+        if (
+          previousSeller === SellerType.ST ||
+          previousSeller === SellerType.MSM ||
+          previousSeller === SellerType.IP
+        ) {
+          await tx.deal.update({
+            where: { id: dealId },
+            data: {
+              sellerType:
+                previousSeller,
+            },
+          });
+        }
+
+
+        await tx.task.update({
+          where: {
+            id: task.id,
+          },
+          data: {
+            status:
+              TaskStatus.CANCELLED,
+            completedAt:
+              new Date(),
+          },
+        });
+
+
+        await tx.storedFile.deleteMany({
+          where: {
+            dealId,
+            category: {
+              in: [
+                'CORRECTION_PRIMARY_' +
+                  task.id,
+                'CORRECTION_ATTACHMENT_' +
+                  task.id,
+                'CORRECTION_TASK_' +
+                  task.id,
+              ],
+            },
+          },
+        });
+
+
+        await tx.auditEvent.create({
+          data: {
+            dealId,
+            actorId,
+            action:
+              'CORRECTION_WITHDRAWN',
+            entityType:
+              'ClientInvoice',
+            entityId:
+              invoiceId,
+            oldValue: {
+              status:
+                InvoiceStatus
+                  .CORRECTION_REQUESTED,
+            },
+            newValue: {
+              status:
+                previousStatus,
+            },
+          },
+        });
+
+
+        return updated;
+      },
+    );
+  }
+
 
   async requestCorrection(
     dealId: string,
