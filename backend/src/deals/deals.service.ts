@@ -460,6 +460,7 @@ export class DealsService {
       sellerType: SellerType;
       clientName: string;
       accountingComment?: string;
+      requestText?: string;
       marginMode?: string;
       marginValue?: number;
     },
@@ -499,70 +500,8 @@ export class DealsService {
         }
 
 
-        const latestReturned =
-          active
-            ? await tx.auditEvent.findFirst({
-                where: {
-                  dealId: id,
-                  entityId: active.id,
-                  action: 'INVOICE_REQUEST_RETURNED',
-                },
-                orderBy: {
-                  createdAt: 'desc',
-                },
-              })
-            : null;
-
-
-        const returnData =
-          latestReturned?.newValue as
-            | Record<string, unknown>
-            | null
-            | undefined;
-
-        const reasonCode =
-          typeof returnData?.reasonCode === 'string'
-            ? returnData.reasonCode
-            : undefined;
-
-
-        if (
-          reasonCode === 'NO_TERMS' &&
-          body.marginValue === undefined
-        ) {
-          throw new BadRequestException(
-            'Укажите условия перед повторной отправкой',
-          );
-        }
-
-
-        if (reasonCode === 'NO_INCOMING_INVOICE') {
-          const incoming =
-            await tx.storedFile.findFirst({
-              where: {
-                dealId: id,
-                OR: [
-                  {
-                    category:
-                      'CUSTOMER_INVOICE_PRIMARY',
-                  },
-                  {
-                    category: {
-                      startsWith:
-                        'CORRECTION_PRIMARY_',
-                    },
-                  },
-                ],
-              },
-              select: { id: true },
-            });
-
-          if (!incoming) {
-            throw new BadRequestException(
-              'Прикрепите входящий счёт перед повторной отправкой',
-            );
-          }
-        }
+        // Возврат всегда возвращает менеджеру всю заявку на редактирование.
+        // Причина возврата объясняет, что нужно исправить, но не меняет состав формы.
 
 
         const nextClientName =
@@ -573,6 +512,21 @@ export class DealsService {
           body.accountingComment?.trim() ||
           null;
 
+        const nextRequestText =
+          body.requestText !== undefined
+            ? body.requestText.trim() || null
+            : deal.requestText;
+
+        const nextMarginMode =
+          body.marginMode !== undefined
+            ? body.marginMode || null
+            : deal.marginMode;
+
+        const nextMarginValue =
+          body.marginValue !== undefined
+            ? body.marginValue
+            : deal.marginValue;
+
 
         await tx.deal.update({
           where: { id },
@@ -581,10 +535,12 @@ export class DealsService {
             clientName: nextClientName,
             accountingComment:
               nextAccountingComment,
+            requestText:
+              nextRequestText,
             marginMode:
-              body.marginMode || null,
+              nextMarginMode,
             marginValue:
-              body.marginValue ?? null,
+              nextMarginValue,
           },
         });
 
@@ -654,9 +610,9 @@ export class DealsService {
             newValue: {
               status: TaskStatus.NEW,
               marginMode:
-                body.marginMode || null,
+                nextMarginMode,
               marginValue:
-                body.marginValue ?? null,
+                nextMarginValue,
             },
           },
         });

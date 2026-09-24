@@ -609,11 +609,26 @@ function DealCard({
       deal
     );
 
+  const returnedInvoiceTask =
+    deal.tasks.find(
+      (task) =>
+        task.type ===
+          'ISSUE_CLIENT_INVOICE' &&
+        task.status ===
+          'NEED_DATA'
+    );
+
   const latestReturn =
     deal.auditEvents?.find(
       (event) =>
         event.action ===
-        'INVOICE_REQUEST_RETURNED'
+          'INVOICE_REQUEST_RETURNED' &&
+        (
+          !returnedInvoiceTask ||
+          !event.entityId ||
+          event.entityId ===
+            returnedInvoiceTask.id
+        )
     );
 
   const returnReason =
@@ -882,18 +897,13 @@ function DealDetail({
   ] = useState<SellerType>('MSM');
 
   const [
-    requestMarginMode,
-    setRequestMarginMode,
-  ] = useState('TOTAL_PLUS');
-
-  const [
-    requestMarginValue,
-    setRequestMarginValue,
+    requestAccountingComment,
+    setRequestAccountingComment,
   ] = useState('');
 
   const [
-    requestAccountingComment,
-    setRequestAccountingComment,
+    requestRequestText,
+    setRequestRequestText,
   ] = useState('');
 
   const [
@@ -1080,8 +1090,27 @@ function DealDetail({
           : []
       );
 
+      const activeInvoiceRequest =
+        deal?.tasks.find(
+          (task) =>
+            task.type ===
+              'ISSUE_CLIENT_INVOICE' &&
+            ![
+              'DONE',
+              'CANCELLED',
+            ].includes(task.status)
+        );
+
       setRequestClientName(
         deal?.clientName || ''
+      );
+
+      setRequestRequestText(
+        deal?.requestText || ''
+      );
+
+      setRequestUrgent(
+        Boolean(activeInvoiceRequest?.urgent)
       );
 
       setRequestSellerType(
@@ -1092,18 +1121,6 @@ function DealDetail({
       setCorrectionSellerType(
         deal?.sellerType ||
         'MSM'
-      );
-
-      setRequestMarginMode(
-        deal?.marginMode ||
-        'TOTAL_PLUS'
-      );
-
-      setRequestMarginValue(
-        deal?.marginValue === undefined ||
-        deal?.marginValue === null
-          ? ''
-          : String(deal.marginValue)
       );
 
       setRequestAccountingComment(
@@ -1117,9 +1134,9 @@ function DealDetail({
       deal?.managerComment,
       deal?.deliveryAddresses,
       deal?.clientName,
+      deal?.requestText,
+      deal?.tasks,
       deal?.sellerType,
-      deal?.marginMode,
-      deal?.marginValue,
       deal?.accountingComment,
     ],
   );
@@ -1223,6 +1240,24 @@ function DealDetail({
     );
 
 
+  const requestExistingExtraFiles =
+    (deal.files || [])
+      .filter(
+        (file) =>
+          file.category ===
+          'MANAGER_ATTACHMENT'
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt || 0
+          ).getTime() -
+          new Date(
+            b.createdAt || 0
+          ).getTime()
+      );
+
+
   const invoiceRequestTask =
     deal.tasks.find(
       (task) =>
@@ -1271,7 +1306,13 @@ function DealDetail({
     deal.auditEvents?.find(
       (event) =>
         event.action ===
-        'INVOICE_REQUEST_RETURNED'
+          'INVOICE_REQUEST_RETURNED' &&
+        (
+          !invoiceRequestTask ||
+          !event.entityId ||
+          event.entityId ===
+            invoiceRequestTask.id
+        )
     );
 
 
@@ -1764,23 +1805,6 @@ function DealDetail({
     }
 
 
-    const parsedMargin =
-      parseMoneyInput(
-        requestMarginValue
-      );
-
-
-    if (
-      requestMarginValue.trim() &&
-      parsedMargin === undefined
-    ) {
-      setError(
-        'Проверьте значение условий'
-      );
-      return;
-    }
-
-
     setSaving(true);
     setError('');
 
@@ -1799,10 +1823,10 @@ function DealDetail({
         requestAccountingComment
           .trim() ||
         undefined,
-      marginMode:
-        requestMarginMode,
-      marginValue:
-        parsedMargin,
+      requestText:
+        requestRequestText
+          .trim() ||
+        undefined,
     };
 
 
@@ -3758,45 +3782,18 @@ function DealDetail({
                   />
                 </Field>
 
-
-                <div className="inline">
-                  <Field title="Условия">
-                    <select
-                      value={requestMarginMode}
-                      onChange={(e) =>
-                        setRequestMarginMode(
-                          e.target.value
-                        )
-                      }
-                    >
-                      <option value="PERCENT">
-                        ± %
-                      </option>
-                      <option value="TOTAL_PLUS">
-                        + к сумме
-                      </option>
-                      <option value="UNIT_PLUS">
-                        + за единицу
-                      </option>
-                      <option value="FINAL">
-                        Итоговая цена
-                      </option>
-                    </select>
-                  </Field>
-
-                  <Field title="Значение">
-                    <input
-                      inputMode="decimal"
-                      value={requestMarginValue}
-                      onChange={(e) =>
-                        setRequestMarginValue(
-                          e.target.value
-                        )
-                      }
-                      placeholder="-7 или +4"
-                    />
-                  </Field>
-                </div>
+                <Field title="Позиции и стоимость">
+                  <textarea
+                    rows={5}
+                    value={requestRequestText}
+                    onChange={(e) =>
+                      setRequestRequestText(
+                        e.target.value
+                      )
+                    }
+                    placeholder="Bonolit D500 — 32,4 м³ × 5 600 ₽…"
+                  />
+                </Field>
 
 
                 <Field title="Комментарий бухгалтерии">
@@ -3808,9 +3805,9 @@ function DealDetail({
                         e.target.value
                       )
                     }
+                    placeholder="Условия, уточнения и всё, что нужно бухгалтеру для выставления счёта"
                   />
                 </Field>
-
 
                 <div className="requestPreviousIncoming">
 
@@ -3857,17 +3854,50 @@ function DealDetail({
                 </div>
 
 
-                <Field title="Новый входящий счёт, если нужен">
+                <Field title="Заменить входящий счёт, если нужно">
                   <SingleFilePicker
                     file={requestIncomingInvoice}
                     onChange={setRequestIncomingInvoice}
-                    title="+ Прикрепить новый входящий счёт"
+                    title="+ Выбрать новый входящий счёт"
                     accept="application/pdf,image/*"
                   />
                 </Field>
 
 
-                <Field title="Дополнительные документы / реквизиты">
+                {requestExistingExtraFiles.length > 0 && (
+                  <div className="requestPreviousIncoming">
+                    <span>
+                      Документы / реквизиты, которые уже были отправлены бухгалтерии
+                    </span>
+
+                    <div className="versionList">
+                      {requestExistingExtraFiles.map(
+                        (file) => (
+                          <div
+                            className="versionRow"
+                            key={file.id}
+                          >
+                            <div>
+                              <b>{file.originalName}</b>
+                              <span>Ранее отправленный документ</span>
+                            </div>
+
+                            <a
+                              href={dealFileUrl(file.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Открыть
+                            </a>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+
+                <Field title="Добавить новые документы / реквизиты">
                   <MultiFilePicker
                     files={requestExtraFiles}
                     onChange={setRequestExtraFiles}
@@ -4928,12 +4958,6 @@ function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCance
   const [requestText, setRequestText] =
     useState('');
 
-  const [marginMode, setMarginMode] =
-    useState('TOTAL_PLUS');
-
-  const [marginValue, setMarginValue] =
-    useState('');
-
   const [
     accountingComment,
     setAccountingComment,
@@ -5084,13 +5108,6 @@ async function submit(
           requestText:
             requestText.trim() ||
             undefined,
-
-          marginMode,
-
-          marginValue:
-            parseMoneyInput(
-              marginValue
-            ),
 
           accountingComment:
             accountingComment
@@ -5355,7 +5372,7 @@ async function submit(
       </Field>
 
 
-      <Field title="Дополнительные вложения">
+      <Field title="Документы / реквизиты">
 
         <div>
 
@@ -5488,56 +5505,6 @@ async function submit(
       </Field>
 
 
-      <Field title="Наценка / цена">
-
-        <div className="inline">
-
-          <select
-            value={marginMode}
-
-            onChange={(e) =>
-              setMarginMode(
-                e.target.value
-              )
-            }
-          >
-
-            <option value="TOTAL_PLUS">
-              ± к сумме
-            </option>
-
-            <option value="UNIT_PLUS">
-              ± за единицу
-            </option>
-
-            <option value="PERCENT">
-              ± %
-            </option>
-
-            <option value="FINAL">
-              Итоговая цена
-            </option>
-
-          </select>
-
-
-          <input
-            inputMode="decimal"
-
-            value={marginValue}
-
-            onChange={(e) =>
-              setMarginValue(
-                e.target.value
-              )
-            }
-
-            placeholder="Например: -7 или 4"
-          />
-
-        </div>
-
-      </Field>
 
 
       <Field title="Комментарий бухгалтерии">
@@ -6822,18 +6789,6 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
             </b>
           </div>
 
-          <div>
-            <span>Условия</span>
-            <b>
-              {
-                pricingConditionLabel(
-                  task.deal.marginMode,
-                  task.deal.marginValue,
-                )
-              }
-            </b>
-          </div>
-
         </div>
 
       )}
@@ -8026,63 +7981,6 @@ function auditLabel(
     labels[action] ||
     'Изменение по сделке'
   );
-}
-
-
-function pricingConditionLabel(
-  mode?: string,
-  rawValue?: string | number,
-) {
-
-  if (
-    rawValue === undefined ||
-    rawValue === null ||
-    rawValue === ''
-  ) {
-    return 'Не указаны';
-  }
-
-
-  const value =
-    Number(rawValue);
-
-
-  if (!Number.isFinite(value)) {
-    return String(rawValue);
-  }
-
-
-  const signed =
-    value > 0
-      ? '+' + value
-      : String(value);
-
-
-  if (mode === 'PERCENT') {
-    return signed + '%';
-  }
-
-
-  if (mode === 'UNIT_PLUS') {
-    return signed + ' ₽ за единицу';
-  }
-
-
-  if (mode === 'TOTAL_PLUS') {
-    return signed + ' ₽ к сумме';
-  }
-
-
-  if (mode === 'FINAL') {
-    return 'Итоговая цена ' +
-      value.toLocaleString(
-        'ru-RU'
-      ) +
-      ' ₽';
-  }
-
-
-  return signed;
 }
 
 

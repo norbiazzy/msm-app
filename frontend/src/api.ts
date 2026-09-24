@@ -595,6 +595,7 @@ export async function resubmitInvoiceRequest(
     sellerType: 'ST' | 'MSM' | 'IP';
     clientName: string;
     accountingComment?: string;
+    requestText?: string;
     marginMode?: string;
     marginValue?: number;
   },

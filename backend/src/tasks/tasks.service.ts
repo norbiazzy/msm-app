@@ -175,8 +175,9 @@ export class TasksService {
             data: {
               status:
                 TaskStatus.NEED_DATA,
-              assigneeId:
-                body.actorId,
+              // После возврата задача снова принадлежит менеджеру,
+              // а не остаётся назначенной на бухгалтера.
+              assigneeId: null,
               completedAt: null,
             },
           });

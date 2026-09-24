@@ -48,6 +48,7 @@ export type AuditEvent = {
   id: string;
   action: string;
   entityType: string;
+  entityId?: string;
   reason?: string;
   createdAt: string;
   oldValue?: Record<string, unknown>;
