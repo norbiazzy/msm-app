@@ -44,7 +44,7 @@ export function DealUploadProgress({
 
 
       {/* PART_V064_O19_V3_UNIFIED_UPLOAD_UX */}
-      {invoiceRequestUploadJob && (
+      {invoiceRequestUploadJob && invoiceRequestUploadJob.id !== dealUploadJob?.id && (
         <div
           className={
             'dealPageUploadProgress taskUpload-' +

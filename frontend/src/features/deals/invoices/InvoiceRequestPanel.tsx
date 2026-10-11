@@ -238,64 +238,7 @@ export function InvoiceRequestPanel({
 
 
 
-          {invoiceRequestUploadJob && (
-
-            <div
-              className={
-                'invoiceRequestUploadState invoiceRequestUpload-' +
-                invoiceRequestUploadJob.status.toLowerCase()
-              }
-            >
-
-              <div className="invoiceRequestUploadTop">
-                <strong>
-                  {
-                    invoiceRequestUploadJob.status === 'SUCCESS'
-                      ? '✓ ' +
-                        (invoiceRequestUploadJob.successTitle ||
-                          invoiceRequestUploadJob.title)
-                      : invoiceRequestUploadJob.status === 'ERROR'
-                        ? 'Не удалось отправить документы'
-                        : invoiceRequestUploadJob.title
-                  }
-                </strong>
-
-                <b>
-                  {invoiceRequestUploadJob.progress}%
-                </b>
-              </div>
-
-              <div className="invoiceRequestUploadBar">
-                <span
-                  style={{
-                    width:
-                      invoiceRequestUploadJob.progress + '%',
-                  }}
-                />
-              </div>
-
-              {invoiceRequestUploadJob.status === 'RUNNING' && (
-                <span>
-                  {
-                    invoiceRequestUploadJob.currentFile
-                      ? 'Сейчас: ' +
-                        invoiceRequestUploadJob.currentFile
-                      : 'Сохраняем данные и отправляем запрос…'
-                  }
-                </span>
-              )}
-
-              {invoiceRequestUploadJob.status === 'ERROR' &&
-                invoiceRequestUploadJob.error && (
-                  <span>
-                    {invoiceRequestUploadJob.error}
-                  </span>
-                )}
-
-            </div>
-
-          )}
-
+          {/* Upload progress is displayed in DealUploadProgress above. */}
 
           {(
             !invoiceRequestTask &&
