@@ -77,6 +77,8 @@ export class DealsController {
 
     @Body()
     body: {
+      requestMode?: string;
+      requestText?: string;
       sellerType?: SellerType;
       clientName?: string;
       contactName?: string;

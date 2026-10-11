@@ -1,0 +1,48 @@
+v064-O2.5 — progress на ЗК в табличном списке сделок
+
+По скриншотам подтверждено:
+- у ЗК-50 background upload реально существует;
+- внутри самой ЗК progress виден;
+- в списке сделок строка ЗК-50 progress не показывает.
+
+Патч исправляет обе возможные причины:
+
+1. Binding
+Home ищет upload по dealId.
+Сначала берётся scope=DEAL.
+Дополнительно принимается job с dealId и без taskId —
+это безопасный fallback для загрузок сделки, созданных старыми патчами.
+
+2. Desktop/table CSS
+В текущем desktop списке DealCard выглядит как табличная строка.
+Progress уже находится внутри DealCard, но сетка могла не дать ему
+отдельную видимую строку.
+
+Теперь .dealUploadState:
+- занимает grid-column 1 / -1;
+- становится второй строкой своей ЗК;
+- строка сделки увеличивает высоту;
+- overflow не обрезает progress.
+
+Меняются только:
+- frontend/src/App.tsx
+- frontend/src/styles.css
+
+Backend и механизм upload не меняются.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o25-deal-list-progress.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o25-deal-list-progress.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+После успешного build — сразу визуальный тест.

@@ -1,0 +1,46 @@
+v064-O2.2 — документы из существующей сделки
+
+Правило:
+- отправили документ ИЗ СДЕЛКИ;
+- остаёмся внутри ЗК;
+- progress виден сверху внутри сделки;
+- тот же progress виден на карточке этой ЗК в списке «Сделки».
+
+Покрывает:
+- повторную отправку документов бухгалтерии;
+- корректировку счёта из сделки;
+- входящие счета и документы поставщика;
+- замену входящего счёта;
+- запрос оплаты поставщику;
+- подтверждение оплаты клиента;
+- доверенность (она уже передаёт dealId).
+
+Дополнительно future-proof:
+если новая форма внутри #deal/<id> забудет передать dealId,
+backgroundUploads сам привяжет job к текущей сделке.
+
+Меняются:
+- frontend/src/App.tsx
+- frontend/src/PurchasesBlock.tsx
+- frontend/src/backgroundUploads.tsx
+- frontend/src/styles.css
+
+Backend не меняется.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o22-existing-deal-upload-progress.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o22-existing-deal-upload-progress.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o22-existing-deal-upload-progress.cjs

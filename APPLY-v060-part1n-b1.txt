@@ -1,0 +1,41 @@
+v0.6.0 Part 1N-B1 — повторная отправка ТОЙ ЖЕ задачи
+
+Требует:
+- Part 1L v4
+- Part 1M-B / 1M-C
+- желательно Part 1N-A v3
+
+Что делает:
+- добавляет POST /tasks/:id/resubmit-to-accounting;
+- разрешает повторную отправку только когда status=NEED_DATA;
+- НЕ создаёт новую Task;
+- текущая Task меняется NEED_DATA -> NEW;
+- assigneeId -> null, чтобы задача снова попала бухгалтерии;
+- completedAt -> null;
+- менеджер может изменить description и urgent;
+- остальные связанные данные/файлы не удаляются и не пересоздаются;
+- пишет AuditEvent TASK_RESUBMITTED_TO_ACCOUNTING;
+- для POWER_OF_ATTORNEY и ETRN появляется редактор:
+  «Исправьте данные» + «Сохранить и повторно отправить бухгалтерии»;
+- Prisma migration не требуется.
+
+ВАЖНО:
+Это первый слой 1N-B.
+Следующий 1N-B2 подключит отдельный редактор для PAY_SUPPLIER,
+потому что его сумма/поставщик лежат не в Task, а в SupplierPurchase.
+
+Распаковать в:
+D:\job\it\msm-app
+
+Проверка:
+node .\apply-v060-part1n-b1-resubmit-same-task.cjs --check
+
+Если всё OK:
+node .\apply-v060-part1n-b1-resubmit-same-task.cjs
+
+Затем:
+git diff --check
+cd .\backend
+npm run build
+cd ..\frontend
+npm run build

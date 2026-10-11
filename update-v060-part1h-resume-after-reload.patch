@@ -1,0 +1,586 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index e25a8e7..064c2e8 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -6,10 +6,15 @@ import {
+ } from './backgroundUploads';
+ import {
+   clearInvoiceTaskDraft,
++  clearPendingInvoiceSubmission,
++  listPendingInvoiceSubmissions,
+   loadInvoiceTaskDraftFiles,
++  markPendingInvoiceFileUploaded,
+   readInvoiceTaskDraftFields,
+   saveInvoiceTaskDraftFields,
+   saveInvoiceTaskDraftFiles,
++  savePendingInvoiceSubmission,
++  type PendingInvoiceSubmission,
+ } from './invoiceTaskDraft';
+ 
+ import {
+@@ -29,6 +34,174 @@ function routeHash(
+   return '#' + view;
+ }
+ 
++const pendingInvoiceResumeLocks =
++  new Set<string>();
++
++async function resumePendingInvoiceSubmission(
++  pending: PendingInvoiceSubmission,
++  actorId: string,
++) {
++  if (
++    pendingInvoiceResumeLocks.has(
++      pending.taskId
++    )
++  ) {
++    return;
++  }
++
++  pendingInvoiceResumeLocks.add(
++    pending.taskId
++  );
++
++  try {
++    const files =
++      await loadInvoiceTaskDraftFiles(
++        pending.taskId,
++      );
++
++    const uploadedFileIds = [
++      ...pending.uploadedFileIds,
++    ];
++
++    while (
++      uploadedFileIds.length <
++      pending.fileCount
++    ) {
++      uploadedFileIds.push(null);
++    }
++
++    startBackgroundUploadJob({
++      taskId:
++        pending.taskId,
++
++      dealId:
++        pending.dealId,
++
++      title:
++        'Возобновляем отправку счёта',
++
++      successTitle:
++        'Счёт отправлен',
++
++      subtitle:
++        pending.clientName,
++
++      files,
++
++      run:
++        async ({
++          upload,
++          setProgress,
++        }) => {
++          for (
++            let index = 0;
++            index < pending.fileCount;
++            index++
++          ) {
++            if (
++              uploadedFileIds[index]
++            ) {
++              setProgress(
++                Math.round(
++                  (
++                    (index + 1) /
++                    Math.max(
++                      pending.fileCount,
++                      1
++                    )
++                  ) * 90
++                )
++              );
++              continue;
++            }
++
++            const file =
++              files[index];
++
++            if (!file) {
++              throw new Error(
++                'Не удалось восстановить один из файлов счёта. Откройте задачу и прикрепите файл повторно.'
++              );
++            }
++
++            const uploaded =
++              await upload(
++                pending.dealId,
++                file,
++                'CLIENT_INVOICE_ATTACHMENT',
++                index,
++                pending.fileCount,
++              );
++
++            uploadedFileIds[index] =
++              uploaded.id;
++
++            markPendingInvoiceFileUploaded(
++              pending.taskId,
++              index,
++              uploaded.id,
++            );
++          }
++
++          setProgress(94);
++
++          await createInvoice(
++            pending.dealId,
++            {
++              number:
++                pending.number,
++
++              amount:
++                pending.amount,
++
++              invoiceDate:
++                pending.invoiceDate,
++
++              fileId:
++                uploadedFileIds[0] ||
++                undefined,
++
++              actorId,
++            },
++          );
++
++          clearPendingInvoiceSubmission(
++            pending.taskId,
++          );
++
++          await clearInvoiceTaskDraft(
++            pending.taskId,
++          ).catch(() => undefined);
++
++          setProgress(99);
++        },
++    });
++  } catch (error) {
++    console.warn(
++      'Не удалось восстановить незавершённую отправку счёта',
++      error,
++    );
++  } finally {
++    pendingInvoiceResumeLocks.delete(
++      pending.taskId
++    );
++  }
++}
++
++function resumePendingInvoiceSubmissions(
++  actorId: string,
++) {
++  const pending =
++    listPendingInvoiceSubmissions();
++
++  for (const item of pending) {
++    void resumePendingInvoiceSubmission(
++      item,
++      actorId,
++    );
++  }
++}
++
+ function App() {
+   const [user, setUser] = useState<CurrentUser | null>(null);
+   const [deals, setDeals] = useState<Deal[]>([]);
+@@ -61,6 +234,15 @@ function App() {
+       }
+     })();
+   }, []);
++
++  useEffect(() => {
++    if (!user) return;
++
++    resumePendingInvoiceSubmissions(
++      user.id
++    );
++  }, [user?.id]);
++
+   useEffect(() => {
+     if (!user) return;
+ 
+@@ -107,9 +289,10 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+     setInvoiceFiles,
+   ] = useState<File[]>([]);
+ 
+-  function finishInvoice() {
++  async function finishInvoice() {
+ 
+     setError('');
++    setSaving(true);
+ 
+ 
+     const filesToUpload =
+@@ -124,96 +307,174 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       parseMoneyInput(amount);
+ 
+ 
+-    startBackgroundUploadJob({
++    const invoiceDateToSave =
++      todayLocalDate();
+ 
+-      taskId:
+-        task.id,
+ 
+-      title:
+-        'Загружаем готовый счёт',
++    const uploadedFileIds:
++      Array<string | null> =
++        Array(
++          filesToUpload.length
++        ).fill(null);
+ 
+-      subtitle:
+-        task.deal.clientName,
+ 
+-      files:
++    try {
++
++      await saveInvoiceTaskDraftFiles(
++        task.id,
+         filesToUpload,
++      );
+ 
+ 
+-      run:
+-        async ({
+-          upload,
+-          setProgress,
+-        }) => {
++      savePendingInvoiceSubmission({
++        taskId:
++          task.id,
+ 
+-          const ids:
+-            string[] = [];
++        dealId:
++          task.deal.id,
+ 
++        clientName:
++          task.deal.clientName,
+ 
+-          for (
+-            let index = 0;
+-            index <
+-              filesToUpload.length;
+-            index++
+-          ) {
++        number:
++          numberToSave,
+ 
+-            const uploaded =
+-              await upload(
++        amount:
++          amountToSave,
+ 
+-                task.deal.id,
++        invoiceDate:
++          invoiceDateToSave,
+ 
+-                filesToUpload[
+-                  index
+-                ],
++        fileCount:
++          filesToUpload.length,
+ 
+-                'CLIENT_INVOICE_ATTACHMENT',
++        uploadedFileIds:
++          [...uploadedFileIds],
++      });
+ 
+-                index,
+ 
+-                filesToUpload.length,
++      startBackgroundUploadJob({
++
++        taskId:
++          task.id,
++
++        dealId:
++          task.deal.id,
++
++        title:
++          'Загружаем готовый счёт',
++
++        successTitle:
++          'Счёт отправлен',
++
++        subtitle:
++          task.deal.clientName,
++
++        files:
++          filesToUpload,
++
++
++        run:
++          async ({
++            upload,
++            setProgress,
++          }) => {
++
++            for (
++              let index = 0;
++              index <
++                filesToUpload.length;
++              index++
++            ) {
++
++              if (
++                uploadedFileIds[index]
++              ) {
++                continue;
++              }
++
++
++              const uploaded =
++                await upload(
++
++                  task.deal.id,
++
++                  filesToUpload[
++                    index
++                  ],
++
++                  'CLIENT_INVOICE_ATTACHMENT',
++
++                  index,
++
++                  filesToUpload.length,
++                );
++
++
++              uploadedFileIds[index] =
++                uploaded.id;
++
++
++              markPendingInvoiceFileUploaded(
++                task.id,
++                index,
++                uploaded.id,
+               );
++            }
+ 
+ 
+-            ids.push(
+-              uploaded.id
+-            );
+-          }
++            setProgress(94);
+ 
+ 
+-          setProgress(94);
++            await createInvoice(
++              task.deal.id,
++              {
+ 
++                number:
++                  numberToSave,
+ 
+-          await createInvoice(
+-            task.deal.id,
+-            {
++                amount:
++                  amountToSave,
+ 
+-              number:
+-                numberToSave,
++                invoiceDate:
++                  invoiceDateToSave,
+ 
+-              amount:
+-                amountToSave,
++                fileId:
++                  uploadedFileIds[0] ||
++                  undefined,
+ 
+-              invoiceDate:
+-                todayLocalDate(),
++                actorId:
++                  user.id,
++              },
++            );
+ 
+-              fileId:
+-                ids[0],
+ 
+-              actorId:
+-                user.id,
+-            },
+-          );
++            clearPendingInvoiceSubmission(
++              task.id,
++            );
+ 
+ 
+-          await clearInvoiceTaskDraft(
+-            task.id,
+-          ).catch(() => undefined);
++            await clearInvoiceTaskDraft(
++              task.id,
++            ).catch(() => undefined);
+ 
+ 
+-          setProgress(99);
+-        },
+-    });
++            setProgress(99);
++          },
++      });
++
++
++      onBack();
++
++    } catch (e) {
+ 
++      setError(
++        e instanceof Error
++          ? e.message
++          : 'Не удалось подготовить отправку счёта'
++      );
+ 
+-    onBack();
++      setSaving(false);
++    }
+   }
+ }
+diff --git a/frontend/src/invoiceTaskDraft.ts b/frontend/src/invoiceTaskDraft.ts
+index 967e581..804f962 100644
+--- a/frontend/src/invoiceTaskDraft.ts
++++ b/frontend/src/invoiceTaskDraft.ts
+@@ -258,3 +258,126 @@ export async function clearInvoiceTaskDraft(
+     db.close();
+   }
+ }
++
++const PENDING_KEY =
++  'msm.invoice-task-pending.v1';
++
++export type PendingInvoiceSubmission = {
++  taskId: string;
++  dealId: string;
++  clientName: string;
++  number: string;
++  amount?: number;
++  invoiceDate: string;
++  fileCount: number;
++  uploadedFileIds: Array<string | null>;
++};
++
++export function listPendingInvoiceSubmissions() {
++  try {
++    const raw =
++      window.localStorage.getItem(
++        PENDING_KEY,
++      );
++
++    if (!raw) {
++      return [] as PendingInvoiceSubmission[];
++    }
++
++    const parsed =
++      JSON.parse(raw) as unknown;
++
++    return Array.isArray(parsed)
++      ? parsed as PendingInvoiceSubmission[]
++      : [];
++  } catch {
++    return [];
++  }
++}
++
++export function savePendingInvoiceSubmission(
++  pending: PendingInvoiceSubmission,
++) {
++  const current =
++    listPendingInvoiceSubmissions();
++
++  const next = [
++    pending,
++    ...current.filter(
++      (item) =>
++        item.taskId !== pending.taskId
++    ),
++  ];
++
++  window.localStorage.setItem(
++    PENDING_KEY,
++    JSON.stringify(next),
++  );
++}
++
++export function markPendingInvoiceFileUploaded(
++  taskId: string,
++  index: number,
++  fileId: string,
++) {
++  const current =
++    listPendingInvoiceSubmissions();
++
++  const next =
++    current.map((item) => {
++      if (item.taskId !== taskId) {
++        return item;
++      }
++
++      const uploadedFileIds = [
++        ...item.uploadedFileIds,
++      ];
++
++      while (
++        uploadedFileIds.length <
++        item.fileCount
++      ) {
++        uploadedFileIds.push(null);
++      }
++
++      uploadedFileIds[index] =
++        fileId;
++
++      return {
++        ...item,
++        uploadedFileIds,
++      };
++    });
++
++  window.localStorage.setItem(
++    PENDING_KEY,
++    JSON.stringify(next),
++  );
++}
++
++export function clearPendingInvoiceSubmission(
++  taskId: string,
++) {
++  try {
++    const next =
++      listPendingInvoiceSubmissions()
++        .filter(
++          (item) =>
++            item.taskId !== taskId
++        );
++
++    if (next.length === 0) {
++      window.localStorage.removeItem(
++        PENDING_KEY,
++      );
++      return;
++    }
++
++    window.localStorage.setItem(
++      PENDING_KEY,
++      JSON.stringify(next),
++    );
++  } catch {
++    // Черновик счёта остаётся отдельной страховкой.
++  }
++}

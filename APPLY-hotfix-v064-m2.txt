@@ -1,0 +1,32 @@
+HOTFIX v064-M2
+
+Полностью заменяет только функцию renderTask()
+в frontend/src/App.tsx.
+
+Нужен после ошибки JSX от v064-M/M1.
+
+Сохраняет:
+- Variant A
+- ЗК
+- МСМ - ХХХ / СТ - ХХХ / ИП - ХХХ
+- имя менеджера
+- дату + время
+- статус
+- компактный возврат
+
+Команды:
+
+cd D:\job\it\msm-app
+
+node .\apply-hotfix-v064-m2-clean-render-task.cjs --check
+node .\apply-hotfix-v064-m2-clean-render-task.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+После build:
+
+cd ..
+node .\audit-hotfix-v064-m2-clean-render-task.cjs

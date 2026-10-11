@@ -1,3 +1,4 @@
+import { TaskContextStrip } from './TaskContextStrip';
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
@@ -33,6 +34,14 @@ import {
   MultiFilePicker,
   SingleFilePicker,
 } from './MultiFilePicker';
+
+import {
+  ReturnToManagerPanel,
+} from './ReturnToManagerPanel';
+
+import {
+  SupplierPaymentManagerEdit,
+} from './SupplierPaymentManagerEdit';
 
 
 function money(
@@ -415,6 +424,10 @@ export function PurchasesBlock({
 
         startBackgroundUploadJob({
 
+        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+        dealId:
+          deal.id,
+
           title:
             mode === 'PAY'
               ? 'Передаём оплату бухгалтерии'
@@ -544,8 +557,9 @@ export function PurchasesBlock({
 
         <div>
 
+          {/* PART_V064_O1_INCOMING_TITLE */}
           <span>
-            Закупка
+            Входящие счета
           </span>
 
           <strong>
@@ -976,9 +990,14 @@ function PurchaseCard({
     )
       .filter(
         (file) =>
+          (
           file.category ===
-          'SUPPLIER_INVOICE_' +
-          purchase.id
+            'SUPPLIER_INVOICE_' +
+            purchase.id ||
+          file.category ===
+            'SUPPLIER_DOCUMENT_' +
+            purchase.id
+        )
       )
       .sort(
         (a, b) =>
@@ -1200,6 +1219,10 @@ function PurchaseCard({
 
 
       startBackgroundUploadJob({
+
+        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+        dealId:
+          deal.id,
 
         title:
           'Обновляем входящий счёт',
@@ -1452,6 +1475,10 @@ function PurchaseCard({
 
 
     startBackgroundUploadJob({
+
+        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+        dealId:
+          deal.id,
 
       title:
         'Передаём оплату бухгалтерии',
@@ -2191,7 +2218,10 @@ export function SupplierBalanceCorrectionTask({
 
 
   return (
-    <section className="content form">
+    <section
+      className="content form taskWorkspace"
+      data-task-status={status}
+    >
 
       <button
         className="backLink"
@@ -2220,6 +2250,9 @@ export function SupplierBalanceCorrectionTask({
               : status}
         </div>
       </div>
+
+      {/* PART_V064_L_BALANCE_TASK_CONTEXT */}
+      <TaskContextStrip task={task} />
 
 
       <div className="balanceCorrectionTaskSummary">
@@ -2565,6 +2598,11 @@ export function SupplierPaymentTask({
 
     startBackgroundUploadJob({
 
+        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+        // PART_V064_O22_H1_SUPPLIER_TASK_DEAL_ID
+        dealId:
+          task.deal.id,
+
       taskId:
         task.id,
 
@@ -2675,6 +2713,10 @@ export function SupplierPaymentTask({
 
     startBackgroundUploadJob({
 
+        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+        dealId:
+          task.deal.id,
+
       taskId:
         task.id,
 
@@ -2740,7 +2782,27 @@ export function SupplierPaymentTask({
 
   return (
 
-    <section className="content form">
+    <section
+      className="content form taskWorkspace"
+      data-task-status={status}
+    >
+
+      {/* PART_1N_B2_SUPPLIER_MANAGER_EDIT */}
+
+      {status === 'NEED_DATA' &&
+        user.role !== 'ACCOUNTANT' && (
+
+        <SupplierPaymentManagerEdit
+          taskId={task.id}
+          dealId={task.deal.id}
+          actorId={user.id}
+          purchase={purchase}
+          urgent={task.urgent}
+          onResubmitted={onBack}
+        />
+
+      )}
+
 
       <button
         className="backLink"
@@ -2800,6 +2862,9 @@ export function SupplierPaymentTask({
         )}
 
       </div>
+
+      {/* PART_V064_L_SUPPLIER_PAYMENT_CONTEXT */}
+      <TaskContextStrip task={task} />
 
 
       <div className="infoBox">
@@ -2953,7 +3018,25 @@ export function SupplierPaymentTask({
       )}
 
 
-      {status === 'NEW' && (
+            {/* PART_1M_A_SUPPLIER_RETURN */}
+
+      {/* PART_1N_K4_V3_DISABLE_OLD_SUPPLIER_RETURN */}
+      {false && (
+        status === 'NEW' ||
+        status === 'IN_PROGRESS'
+      ) && (
+
+        <ReturnToManagerPanel
+          taskId={task.id}
+          actorId={user.id}
+          disabled={saving}
+          onReturned={onBack}
+        />
+
+      )}
+
+
+{status === 'NEW' && (
 
         <button
           className="primary wide"
@@ -2972,7 +3055,27 @@ export function SupplierPaymentTask({
       )}
 
 
-      {status ===
+      
+
+      {/* PART_1N_K2_V3_SUPPLIER_RETURN */}
+
+      {(
+        status === 'NEW' ||
+        status === 'IN_PROGRESS'
+      ) &&
+        !financiallyPaid && (
+
+        <ReturnToManagerPanel
+          taskId={task.id}
+          actorId={user.id}
+          disabled={saving}
+          onReturned={onBack}
+        />
+
+      )}
+
+
+{status ===
         'IN_PROGRESS' &&
         !financiallyPaid && (
 
@@ -3041,7 +3144,7 @@ export function SupplierPaymentTask({
           </label>
 
 
-          <label className="stampToggle balancePaymentToggle">
+          <label data-bo-payment-choice="balance" className="stampToggle balancePaymentToggle">
 
             <input
               type="checkbox"
@@ -3086,7 +3189,7 @@ export function SupplierPaymentTask({
 
           {!paidFromBalance && (
 
-          <label className="stampToggle">
+          <label data-bo-payment-choice="stamped" className="stampToggle">
 
             <input
               type="checkbox"

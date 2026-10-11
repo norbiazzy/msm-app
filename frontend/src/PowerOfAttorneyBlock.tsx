@@ -1,3 +1,5 @@
+import { PoaEtrnPanel } from './PoaEtrnPanel';
+import { TaskContextStrip } from './TaskContextStrip';
 import {
   useMemo,
   useState,
@@ -7,6 +9,7 @@ import {
   completePowerOfAttorneyTask,
   createPowerOfAttorneyTask,
   dealFileUrl,
+  updateDealInfo,
   updateTaskStatus,
   type Task,
 } from './api';
@@ -18,6 +21,14 @@ import {
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
+
+import {
+  ReturnToManagerPanel,
+} from './ReturnToManagerPanel';
+
+import {
+  ManagerResubmitPanel,
+} from './ManagerResubmitPanel';
 
 import type {
   CurrentUser,
@@ -76,24 +87,23 @@ export function PowerOfAttorneyBlock({
 
   const [supplierName, setSupplierName] =
     useState('');
-
-  const [organization, setOrganization] =
-    useState<SellerType>(deal.sellerType);
-
-  const [recipientName, setRecipientName] =
+const [recipientName, setRecipientName] =
+    useState('');
+const [goodsDescription, setGoodsDescription] =
     useState('');
 
-  const [invoiceNumber, setInvoiceNumber] =
-    useState('');
+  /* PART_V062_POA_REBUILD */
+  const [
+    accountingComment,
+    setAccountingComment,
+  ] = useState('');
 
-  const [requestDate, setRequestDate] =
-    useState(todayLocalDate());
-
-  const [goodsDescription, setGoodsDescription] =
-    useState('');
-
-  const [comment, setComment] =
-    useState('');
+  const [
+    managerComment,
+    setManagerComment,
+  ] = useState(
+    deal.managerComment || ''
+  );
 
   const [files, setFiles] =
     useState<File[]>([]);
@@ -138,12 +148,10 @@ export function PowerOfAttorneyBlock({
 
   function resetForm() {
     setSupplierName('');
-    setOrganization(deal.sellerType);
-    setRecipientName('');
-    setInvoiceNumber('');
-    setRequestDate(todayLocalDate());
-    setGoodsDescription('');
-    setComment('');
+setRecipientName('');
+setGoodsDescription('');
+    setAccountingComment('');
+    setManagerComment(deal.managerComment || '');
     setFiles([]);
     setUrgent(false);
     setOpen(false);
@@ -152,57 +160,53 @@ export function PowerOfAttorneyBlock({
 
   async function createTask(
     requestKey: string,
+    withEtrn = false,
   ) {
+    // PART_V064_N1_V5B_CREATE_WITH_ETRN
+    const normalizedManagerComment =
+      managerComment.trim();
+
+    if (
+      normalizedManagerComment !==
+      String(deal.managerComment || '').trim()
+    ) {
+      await updateDealInfo(
+        deal.id,
+        {
+          managerComment:
+            normalizedManagerComment,
+          actorId: user.id,
+        },
+      );
+    }
+
     await createPowerOfAttorneyTask({
       dealId: deal.id,
       actorId: user.id,
       urgent,
+      requestEtrn:
+        withEtrn,
       requestKey,
       supplierName:
         supplierName.trim(),
-      organization,
+      organization: deal.sellerType,
       recipientName:
         recipientName.trim(),
-      invoiceNumber:
-        invoiceNumber.trim() ||
-        undefined,
-      requestDate:
-        requestDate || undefined,
       goodsDescription:
         goodsDescription.trim(),
       comment:
-        comment.trim() ||
+        accountingComment.trim() ||
         undefined,
     });
   }
 
 
-  async function submit() {
+  async function submit(
+    withEtrn = false,
+  ) {
+    // PART_V064_N1_V5B_SUBMIT_WITH_ETRN
     setError('');
-
-    if (!supplierName.trim()) {
-      setError(
-        'Укажите поставщика / завод.'
-      );
-      return;
-    }
-
-    if (!recipientName.trim()) {
-      setError(
-        'Укажите, на кого нужна доверенность.'
-      );
-      return;
-    }
-
-    if (!goodsDescription.trim()) {
-      setError(
-        'Укажите, что получаем.'
-      );
-      return;
-    }
-
-
-    const requestKey =
+const requestKey =
       'poa-' +
       Date.now() +
       '-' +
@@ -245,12 +249,14 @@ export function PowerOfAttorneyBlock({
           }
 
           setProgress(95);
-          await createTask(requestKey);
+          await createTask(
+            requestKey,
+            withEtrn,
+          );
           setProgress(99);
           await onChanged();
         },
       });
-
       resetForm();
       return;
     }
@@ -259,7 +265,10 @@ export function PowerOfAttorneyBlock({
     setSaving(true);
 
     try {
-      await createTask(requestKey);
+      await createTask(
+            requestKey,
+            withEtrn,
+          );
       resetForm();
       await onChanged();
     } catch (e) {
@@ -294,6 +303,21 @@ export function PowerOfAttorneyBlock({
               const payload =
                 task.payload || {};
 
+              const details =
+                ((task as any).details || {}) as
+                  Record<string, unknown>;
+
+              const resultNumber =
+                String(
+                  details.poaNumber || ''
+                ).trim();
+
+              const resultComment =
+                String(
+                  details.accountantComment ||
+                  ''
+                ).trim();
+
               const requestKey =
                 String(
                   payload.requestKey || ''
@@ -326,6 +350,7 @@ export function PowerOfAttorneyBlock({
                     <div>
                       <strong>
                         {String(
+                          details.supplierOrFactory ||
                           payload.supplierName ||
                           'Доверенность'
                         )}
@@ -334,8 +359,9 @@ export function PowerOfAttorneyBlock({
                       <span>
                         На кого: {' '}
                         {String(
-                          payload.recipientName ||
-                          'не указано'
+                          details.attorneyPerson ||
+                            payload.recipientName ||
+                            'не указано'
                         )}
                       </span>
                     </div>
@@ -351,30 +377,21 @@ export function PowerOfAttorneyBlock({
                   </div>
 
 
-                  <div className="powerMeta">
-                    <span>
-                      От: {' '}
-                      {sellerLabels[
-                        String(
-                          payload.organization ||
-                          deal.sellerType
-                        ) as SellerType
-                      ] ||
-                      String(
-                        payload.organization ||
-                        deal.sellerType
+                  {(resultNumber || resultComment) && (
+                    <div className="powerMeta">
+                      {resultNumber && (
+                        <span>
+                          Доверенность №{resultNumber}
+                        </span>
                       )}
-                    </span>
 
-                    {typeof payload.invoiceNumber === 'string' && payload.invoiceNumber && (
-                      <span>
-                        Счёт: {' '}
-                        {String(
-                          payload.invoiceNumber
-                        )}
-                      </span>
-                    )}
-                  </div>
+                      {resultComment && (
+                        <span>
+                          Комментарий бухгалтера: {resultComment}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
 
                   {resultFiles.length > 0 && (
@@ -398,6 +415,15 @@ export function PowerOfAttorneyBlock({
                       ))}
                     </div>
                   )}
+
+
+                  {/* PART_V064_N1_V5B_READY_POA_ETRN */}
+                  <PoaEtrnPanel
+                    deal={deal}
+                    user={user}
+                    task={task}
+                    onChanged={onChanged}
+                  />
 
 
                   {sourceFiles.length > 0 &&
@@ -478,78 +504,31 @@ export function PowerOfAttorneyBlock({
           </label>
 
 
-          <label className="field">
-            <span>От какой организации</span>
-            <div className="segmented">
-              {(['ST', 'MSM', 'IP'] as SellerType[])
-                .map(
-                  (type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    className={
-                      organization === type
-                        ? 'selected'
-                        : ''
-                    }
-                    onClick={() =>
-                      setOrganization(type)
-                    }
-                  >
-                    {sellerLabels[type]}
-                  </button>
-                ))}
-            </div>
-          </label>
+
 
 
           <label className="field">
-            <span>На кого</span>
-            <input
+            <span>На кого доверенность</span>
+            <textarea
+              rows={4}
               value={recipientName}
               onChange={(e) =>
                 setRecipientName(
                   e.target.value
                 )
               }
-              placeholder="ФИО получателя"
+              placeholder="ФИО / данные получателя"
             />
           </label>
 
 
-          <div className="inline">
-            <label className="field">
-              <span>Входящий счёт</span>
-              <input
-                value={invoiceNumber}
-                onChange={(e) =>
-                  setInvoiceNumber(
-                    e.target.value
-                  )
-                }
-                placeholder="Номер, если есть"
-              />
-            </label>
 
-            <label className="field">
-              <span>Дата</span>
-              <input
-                type="date"
-                value={requestDate}
-                onChange={(e) =>
-                  setRequestDate(
-                    e.target.value
-                  )
-                }
-              />
-            </label>
-          </div>
 
 
           <label className="field">
             <span>Что получаем</span>
             <textarea
-              rows={3}
+              rows={4}
               value={goodsDescription}
               onChange={(e) =>
                 setGoodsDescription(
@@ -562,16 +541,30 @@ export function PowerOfAttorneyBlock({
 
 
           <label className="field">
-            <span>Комментарий</span>
+            <span>Комментарий для бухгалтерии</span>
             <textarea
-              rows={2}
-              value={comment}
+              rows={3}
+              value={accountingComment}
               onChange={(e) =>
-                setComment(
+                setAccountingComment(
                   e.target.value
                 )
               }
-              placeholder="Необязательно"
+              placeholder="Что важно знать бухгалтерии"
+            />
+          </label>
+
+          <label className="field">
+            <span>Комментарий для себя</span>
+            <textarea
+              rows={3}
+              value={managerComment}
+              onChange={(e) =>
+                setManagerComment(
+                  e.target.value
+                )
+              }
+              placeholder="Останется в сделке"
             />
           </label>
 
@@ -600,16 +593,30 @@ export function PowerOfAttorneyBlock({
           </label>
 
 
-          <button
-            type="button"
-            className="primary wide"
-            disabled={saving}
-            onClick={submit}
-          >
-            {saving
-              ? 'Отправляем…'
-              : 'Отправить бухгалтерии'}
-          </button>
+          {/* PART_V064_N1_V5B_SUBMIT_BUTTONS */}
+          <div className="powerSubmitActions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={saving}
+              onClick={() => {
+                void submit(false);
+              }}
+            >
+              Доверенность
+            </button>
+
+            <button
+              type="button"
+              className="primary"
+              disabled={saving}
+              onClick={() => {
+                void submit(true);
+              }}
+            >
+              Доверенность + ЭТРН
+            </button>
+          </div>
         </div>
       )}
 
@@ -639,6 +646,14 @@ export function PowerOfAttorneyTask({
   const [files, setFiles] =
     useState<File[]>([]);
 
+  const [poaNumber, setPoaNumber] =
+    useState('');
+
+  const [
+    accountantComment,
+    setAccountantComment,
+  ] = useState('');
+
   const [saving, setSaving] =
     useState(false);
 
@@ -648,21 +663,173 @@ export function PowerOfAttorneyTask({
   const payload =
     task.payload || {};
 
+  const details =
+    ((task as any).details || {}) as
+                  Record<string, unknown>;
+
+  const supplierName =
+    String(
+      details.supplierOrFactory ||
+      payload.supplierName ||
+      ''
+    );
+
+  const recipientName =
+    String(
+      details.attorneyPerson ||
+      payload.recipientName ||
+      ''
+    );
+
+  const goodsDescription =
+    String(
+      details.items ||
+      payload.goodsDescription ||
+      ''
+    );
+
+  const editableDetails = {
+    ...details,
+    supplierOrFactory:
+      details.supplierOrFactory ||
+      payload.supplierName ||
+      '',
+    attorneyPerson:
+      details.attorneyPerson ||
+      payload.recipientName ||
+      '',
+    items:
+      details.items ||
+      payload.goodsDescription ||
+      '',
+  };
+
+  const dealFiles =
+    task.deal.files || [];
+
+  const dealAny =
+    task.deal as any;
+
+  const invoiceRows =
+    Array.isArray(dealAny.invoices)
+      ? dealAny.invoices
+      : [];
+
+  const currentInvoice =
+    invoiceRows.find(
+      (invoice: any) =>
+        invoice?.isCurrent
+    ) ||
+    invoiceRows[0];
+
+  const currentCustomerInvoiceFile =
+    dealFiles.find(
+      (file) =>
+        currentInvoice?.fileId &&
+        file.id === currentInvoice.fileId
+    ) ||
+    [...dealFiles]
+      .reverse()
+      .find(
+        (file) =>
+          file.category ===
+            'CUSTOMER_INVOICE_PRIMARY' ||
+          file.category?.startsWith(
+            'CORRECTION_PRIMARY_'
+          )
+      );
+
+  const currentCustomerInvoiceNumber =
+    String(
+      currentInvoice?.number ||
+      currentInvoice?.invoiceNumber ||
+      currentInvoice?.invoiceNo ||
+      ''
+    ).trim();
+
+  const purchases =
+    Array.isArray(
+      dealAny.supplierPurchases
+    )
+      ? dealAny.supplierPurchases
+      : [];
+
+  const matchingPurchase =
+    [...purchases]
+      .reverse()
+      .find(
+        (purchase: any) =>
+          String(
+            purchase?.supplierName || ''
+          ).trim().toLowerCase() ===
+          supplierName
+            .trim()
+            .toLowerCase()
+      );
+
+  const incomingInvoiceFile =
+    dealFiles.find(
+      (file) =>
+        matchingPurchase?.sourceFileId &&
+        file.id ===
+          matchingPurchase.sourceFileId
+    ) ||
+    dealFiles.find(
+      (file) =>
+        matchingPurchase?.id &&
+        file.category ===
+          'SUPPLIER_INVOICE_' +
+          matchingPurchase.id
+    );
+
+  const incomingInvoiceNumber =
+    String(
+      matchingPurchase
+        ?.incomingInvoiceNumber ||
+      ''
+    ).trim();
+
+  const taskAny =
+    task as any;
+
+  const returnReason =
+    String(
+      taskAny.returnReason ||
+      taskAny.returnReasonCode ||
+      taskAny.returnDetails?.reason ||
+      taskAny.returnDetails?.reasonCode ||
+      taskAny.payload?.returnReason ||
+      ''
+    ).trim();
+
+  const returnComment =
+    String(
+      taskAny.returnComment ||
+      taskAny.returnNote ||
+      taskAny.returnDetails?.comment ||
+      taskAny.payload?.returnComment ||
+      ''
+    ).trim();
+
   const requestKey =
     String(
       payload.requestKey || ''
     );
 
   const sourceFiles =
-    requestKey
-      ? (task.deal.files || [])
-          .filter(
-            (file) =>
-              file.category ===
+    (task.deal.files || [])
+      .filter(
+        (file) =>
+          (
+            requestKey &&
+            file.category ===
               'POWER_OF_ATTORNEY_SOURCE_' +
               requestKey
-          )
-      : [];
+          ) ||
+          file.category ===
+            'TASK_ATTACHMENT_' +
+            task.id
+      );
 
 
   async function take() {
@@ -690,6 +857,13 @@ export function PowerOfAttorneyTask({
 
   function finish() {
     setError('');
+
+    if (!poaNumber.trim()) {
+      setError(
+        'Укажите номер доверенности.'
+      );
+      return;
+    }
 
     if (files.length === 0) {
       setError(
@@ -739,13 +913,136 @@ export function PowerOfAttorneyTask({
         setProgress(95);
         await completePowerOfAttorneyTask(
           task.id,
-          user.id,
+          {
+            actorId: user.id,
+            poaNumber:
+              poaNumber.trim(),
+            accountantComment:
+              accountantComment
+                .trim() ||
+              undefined,
+          },
         );
         setProgress(99);
       },
     });
 
     onBack();
+  }
+
+
+  if (
+    status === 'NEED_DATA' &&
+    user.role !== 'ACCOUNTANT'
+  ) {
+    return (
+      <section
+      className="content form taskWorkspace"
+      data-task-status={status}
+    >
+        <button
+          className="backLink"
+          onClick={onBack}
+        >
+          ← К задачам
+        </button>
+
+        <div className="detailHero">
+          <div className="eyebrow">
+            ЗК-{task.deal.internalNumber}
+          </div>
+
+          <h2>
+            Исправить доверенность
+          </h2>
+
+          <p>
+            {supplierName ||
+              task.deal.clientName}
+          </p>
+
+          <div className="statusPill">
+            Нужно исправить
+          </div>
+        </div>
+
+      {/* PART_V064_L_POA_TASK_CONTEXT */}
+      <TaskContextStrip task={task} />
+
+        {(returnReason ||
+          returnComment) && (
+          <div className="taskReturnNotice">
+            <strong>
+              Возвращено бухгалтерией
+            </strong>
+
+            {returnReason && (
+              <span>
+                Причина: {returnReason}
+              </span>
+            )}
+
+            {returnComment && (
+              <p>
+                Комментарий бухгалтера:
+                {' '}
+                {returnComment}
+              </p>
+            )}
+          </div>
+        )}
+
+        {sourceFiles.length > 0 && (
+          <div className="infoBox">
+            <strong>
+              Прикреплённые документы
+            </strong>
+
+            <div className="versionList">
+              {sourceFiles.map(
+                (file) => (
+                  <div
+                    key={file.id}
+                    className="versionRow"
+                  >
+                    <b>
+                      {file.originalName}
+                    </b>
+
+                    <a
+                      href={dealFileUrl(
+                        file.id
+                      )}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Открыть
+                    </a>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        )}
+
+        <ManagerResubmitPanel
+          taskId={task.id}
+          dealId={task.deal.id}
+          taskType={task.type}
+          actorId={user.id}
+          initialDescription={
+            task.description
+          }
+          initialUrgent={
+            task.urgent
+          }
+          initialDetails={
+            editableDetails
+          }
+          onResubmitted={onBack}
+        />
+      </section>
+    );
   }
 
 
@@ -788,52 +1085,13 @@ export function PowerOfAttorneyTask({
 
       <div className="powerTaskGrid">
         <div>
-          <span>От организации</span>
-          <b>
-            {sellerLabels[
-              String(
-                payload.organization ||
-                task.deal.sellerType
-              ) as SellerType
-            ] ||
-            String(
-              payload.organization ||
-              task.deal.sellerType
-            )}
-          </b>
+          <span>Поставщик / завод</span>
+          <b>{supplierName || '—'}</b>
         </div>
 
         <div>
-          <span>На кого</span>
-          <b>
-            {String(
-              payload.recipientName || '—'
-            )}
-          </b>
-        </div>
-
-        <div>
-          <span>Входящий счёт</span>
-          <b>
-            {String(
-              payload.invoiceNumber || '—'
-            )}
-          </b>
-        </div>
-
-        <div>
-          <span>Дата</span>
-          <b>
-            {payload.requestDate
-              ? new Date(
-                  String(
-                    payload.requestDate
-                  ) + 'T12:00:00'
-                ).toLocaleDateString(
-                  'ru-RU'
-                )
-              : '—'}
-          </b>
+          <span>На кого доверенность</span>
+          <b>{recipientName || '—'}</b>
         </div>
       </div>
 
@@ -841,17 +1099,69 @@ export function PowerOfAttorneyTask({
       <div className="infoBox">
         <strong>Что получаем</strong>
         <p>
-          {String(
-            payload.goodsDescription || '—'
-          )}
+          {goodsDescription || '—'}
         </p>
       </div>
 
 
       {task.description && (
         <div className="infoBox">
-          <strong>Комментарий менеджера</strong>
+          <strong>
+            Комментарий для бухгалтерии
+          </strong>
           <p>{task.description}</p>
+        </div>
+      )}
+
+
+      {(currentCustomerInvoiceFile ||
+        currentCustomerInvoiceNumber) && (
+        <div className="infoBox">
+          <strong>
+            Актуальный основной счёт
+          </strong>
+
+          {currentCustomerInvoiceFile ? (
+            <a
+              href={dealFileUrl(
+                currentCustomerInvoiceFile.id
+              )}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {currentCustomerInvoiceFile
+                .originalName}
+            </a>
+          ) : (
+            <p>
+              {currentCustomerInvoiceNumber}
+            </p>
+          )}
+        </div>
+      )}
+
+
+      {(incomingInvoiceFile ||
+        incomingInvoiceNumber) && (
+        <div className="infoBox">
+          <strong>Входящий счёт</strong>
+
+          {incomingInvoiceNumber && (
+            <p>{incomingInvoiceNumber}</p>
+          )}
+
+          {incomingInvoiceFile && (
+            <a
+              href={dealFileUrl(
+                incomingInvoiceFile.id
+              )}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {incomingInvoiceFile
+                .originalName}
+            </a>
+          )}
         </div>
       )}
 
@@ -885,6 +1195,20 @@ export function PowerOfAttorneyTask({
       )}
 
 
+      {user.role === 'ACCOUNTANT' &&
+        (
+          status === 'NEW' ||
+          status === 'IN_PROGRESS'
+        ) && (
+          <ReturnToManagerPanel
+            taskId={task.id}
+            actorId={user.id}
+            disabled={saving}
+            onReturned={onBack}
+          />
+        )}
+
+
       {status === 'NEW' && (
         <button
           type="button"
@@ -900,11 +1224,46 @@ export function PowerOfAttorneyTask({
       {status === 'IN_PROGRESS' && (
         <>
           <label className="field">
-            <span>Готовая доверенность</span>
+            <span>
+              Номер доверенности
+            </span>
+            <input
+              value={poaNumber}
+              disabled={saving}
+              onChange={(event) =>
+                setPoaNumber(
+                  event.target.value
+                )
+              }
+              placeholder="Например: 1757"
+            />
+          </label>
+
+          <label className="field">
+            <span>
+              Готовая доверенность
+            </span>
             <MultiFilePicker
               files={files}
               onChange={setFiles}
               title="+ Прикрепить доверенность"
+            />
+          </label>
+
+          <label className="field">
+            <span>
+              Комментарий бухгалтера
+            </span>
+            <textarea
+              rows={3}
+              value={accountantComment}
+              disabled={saving}
+              onChange={(event) =>
+                setAccountantComment(
+                  event.target.value
+                )
+              }
+              placeholder="Необязательно"
             />
           </label>
 

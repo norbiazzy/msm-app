@@ -1,0 +1,59 @@
+v064-O1.5 v2
+
+v1 НЕ применился: --check остановился до записи.
+Откатывать его не нужно.
+
+v2 больше не ищет жёсткий якорь isBackgroundUploading.
+Для списка задач он использует существующий marker:
+PART_1N_RETURN_NOTICE
+
+Результат:
+
+В списке задач:
+Вернул бухгалтер
+<причина>
+«<комментарий бухгалтера>»
+Открыть и исправить →
+
+В открытой задаче:
+Бухгалтер вернул задачу
+Что нужно исправить
+
+Причина возврата
+<причина>
+
+Комментарий бухгалтера
+<комментарий>
+
+После этого остаются:
+Запрос менеджера
+Исправить запрос
+
+Изменяются:
+backend/src/tasks/tasks.service.ts
+frontend/src/App.tsx
+frontend/src/InvoiceRequestTaskPanel.tsx
+frontend/src/styles.css
+
+Перед записью создаются backups.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o15-v2-accountant-return-message.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o15-v2-accountant-return-message.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..\backend
+npm run build
+
+cd ..
+node .\audit-v064-o15-v2-accountant-return-message.cjs

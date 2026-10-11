@@ -1,0 +1,40 @@
+v064-C — Block Office Tasks
+
+Меняется только UI задач:
+- список задач;
+- группы В работе / Новые / Нужно исправить;
+- цветная статусная полоса;
+- ссылка на сделку;
+- дата создания;
+- срочность;
+- прогресс фоновой отправки прямо на карточке;
+- открытая задача;
+- структурированные данные;
+- файлы;
+- возврат менеджеру;
+- повторная отправка;
+- mobile.
+
+Логика, API и backend не меняются.
+
+Требуется ранее применённый v064-A+B.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-c-block-office-tasks.cjs --check
+
+Если OK:
+
+node .\apply-v064-c-block-office-tasks.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+После сборки:
+
+cd ..
+node .\audit-v064-c-block-office-tasks.cjs

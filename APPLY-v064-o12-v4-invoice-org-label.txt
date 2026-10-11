@@ -1,0 +1,38 @@
+v064-O1.2 v4 — точный патч по выводу BlockOfficeHome.tsx
+
+Текущий код показал два отдельных формата:
+- карточки: 'Счёт №' + номер
+- таблица: '№' + номер
+
+v4 меняет оба:
+
+МСМ-1560
+СТ-1560
+ИП-1560
+
+Приоритет организации:
+1. invoice.sellerType
+2. deal.sellerType
+
+Меняется только:
+frontend/src/BlockOfficeHome.tsx
+
+Перед записью создаётся backup.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o12-v4-invoice-org-label.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o12-v4-invoice-org-label.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o12-v4-invoice-org-label.cjs

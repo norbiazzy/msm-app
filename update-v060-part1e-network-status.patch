@@ -1,0 +1,229 @@
+diff --git a/frontend/src/NetworkStatusBanner.tsx b/frontend/src/NetworkStatusBanner.tsx
+new file mode 100644
+index 0000000..fc6bb4d
+--- /dev/null
++++ b/frontend/src/NetworkStatusBanner.tsx
+@@ -0,0 +1,116 @@
++import { useEffect, useState } from 'react';
++
++type NetworkState =
++  | 'ONLINE'
++  | 'OFFLINE'
++  | 'RESTORED';
++
++export default function NetworkStatusBanner() {
++  const [networkState, setNetworkState] =
++    useState<NetworkState>(() =>
++      navigator.onLine
++        ? 'ONLINE'
++        : 'OFFLINE'
++    );
++
++  useEffect(() => {
++    let restoredTimer:
++      | number
++      | undefined;
++
++    const handleOffline = () => {
++      if (restoredTimer) {
++        window.clearTimeout(
++          restoredTimer
++        );
++      }
++
++      setNetworkState('OFFLINE');
++    };
++
++    const handleOnline = () => {
++      setNetworkState(
++        (current) =>
++          current === 'OFFLINE'
++            ? 'RESTORED'
++            : 'ONLINE'
++      );
++
++      if (restoredTimer) {
++        window.clearTimeout(
++          restoredTimer
++        );
++      }
++
++      restoredTimer =
++        window.setTimeout(() => {
++          setNetworkState('ONLINE');
++        }, 2500);
++    };
++
++    window.addEventListener(
++      'offline',
++      handleOffline
++    );
++    window.addEventListener(
++      'online',
++      handleOnline
++    );
++
++    return () => {
++      window.removeEventListener(
++        'offline',
++        handleOffline
++      );
++      window.removeEventListener(
++        'online',
++        handleOnline
++      );
++
++      if (restoredTimer) {
++        window.clearTimeout(
++          restoredTimer
++        );
++      }
++    };
++  }, []);
++
++  if (networkState === 'ONLINE') {
++    return null;
++  }
++
++  const restored =
++    networkState === 'RESTORED';
++
++  return (
++    <div
++      className={
++        'networkStatusBanner ' +
++        (restored
++          ? 'networkStatusBannerRestored'
++          : 'networkStatusBannerOffline')
++      }
++      role="status"
++      aria-live="polite"
++    >
++      <span
++        className="networkStatusDot"
++        aria-hidden="true"
++      />
++
++      <div>
++        <strong>
++          {restored
++            ? 'Сеть восстановлена'
++            : 'Нет подключения к сети'}
++        </strong>
++
++        {!restored && (
++          <span>
++            Ждём восстановления соединения…
++          </span>
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/main.tsx b/frontend/src/main.tsx
+index fa3dd3f..b1e7ef0 100644
+--- a/frontend/src/main.tsx
++++ b/frontend/src/main.tsx
+@@ -1,13 +1,16 @@
+ import { StrictMode } from 'react';
+ import { createRoot } from 'react-dom/client';
+ import App from './App';
++import NetworkStatusBanner from './NetworkStatusBanner';
+ import './styles.css';
++import './networkStatus.css';
+ 
+ window.Telegram?.WebApp?.ready();
+ window.Telegram?.WebApp?.expand();
+ 
+ createRoot(document.getElementById('root')!).render(
+   <StrictMode>
++    <NetworkStatusBanner />
+     <App />
+   </StrictMode>,
+ );
+diff --git a/frontend/src/networkStatus.css b/frontend/src/networkStatus.css
+new file mode 100644
+index 0000000..24928f4
+--- /dev/null
++++ b/frontend/src/networkStatus.css
+@@ -0,0 +1,80 @@
++.networkStatusBanner {
++  position: fixed;
++  z-index: 9999;
++  top: max(12px, env(safe-area-inset-top));
++  left: 50%;
++  transform: translateX(-50%);
++  width: min(calc(100% - 24px), 520px);
++  box-sizing: border-box;
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 12px 14px;
++  border: 1px solid rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  color: #fff;
++  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
++  backdrop-filter: blur(12px);
++  -webkit-backdrop-filter: blur(12px);
++}
++
++.networkStatusBannerOffline {
++  background: rgba(47, 47, 52, 0.96);
++}
++
++.networkStatusBannerRestored {
++  background: rgba(31, 91, 61, 0.96);
++}
++
++.networkStatusBanner > div {
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++}
++
++.networkStatusBanner strong {
++  font-size: 14px;
++  line-height: 1.25;
++}
++
++.networkStatusBanner span {
++  font-size: 12px;
++  line-height: 1.35;
++  opacity: 0.82;
++}
++
++.networkStatusDot {
++  flex: 0 0 auto;
++  width: 9px;
++  height: 9px;
++  border-radius: 999px;
++  background: currentColor;
++  opacity: 1 !important;
++}
++
++.networkStatusBannerOffline .networkStatusDot {
++  animation: networkStatusPulse 1.4s ease-in-out infinite;
++}
++
++@keyframes networkStatusPulse {
++  0%,
++  100% {
++    opacity: 0.35;
++    transform: scale(0.85);
++  }
++
++  50% {
++    opacity: 1;
++    transform: scale(1);
++  }
++}
++
++@media (max-width: 640px) {
++  .networkStatusBanner {
++    top: max(8px, env(safe-area-inset-top));
++    width: calc(100% - 16px);
++    padding: 11px 12px;
++    border-radius: 12px;
++  }
++}

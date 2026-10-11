@@ -1,0 +1,458 @@
+import {
+  useEffect,
+  useState,
+} from 'react';
+
+
+type ServerState =
+  | 'ONLINE'
+  | 'OFFLINE'
+  | 'RESTORED';
+
+
+const API =
+  import.meta.env.VITE_API_URL ||
+  '/api';
+
+
+export default function ServerStatusBanner() {
+
+  const [
+    serverState,
+    setServerState,
+  ] = useState<ServerState>(
+    'ONLINE'
+  );
+
+
+  useEffect(() => {
+
+    let stopped =
+      false;
+
+    let failureCount =
+      0;
+
+    let unavailableShown =
+      false;
+
+    let pollTimer:
+      number | undefined;
+
+    let restoredTimer:
+      number | undefined;
+
+    let activeController:
+      AbortController | undefined;
+
+
+    const schedule = (
+      delay: number
+    ) => {
+
+      if (stopped) {
+        return;
+      }
+
+
+      if (pollTimer) {
+        window.clearTimeout(
+          pollTimer
+        );
+      }
+
+
+      pollTimer =
+        window.setTimeout(
+          () => {
+            void checkServer();
+          },
+          delay,
+        );
+    };
+
+
+    const checkServer =
+      async () => {
+
+        if (
+          stopped
+        ) {
+          return;
+        }
+
+
+        if (
+          !navigator.onLine
+        ) {
+
+          failureCount =
+            0;
+
+          unavailableShown =
+            false;
+
+          setServerState(
+            'ONLINE'
+          );
+
+          schedule(
+            5000
+          );
+
+          return;
+        }
+
+
+        activeController
+          ?.abort();
+
+
+        const controller =
+          new AbortController();
+
+        activeController =
+          controller;
+
+
+        const timeout =
+          window.setTimeout(
+            () => {
+              controller.abort();
+            },
+            3000,
+          );
+
+
+        try {
+
+          const separator =
+            API.includes('?')
+              ? '&'
+              : '?';
+
+
+          const response =
+            await fetch(
+              API +
+                '/health' +
+                separator +
+                '_health=' +
+                Date.now(),
+              {
+                cache:
+                  'no-store',
+
+                signal:
+                  controller.signal,
+
+                headers: {
+                  'Cache-Control':
+                    'no-cache',
+                },
+              },
+            );
+
+
+          if (!response.ok) {
+
+            throw new Error(
+              'Health check ' +
+                response.status
+            );
+          }
+
+
+          const payload =
+            await response
+              .json()
+              .catch(
+                () => null
+              );
+
+
+          if (
+            !payload ||
+            payload.ok !== true
+          ) {
+
+            throw new Error(
+              'Invalid health response'
+            );
+          }
+
+
+          failureCount =
+            0;
+
+
+          if (
+            unavailableShown
+          ) {
+
+            unavailableShown =
+              false;
+
+            setServerState(
+              'RESTORED'
+            );
+
+
+            if (
+              restoredTimer
+            ) {
+
+              window.clearTimeout(
+                restoredTimer
+              );
+            }
+
+
+            restoredTimer =
+              window.setTimeout(
+                () => {
+
+                  setServerState(
+                    'ONLINE'
+                  );
+                },
+                2500,
+              );
+
+          } else {
+
+            setServerState(
+              'ONLINE'
+            );
+          }
+
+
+          schedule(
+            5000
+          );
+
+        } catch {
+
+          if (
+            !navigator.onLine
+          ) {
+
+            failureCount =
+              0;
+
+            unavailableShown =
+              false;
+
+            setServerState(
+              'ONLINE'
+            );
+
+            schedule(
+              5000
+            );
+
+            return;
+          }
+
+
+          failureCount +=
+            1;
+
+
+          if (
+            failureCount >= 2
+          ) {
+
+            unavailableShown =
+              true;
+
+            setServerState(
+              'OFFLINE'
+            );
+          }
+
+
+          schedule(
+            3000
+          );
+
+        } finally {
+
+          window.clearTimeout(
+            timeout
+          );
+
+
+          if (
+            activeController ===
+            controller
+          ) {
+
+            activeController =
+              undefined;
+          }
+        }
+      };
+
+
+    const handleOnline =
+      () => {
+
+        failureCount =
+          0;
+
+        schedule(
+          150
+        );
+      };
+
+
+    const handleOffline =
+      () => {
+
+        failureCount =
+          0;
+
+        unavailableShown =
+          false;
+
+        activeController
+          ?.abort();
+
+        setServerState(
+          'ONLINE'
+        );
+      };
+
+
+    window.addEventListener(
+      'online',
+      handleOnline
+    );
+
+
+    window.addEventListener(
+      'offline',
+      handleOffline
+    );
+
+
+    void checkServer();
+
+
+    return () => {
+
+      stopped =
+        true;
+
+
+      window.removeEventListener(
+        'online',
+        handleOnline
+      );
+
+
+      window.removeEventListener(
+        'offline',
+        handleOffline
+      );
+
+
+      activeController
+        ?.abort();
+
+
+      if (
+        pollTimer
+      ) {
+
+        window.clearTimeout(
+          pollTimer
+        );
+      }
+
+
+      if (
+        restoredTimer
+      ) {
+
+        window.clearTimeout(
+          restoredTimer
+        );
+      }
+    };
+  }, []);
+
+
+  if (
+    serverState ===
+    'ONLINE'
+  ) {
+
+    return null;
+  }
+
+
+  const restored =
+    serverState ===
+    'RESTORED';
+
+
+  return (
+
+    <div
+      className={
+        'serverStatusBanner ' +
+        (
+          restored
+            ? 'serverStatusBannerRestored'
+            : 'serverStatusBannerOffline'
+        )
+      }
+      role="status"
+      aria-live="polite"
+    >
+
+      {restored ? (
+
+        <span
+          className="serverStatusDot"
+          aria-hidden="true"
+        />
+
+      ) : (
+
+        <span
+          className="serverStatusSpinner"
+          aria-hidden="true"
+        />
+
+      )}
+
+
+      <div>
+
+        <strong>
+
+          {
+            restored
+              ? 'Сервер снова доступен'
+              : 'Сервер временно недоступен'
+          }
+
+        </strong>
+
+
+        {!restored && (
+
+          <span>
+            Повторяем подключение…
+          </span>
+
+        )}
+
+      </div>
+
+    </div>
+  );
+}

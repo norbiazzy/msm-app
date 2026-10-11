@@ -1,0 +1,18 @@
+Frontend TS hotfix for Part 1N-J1
+
+Исправляет ошибки:
+Property 'status' does not exist on type 'never'
+
+Причина:
+TypeScript слишком сузил invoiceRequestTask в нескольких JSX-ветках DealDetail.
+
+Hotfix:
+- добавляет invoiceRequestNeedsData boolean;
+- заменяет прямые проверки invoiceRequestTask?.status === 'NEED_DATA';
+- backend не меняет;
+- Prisma migration не нужна.
+
+Установка:
+node .\apply-v060-part1n-j1-ts-hotfix.cjs --check
+node .\apply-v060-part1n-j1-ts-hotfix.cjs
+npm run build

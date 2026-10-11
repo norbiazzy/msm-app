@@ -1,0 +1,8427 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 3380c22..071e044 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,8 +1,12 @@
++import { EtrnSourceDocuments } from './EtrnSourceDocuments';
++import { TaskContextStrip } from './TaskContextStrip';
+ import {
+   updateDealInfo,
+   updateShipmentDate,
+   updateSupplierPurchase,
+ } from './api';
++import { BlockOfficeHome } from './BlockOfficeHome';
++import { BlockOfficeMobileNav } from './BlockOfficeMobileNav';
+ 
+ import {
+   MultiFilePicker,
+@@ -17,11 +21,21 @@ import {
+   RecentActivityPanel,
+ } from './RecentActivityPanel';
+ import {
+-  BackgroundUploadList,
+   type BackgroundUploadJob,
+   startBackgroundUploadJob,
+   useBackgroundUploads,
+ } from './backgroundUploads';
++import {
++  clearInvoiceTaskDraft,
++  loadInvoiceTaskDraftFiles,
++  readInvoiceTaskDraftFields,
++  saveInvoiceTaskDraftFields,
++  saveInvoiceTaskDraftFiles,
++} from './invoiceTaskDraft';
++import {
++  resumePendingInvoiceSubmissions,
++  startInvoiceSubmission,
++} from './invoiceSubmissionQueue';
+ 
+ import {
+   PurchasesBlock,
+@@ -56,6 +70,23 @@ import {
+ } from './api';
+ import type { ClientPaymentMethod, CurrentUser, Deal, Invoice, PaymentStatus, SellerType } from './types';
+ 
++import {
++  ReturnToManagerPanel,
++} from './ReturnToManagerPanel';
++
++import {
++  ManagerResubmitPanel,
++} from './ManagerResubmitPanel';
++
++import {
++  TaskStructuredFields,
++} from './TaskStructuredFields';
++
++import {
++  InvoiceRequestDataCard,
++  InvoiceRequestManagerRepair,
++} from './InvoiceRequestTaskPanel';
++
+ const sellerLabels: Record<SellerType, string> = { ST: 'СТ', MSM: 'МСМ', IP: 'ИП' };
+ type View = 'home' | 'new' | 'tasks' | 'deal';
+ 
+@@ -178,6 +209,15 @@ function App() {
+       }
+     })();
+   }, []);
++
++  useEffect(() => {
++    if (!user) return;
++
++    void resumePendingInvoiceSubmissions(
++      user.id
++    );
++  }, [user?.id]);
++
+   useEffect(() => {
+     if (!user) return;
+ 
+@@ -200,7 +240,7 @@ function App() {
+   const title = view === 'new' ? 'Новый запрос на счёт' : view === 'tasks' ? 'Задачи' : view === 'deal' ? 'Сделка' : 'Мои сделки';
+ 
+   return (
+-    <main className="shell">
++    <main className={'shell boShell boView-' + view}>
+       <header className="topbar">
+         <div><div className="eyebrow">МСМ · Telegram Mini App</div><h1>{title}</h1></div>
+         <div className="topbarActions">
+@@ -210,7 +250,7 @@ function App() {
+       </header>
+ 
+       {view === 'home' ? (
+-        <Home
++        <BlockOfficeHome
+           deals={deals}
+           onNew={() => navigate('new')}
+           onOpen={(id) => navigate('deal', id)}
+@@ -242,6 +282,8 @@ function App() {
+         <button className={view === 'tasks' ? 'active' : ''} onClick={() => navigate('tasks')}>Задачи</button>
+         <button disabled>Месяц</button>
+       </nav>
++    
++      <BlockOfficeMobileNav />
+     </main>
+   );
+ }
+@@ -601,8 +643,25 @@ function DealCard({
+   onOpen: () => void;
+   uploadJob?: BackgroundUploadJob;
+ }) {
+-  const invoice = deal.invoices[0];
+-  const urgent = deal.tasks.some((t) => t.urgent);
++  const invoice =
++    deal.invoices[0];
++
++  const urgent =
++    deal.tasks.some(
++      (task) =>
++        task.urgent
++    );
++
++  const activeTasks =
++    deal.tasks.filter(
++      (task) =>
++        ![
++          'DONE',
++          'CANCELLED',
++        ].includes(
++          task.status
++        )
++    );
+ 
+   const needsManagerAction =
+     invoiceRequestNeedsManager(
+@@ -610,7 +669,7 @@ function DealCard({
+     );
+ 
+   const returnedInvoiceTask =
+-    deal.tasks.find(
++    activeTasks.find(
+       (task) =>
+         task.type ===
+           'ISSUE_CLIENT_INVOICE' &&
+@@ -622,13 +681,7 @@ function DealCard({
+     deal.auditEvents?.find(
+       (event) =>
+         event.action ===
+-          'INVOICE_REQUEST_RETURNED' &&
+-        (
+-          !returnedInvoiceTask ||
+-          !event.entityId ||
+-          event.entityId ===
+-            returnedInvoiceTask.id
+-        )
++        'INVOICE_REQUEST_RETURNED'
+     );
+ 
+   const returnReason =
+@@ -639,8 +692,20 @@ function DealCard({
+       'Нужно уточнить данные для счёта'
+     );
+ 
++
++  function stopCardOpen(
++    event: {
++      stopPropagation:
++        () => void;
++    }
++  ) {
++    event.stopPropagation();
++  }
++
++
+   return (
+-    <button
++
++    <div
+       className={
+         'dealCard clickable' +
+         (
+@@ -649,52 +714,221 @@ function DealCard({
+             : ''
+         )
+       }
++      role="button"
++      tabIndex={0}
+       onClick={onOpen}
++      onKeyDown={(event) => {
++
++        if (
++          event.key ===
++            'Enter' ||
++          event.key ===
++            ' '
++        ) {
++
++          event.preventDefault();
++          onOpen();
++        }
++      }}
+     >
++
+       <div className="dealTop">
+-        <div>
+-          <strong>{invoice ? `${sellerLabels[invoice.sellerType || deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
+-          <span>{deal.clientName}</span>
++
++        <div className="dealIdentity">
++
++          <a
++            className="dealInternalNumberLink"
++            href={
++              '#deal/' +
++              encodeURIComponent(
++                deal.id
++              )
++            }
++            onClick={
++              stopCardOpen
++            }
++          >
++            ЗК-
++            {deal.internalNumber}
++          </a>
++
++
++          {invoice && (
++
++            <span className="dealInvoiceNumber">
++              {
++                sellerLabels[
++                  deal.sellerType
++                ]
++              }
++              -
++              {invoice.number}
++            </span>
++
++          )}
++
++
++          <span className="dealClientName">
++            {deal.clientName}
++          </span>
++
+         </div>
+-        {urgent && <b className="urgent">СРОЧНО</b>}
++
++
++        {urgent && (
++
++          <b className="urgent">
++            СРОЧНО
++          </b>
++
++        )}
++
+       </div>
+ 
++
+       <div className="dealMeta">
+-        <span>Отгрузка: {deal.plannedShipmentAt ? new Date(deal.plannedShipmentAt).toLocaleDateString('ru-RU') : 'не указана'}</span>
++
++        <span>
++          Отгрузка:{' '}
++          {
++            deal.plannedShipmentAt
++              ? new Date(
++                  deal.plannedShipmentAt
++                )
++                  .toLocaleDateString(
++                    'ru-RU'
++                  )
++              : 'не указана'
++          }
++        </span>
++
+ 
+         {needsManagerAction ? (
++
+           <b className="dealCardActionStatus">
+             Нужны данные
+           </b>
++
+         ) : (
++
+           <span>
+             {
+-              uploadJob?.status === 'RUNNING' &&
+-              !invoice
+-                ? 'Счёт на создании'
+-                : dealInvoiceWorkflowLabel(deal)
++              invoice
++                ? statusLabel(
++                    invoice.status
++                  )
++                : 'Ожидаем счёт'
+             }
+           </span>
++
+         )}
++
++      </div>
++
++
++      <div className="paymentMini">
++        {
++          paymentStatusLabel(
++            deal.paymentStatus
++          )
++        }
+       </div>
+ 
+-      <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
++
++      {activeTasks.length > 0 && (
++
++        <div
++          className="dealTaskLinks"
++          onClick={
++            stopCardOpen
++          }
++        >
++
++          <span className="dealTaskLinksLabel">
++            {
++              activeTasks.length === 1
++                ? 'Задача'
++                : 'Задачи'
++            }
++          </span>
++
++
++          <div className="dealTaskLinksList">
++
++            {activeTasks.map(
++              (task) => (
++
++                <a
++                  key={task.id}
++                  className={
++                    'dealTaskLink' +
++                    (
++                      task.status ===
++                        'NEED_DATA'
++                        ? ' dealTaskLinkNeedData'
++                        : ''
++                    )
++                  }
++                  href={
++                    '#tasks/' +
++                    encodeURIComponent(
++                      task.id
++                    )
++                  }
++                  onClick={
++                    stopCardOpen
++                  }
++                >
++                  <strong>
++                    {task.title}
++                  </strong>
++
++                  <span>
++                    {
++                      task.status ===
++                        'NEED_DATA'
++                        ? 'Нужно исправить'
++                        : taskStatus(
++                            task.status
++                          )
++                    }
++                  </span>
++                </a>
++
++              )
++            )}
++
++          </div>
++
++        </div>
++
++      )}
++
+ 
+       {uploadJob && (
++
+         <div
+           className={
+             'dealUploadState dealUpload-' +
+-            uploadJob.status.toLowerCase()
++            uploadJob.status
++              .toLowerCase()
+           }
+         >
++
+           <div className="dealUploadStateTop">
++
+             <strong>
+               {
+-                uploadJob.status === 'SUCCESS'
++                uploadJob.status ===
++                  'SUCCESS'
+                   ? '✓ ' +
+-                    (uploadJob.successTitle ||
+-                      uploadJob.title)
+-                  : uploadJob.status === 'ERROR'
++                    (
++                      uploadJob
++                        .successTitle ||
++                      uploadJob.title
++                    )
++                  : uploadJob.status ===
++                      'ERROR'
+                     ? 'Не удалось отправить файлы'
+                     : uploadJob.title
+               }
+@@ -703,66 +937,127 @@ function DealCard({
+             <b>
+               {uploadJob.progress}%
+             </b>
++
+           </div>
+ 
++
+           <div className="dealUploadMiniBar">
++
+             <span
+               style={{
+                 width:
+-                  uploadJob.progress + '%',
++                  uploadJob.progress +
++                  '%',
+               }}
+             />
++
+           </div>
+ 
+-          {uploadJob.status === 'RUNNING' && (
++
++          {uploadJob.status ===
++            'RUNNING' && (
++
+             <span>
+-              {uploadJob.currentFile
+-                ? 'Загружаем: ' +
+-                  uploadJob.currentFile
+-                : 'Подготавливаем отправку…'}
++              {
++                uploadJob.currentFile
++                  ? 'Загружаем: ' +
++                    uploadJob.currentFile
++                  : 'Подготавливаем отправку…'
++              }
+             </span>
++
+           )}
+ 
+-          {uploadJob.status === 'ERROR' &&
++
++          {uploadJob.status ===
++            'ERROR' &&
+             uploadJob.error && (
+-              <span>
+-                {uploadJob.error}
+-              </span>
+-            )}
++
++            <span>
++              {uploadJob.error}
++            </span>
++
++          )}
++
+         </div>
++
+       )}
+ 
++
+       {needsManagerAction ? (
++
+         <div className="dealCardActionBox">
++
+           <div className="dealCardActionHead">
++
+             <strong>
+               Бухгалтерия вернула запрос
+             </strong>
++
+             <span>
+               {returnReason}
+             </span>
++
+           </div>
+ 
++
+           {latestReturn?.reason && (
++
+             <p>
+               {latestReturn.reason}
+             </p>
++
++          )}
++
++
++          {returnedInvoiceTask ? (
++
++            <a
++              className="dealCardActionCta dealCardActionLink"
++              href={
++                '#tasks/' +
++                encodeURIComponent(
++                  returnedInvoiceTask.id
++                )
++              }
++              onClick={
++                stopCardOpen
++              }
++            >
++              Открыть задачу и исправить →
++            </a>
++
++          ) : (
++
++            <span className="dealCardActionCta">
++              Исправить и повторно отправить →
++            </span>
++
+           )}
+ 
+-          <span className="dealCardActionCta">
+-            Исправить и повторно отправить →
+-          </span>
+         </div>
++
+       ) : (
++
+         <>
+-          {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
+-          {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
++
++          {deal.managerComment && (
++
++            <div className="note">
++              📝 {deal.managerComment}
++            </div>
++
++          )}
++
+         </>
++
+       )}
+-    </button>
++
++    </div>
+   );
+ }
+ 
++
+ function DealDetail({
+   dealId,
+   user,
+@@ -1271,6 +1566,15 @@ function DealDetail({
+         )
+     );
+ 
++  // PART_1N_J1_TS_INVOICE_NEED_DATA
++  const invoiceRequestNeedsData: boolean =
++    Boolean(
++      invoiceRequestTask &&
++      invoiceRequestTask.status ===
++        'NEED_DATA'
++    );
++
++
+ 
+   const invoiceRequestUploadJob =
+     backgroundUploads.find(
+@@ -2418,7 +2722,7 @@ function DealDetail({
+ 
+   return (
+ 
+-    <section className="content form">
++    <section className="content form dealWorkspaceCPage">
+ 
+       <button
+         className="backLink"
+@@ -2427,42 +2731,390 @@ function DealDetail({
+         ← К сделкам
+       </button>
+ 
++      {/* PART_V064_O1_DEAL_WORKSPACE_C */}
++      <div className="dealWorkspaceCLayout">
+ 
+-      <div className="dealOverview">
+-
+-        <div className="dealOverviewHead">
++        <aside className="dealWorkspaceCSidebar">
++          <div className="dealWorkspaceCSideCard">
+ 
+-          <div>
+-            <div className="dealOverviewMeta">
+-              <span>
+-                ЗК-{deal.internalNumber}
+-              </span>
++            <div className="dealWorkspaceCDealNo">
++              ЗК-{deal.internalNumber}
++            </div>
+ 
+-              <span>
+-                {
+-                  deal.createdAt
+-                    ? 'Создан ' +
+-                      new Date(
+-                        deal.createdAt
+-                      ).toLocaleString(
+-                        'ru-RU',
+-                        {
+-                          day: '2-digit',
+-                          month: '2-digit',
+-                          year: 'numeric',
+-                          hour: '2-digit',
+-                          minute: '2-digit',
+-                        }
+-                      )
+-                    : 'Дата создания не указана'
+-                }
+-              </span>
++            <div className="dealWorkspaceCClient">
++              {deal.clientName}
+             </div>
+ 
+-            <h2>
++            <div className="dealWorkspaceCAddress">
+               {
+-                current
+-                  ? sellerLabels[
++                deal.deliveryAddresses?.[0] ||
++                'Адрес доставки не указан'
++              }
++            </div>
++
++            <div className="dealWorkspaceCPills">
++              {current && (
++                <span className="dealWorkspaceCPill dealWorkspaceCPillBlue">
++                  {
++                    sellerLabels[
++                      current.sellerType ||
++                      deal.sellerType
++                    ]
++                  }
++                  {' - '}
++                  {current.number}
++                </span>
++              )}
++
++              <span className="dealWorkspaceCPill dealWorkspaceCPillGreen">
++                {
++                  paymentStatusLabel(
++                    deal.paymentStatus
++                  )
++                }
++              </span>
++
++              {
++                deal.tasks.filter(
++                  (task) =>
++                    ![
++                      'DONE',
++                      'CANCELLED',
++                    ].includes(
++                      task.status
++                    )
++                ).length > 0 && (
++                  <span className="dealWorkspaceCPill dealWorkspaceCPillYellow">
++                    {
++                      deal.tasks.filter(
++                        (task) =>
++                          ![
++                            'DONE',
++                            'CANCELLED',
++                          ].includes(
++                            task.status
++                          )
++                      ).length
++                    }
++                    {' '}
++                    {
++                      deal.tasks.filter(
++                        (task) =>
++                          ![
++                            'DONE',
++                            'CANCELLED',
++                          ].includes(
++                            task.status
++                          )
++                      ).length === 1
++                        ? 'задача'
++                        : 'задачи'
++                    }
++                  </span>
++                )
++              }
++            </div>
++
++            <div className="dealWorkspaceCActions">
++
++              <button
++                type="button"
++                className="primary"
++                onClick={() =>
++                  document
++                    .getElementById(
++                      'dealCInvoice'
++                    )
++                    ?.scrollIntoView({
++                      behavior: 'smooth',
++                      block: 'start',
++                    })
++                }
++              >
++                Счёт
++              </button>
++
++              <button
++                type="button"
++                className="secondary"
++                onClick={() =>
++                  document
++                    .getElementById(
++                      'dealCPayments'
++                    )
++                    ?.scrollIntoView({
++                      behavior: 'smooth',
++                      block: 'start',
++                    })
++                }
++              >
++                Оплата клиента
++              </button>
++
++              <button
++                type="button"
++                className="secondary"
++                onClick={() =>
++                  document
++                    .getElementById(
++                      'dealCIncoming'
++                    )
++                    ?.scrollIntoView({
++                      behavior: 'smooth',
++                      block: 'start',
++                    })
++                }
++              >
++                Входящие счета
++              </button>
++
++              <button
++                type="button"
++                className="secondary"
++                onClick={() =>
++                  document
++                    .getElementById(
++                      'dealCDocuments'
++                    )
++                    ?.scrollIntoView({
++                      behavior: 'smooth',
++                      block: 'start',
++                    })
++                }
++              >
++                Доверенность / ЭТРН
++              </button>
++
++              {canManageDeal && (
++                <button
++                  type="button"
++                  className="secondary"
++                  onClick={() => {
++                    setDealInfoOpen(true);
++
++                    window.setTimeout(
++                      () =>
++                        document
++                          .getElementById(
++                            'dealCClient'
++                          )
++                          ?.scrollIntoView({
++                            behavior:
++                              'smooth',
++                            block:
++                              'start',
++                          }),
++                      0
++                    );
++                  }}
++                >
++                  Редактировать сделку
++                </button>
++              )}
++
++            </div>
++
++            <div className="dealWorkspaceCSubhead">
++              Контакт на объекте
++            </div>
++
++            <div className="dealWorkspaceCContact">
++              <strong>
++                {
++                  deal.contactName ||
++                  'Не указан'
++                }
++              </strong>
++
++              <span>
++                {
++                  deal.clientPhone ||
++                  'Телефон не указан'
++                }
++              </span>
++            </div>
++
++            <div className="dealWorkspaceCSubhead">
++              Финансы
++            </div>
++
++            <div className="dealWorkspaceCFinance">
++
++              <div>
++                <span>
++                  Сумма сделки
++                </span>
++                <b>
++                  {
++                    current?.amount
++                      ? money(
++                          current.amount
++                        )
++                      : '—'
++                  }
++                </b>
++              </div>
++
++              <div>
++                <span>
++                  Получено от клиента
++                </span>
++                <b>
++                  {
++                    money(
++                      (
++                        deal.clientPayments ||
++                        []
++                      ).reduce(
++                        (
++                          sum,
++                          payment,
++                        ) =>
++                          sum +
++                          Number(
++                            payment.amount ||
++                            0
++                          ),
++                        0
++                      )
++                    )
++                  }
++                </b>
++              </div>
++
++              <div>
++                <span>
++                  Входящие счета
++                </span>
++                <b>
++                  {
++                    incomingTotal > 0
++                      ? money(
++                          incomingTotal
++                        )
++                      : '—'
++                  }
++                </b>
++              </div>
++
++            </div>
++
++          </div>
++        </aside>
++
++        <div className="dealWorkspaceCMain">
++
++          <div className="dealWorkspaceCAttention">
++
++            <div className="dealWorkspaceCSectionTitle">
++              Сейчас требует внимания
++            </div>
++
++            {
++              deal.tasks.filter(
++                (task) =>
++                  ![
++                    'DONE',
++                    'CANCELLED',
++                  ].includes(
++                    task.status
++                  )
++              ).length > 0 ? (
++
++              <div className="dealWorkspaceCAttentionList">
++                {
++                  deal.tasks
++                    .filter(
++                      (task) =>
++                        ![
++                          'DONE',
++                          'CANCELLED',
++                        ].includes(
++                          task.status
++                        )
++                    )
++                    .slice(0, 3)
++                    .map(
++                      (task) => (
++                        <a
++                          className="dealWorkspaceCAttentionRow"
++                          key={task.id}
++                          href={
++                            '#tasks/' +
++                            encodeURIComponent(
++                              task.id
++                            )
++                          }
++                        >
++                          <div>
++                            <strong>
++                              {task.title}
++                            </strong>
++
++                            <span>
++                              {
++                                task.status ===
++                                  'NEED_DATA'
++                                  ? 'Нужно исправить'
++                                  : taskStatus(
++                                      task.status
++                                    )
++                              }
++                            </span>
++                          </div>
++
++                          <b>→</b>
++                        </a>
++                      )
++                    )
++                }
++              </div>
++
++            ) : (
++
++              <div className="dealWorkspaceCQuiet">
++                Активных задач нет
++              </div>
++
++            )}
++          </div>
++
++
++      <div className="dealOverview">
++
++        <div className="dealOverviewHead">
++
++          <div>
++            <div className="dealOverviewMeta">
++              <span>
++                ЗК-{deal.internalNumber}
++              </span>
++
++              <span>
++                {
++                  deal.createdAt
++                    ? 'Создан ' +
++                      new Date(
++                        deal.createdAt
++                      ).toLocaleString(
++                        'ru-RU',
++                        {
++                          day: '2-digit',
++                          month: '2-digit',
++                          year: 'numeric',
++                          hour: '2-digit',
++                          minute: '2-digit',
++                        }
++                      )
++                    : 'Дата создания не указана'
++                }
++              </span>
++            </div>
++
++            <h2>
++              {
++                current
++                  ? sellerLabels[
+                       current.sellerType ||
+                       deal.sellerType
+                     ] +
+@@ -2774,7 +3426,7 @@ function DealDetail({
+                   {
+                     supplierPurchases.length > 1
+                       ? 'Сумма рассчитана по нескольким поставщикам. Измените нужную закупку в блоке «Поставщики».'
+-                      : 'Сначала добавьте поставщика и сумму закупки.'
++                      : 'Сначала добавьте поставщика и сумму входящего счёта.'
+                   }
+                 </div>
+ 
+@@ -3014,7 +3666,7 @@ function DealDetail({
+ 
+       )}
+ 
+-      <div className="dealInfoBox">
++      <div id="dealCClient" className="dealInfoBox dealCAnchor">
+ 
+         <div className="dealInfoHead">
+ 
+@@ -3462,6 +4114,10 @@ function DealDetail({
+       </div>
+ 
+ 
++      <div
++        id="dealCInvoice"
++        className="dealCAnchor"
++      >
+       {current ? (
+ 
+         <InvoiceBlock
+@@ -3488,6 +4144,7 @@ function DealDetail({
+         </div>
+ 
+       )}
++      </div>
+ 
+ 
+       {!current &&
+@@ -3678,17 +4335,13 @@ function DealDetail({
+ 
+ 
+           {(
+-            invoiceRequestTask?.status ===
+-              'NEED_DATA' ||
+-            (
+-              !invoiceRequestTask &&
+-              invoiceRequestEditOpen
+-            )
++            !invoiceRequestTask &&
++            invoiceRequestEditOpen
+           ) ? (
+ 
+             <>
+ 
+-              {invoiceRequestTask?.status === 'NEED_DATA' ? (
++              {invoiceRequestNeedsData ? (
+ 
+                 <>
+                   <div className="invoiceRequestReturnedHead">
+@@ -3929,14 +4582,14 @@ function DealDetail({
+                   {
+                     saving
+                       ? 'Отправляем…'
+-                      : invoiceRequestTask?.status === 'NEED_DATA'
++                      : invoiceRequestNeedsData
+                         ? 'Сохранить и повторно отправить'
+                         : 'Сохранить и отправить бухгалтерии'
+                   }
+                 </button>
+ 
+ 
+-                {invoiceRequestTask?.status === 'NEED_DATA' ? (
++                {invoiceRequestNeedsData ? (
+                   <button
+                     type="button"
+                     className="purchaseCancelButton"
+@@ -3965,6 +4618,40 @@ function DealDetail({
+ 
+           ) : invoiceRequestTask ? (
+ 
++            <>
++              {/* PART_1N_I1_DEAL_REPAIR_MOVED */}
++
++              {invoiceRequestNeedsData ? (
++
++                <div className="invoiceRequestMovedToTask">
++                  <div>
++                    <strong>
++                      Бухгалтерия вернула запрос
++                    </strong>
++
++                    <span>
++                      Исправление теперь выполняется
++                      непосредственно в задаче.
++                    </span>
++                  </div>
++
++                  <a
++                    className="primary"
++                    href={
++                      '#tasks/' +
++                      encodeURIComponent(
++                        invoiceRequestTask.id
++                      )
++                    }
++                  >
++                    Открыть задачу и исправить
++                  </a>
++                </div>
++
++              ) : (
++
++          
++
+             <div className="invoiceRequestStateRow">
+               <div>
+                 <strong>
+@@ -4001,6 +4688,12 @@ function DealDetail({
+               )}
+             </div>
+ 
++          
++
++              )}
++
++            </>
++
+           ) : (
+ 
+             <div className="invoiceRequestStateRow">
+@@ -4378,6 +5071,10 @@ function DealDetail({
+       )}
+ 
+ 
++      <div
++        id="dealCPayments"
++        className="dealCAnchor"
++      >
+       <PaymentBlock
+         deal={deal}
+         user={user}
+@@ -4385,8 +5082,13 @@ function DealDetail({
+           reload(false)
+         }
+       />
++      </div>
+ 
+ 
++      <div
++        id="dealCIncoming"
++        className="dealCAnchor"
++      >
+       <PurchasesBlock
+         deal={deal}
+         user={user}
+@@ -4394,8 +5096,13 @@ function DealDetail({
+           reload(false)
+         }
+       />
++      </div>
+ 
+ 
++      <div
++        id="dealCDocuments"
++        className="dealCAnchor"
++      >
+       <PowerOfAttorneyBlock
+         deal={deal}
+         user={user}
+@@ -4403,6 +5110,7 @@ function DealDetail({
+           reload(false)
+         }
+       />
++      </div>
+ 
+ 
+       <div className="infoBox">
+@@ -4486,7 +5194,7 @@ function DealDetail({
+         <div className="infoBox">
+ 
+           <strong>
+-            Последние события
++            Лента сделки
+           </strong>
+ 
+ 
+@@ -4549,6 +5257,9 @@ function DealDetail({
+ 
+       )}
+ 
++        </div>
++      </div>
++
+     </section>
+   );
+ }
+@@ -4931,14 +5642,9 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
+ 
+ function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCancel: () => void; onCreated: () => void }) {
+ 
++  /* PART_V061_SELLER_REQUIRED */
+   const [sellerType, setSellerType] =
+-    useState<SellerType>('MSM');
+-
+-  const [requestMode, setRequestMode] =
+-    useState<
+-      'TEXT' |
+-      'INCOMING_INVOICE'
+-    >('TEXT');
++    useState<SellerType | ''>('');
+ 
+   const [clientName, setClientName] =
+     useState('');
+@@ -5066,6 +5772,15 @@ async function submit(
+       const extraFilesToUpload =
+         [...attachments];
+ 
++      /* PART_V061_VALIDATE_SELLER */
++      if (!sellerType) {
++        setError(
++          'Выберите, от какой организации выставлять счёт: СТ, МСМ или ИП.'
++        );
++        return;
++      }
++
++
+       const primaryIncomingInvoice =
+         incomingInvoice;
+ 
+@@ -5507,7 +6222,7 @@ async function submit(
+ 
+ 
+ 
+-      <Field title="Комментарий бухгалтерии">
++      <Field title="Комментарий для бухгалтерии">
+ 
+         <textarea
+           rows={3}
+@@ -5636,6 +6351,25 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+     setShowCompleted,
+   ] = useState(false);
+ 
++  // PART_V064_J_TASK_FILTER_STATE
++  const [
++    taskFilter,
++    setTaskFilter,
++  ] = useState<
++    'ALL' |
++    'IN_PROGRESS' |
++    'NEW' |
++    'NEED_DATA'
++  >('ALL');
++
++  // PART_V064_K_TASK_SEARCH_STATE
++  const [
++    taskSearch,
++    setTaskSearch,
++  ] = useState('');
++
++
++
+ 
+   async function reloadTasks(
+     showLoading = true
+@@ -5907,6 +6641,7 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+     completedTask = false
+   ) {
+ 
++    // PART_V064_M2_CLEAN_RENDER_TASK
+     const statusClass =
+       task.status
+         .toLowerCase()
+@@ -5915,27 +6650,57 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+           '-'
+         );
+ 
++    const currentInvoice =
++      task.deal.invoices.find(
++        (invoice) =>
++          invoice.isCurrent
++      ) ??
++      task.deal.invoices[0];
+ 
++    const sellerType =
++      currentInvoice?.sellerType ||
++      task.deal.sellerType;
+ 
+-    const isBackgroundUploading =
+-      backgroundUploads.some(
+-        (job) =>
+-          job.taskId === task.id &&
+-          job.status === 'RUNNING'
+-      );
+-
+-
+-    if (
+-      isBackgroundUploading
+-    ) {
+-      return null;
+-    }
++    const managerName =
++      [
++        task.createdBy?.firstName,
++        task.createdBy?.lastName,
++      ]
++        .filter(Boolean)
++        .join(' ');
++
++    const returnText =
++      task.status === 'NEED_DATA'
++        ? String(
++            task.payload?.returnComment ||
++            task.payload?.returnReason ||
++            task.description ||
++            ''
++          )
++        : '';
+ 
+-    return (
++    const createdLabel =
++      task.createdAt
++        ? new Date(
++            task.createdAt
++          )
++            .toLocaleString(
++              'ru-RU',
++              {
++                day: '2-digit',
++                month: '2-digit',
++                year: 'numeric',
++                hour: '2-digit',
++                minute: '2-digit',
++              }
++            )
++            .replace(',', ' ·')
++        : '';
+ 
++    return (
+       <button
+         key={task.id}
+-
++        type="button"
+         className={
+           'taskCard taskCardStatus-' +
+           statusClass +
+@@ -5951,97 +6716,91 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+               : ''
+           )
+         }
+-
+         onClick={() =>
+           openTask(task)
+         }
+       >
+-
+         <div className="taskCardMain">
+-
+           <div className="taskCardTitle">
+-
+             <strong>
+               {task.title}
+             </strong>
+ 
+-
+             {task.urgent &&
+               !completedTask && (
+-
+               <b className="urgent">
+                 СРОЧНО
+               </b>
+-
+             )}
+-
+           </div>
+ 
+-
+           <span className="taskClient">
+-
+             {task.deal.clientName}
+-
+-            {' · '}
+-
+-            ЗК-
+-            {task.deal.internalNumber}
+-
+           </span>
+ 
++          <div className="taskVariantAMeta">
++            <span className="taskVariantADeal">
++              ЗК-{task.deal.internalNumber}
++            </span>
+ 
+-          {task.createdAt && (
+-
+-            <span className="taskCreated">
+-
+-              Создана{' '}
++            {currentInvoice?.number && (
++              <span className="taskVariantAPill taskVariantAInvoice">
++                {sellerLabels[sellerType] || sellerType}
++                {' - '}
++                {currentInvoice.number}
++              </span>
++            )}
+ 
+-              {
+-                new Date(
+-                  task.createdAt
+-                ).toLocaleString(
+-                  'ru-RU',
+-                  {
+-                    day: '2-digit',
+-                    month: '2-digit',
+-                    hour: '2-digit',
+-                    minute: '2-digit',
+-                  }
+-                )
+-              }
++            {managerName && (
++              <span className="taskVariantAPill taskVariantAManager">
++                Менеджер: {managerName}
++              </span>
++            )}
++          </div>
+ 
++          {createdLabel && (
++            <span className="taskCreated">
++              {createdLabel}
+             </span>
+-
+           )}
+-
+         </div>
+ 
+-
+         <div className="taskState">
+-
+           <span
+             className={
+               'taskStatusBadge taskStatus-' +
+               statusClass
+             }
+           >
+-
+             {
+               taskStatus(
+                 task.status
+               )
+             }
+-
+           </span>
+-
+         </div>
+ 
+-      </button>
++        {task.status === 'NEED_DATA' && (
++          <div className="taskReturnNotice">
++            <strong>
++              Вернул бухгалтер
++            </strong>
++
++            {returnText && (
++              <span>
++                {returnText}
++              </span>
++            )}
+ 
++            <em>
++              Открыть и исправить →
++            </em>
++          </div>
++        )}
++      </button>
+     );
+   }
+ 
+-
+   function renderGroup(
+     title: string,
+     items: Task[],
+@@ -6094,6 +6853,37 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+ 
+   if (selected) {
+ 
++    // PART_1N_I1_INVOICE_MANAGER_TASK
++    if (
++      selected.type ===
++        'ISSUE_CLIENT_INVOICE' &&
++      selected.status ===
++        'NEED_DATA' &&
++      user.role !==
++        'ACCOUNTANT'
++    ) {
++
++      return (
++        <InvoiceRequestManagerRepair
++          task={selected}
++          user={user}
++          onResubmitted={() => {
++            window.location.hash =
++              '#tasks';
++
++            setSelected(null);
++
++            void reloadTasks(
++              false
++            );
++
++            onChanged();
++          }}
++        />
++      );
++    }
++
++
+     return selected.type === 'POWER_OF_ATTORNEY' ? (
+ 
+       <PowerOfAttorneyTask
+@@ -6176,78 +6966,214 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+ 
+     <section className="content">
+ 
+-      <BackgroundUploadList
+-        jobs={backgroundUploads}
+-      />
++      {/* PART_V064_J_APPROVED_TASK_LIST */}
++      <div className="taskListIntro">
++        <strong>
++          {
++            user.role === 'ACCOUNTANT'
++              ? 'Бухгалтерия'
++              : user.role === 'MANAGER'
++                ? 'Менеджер'
++                : user.role === 'LEADER'
++                  ? 'Руководитель'
++                  : 'Все роли'
++          }
++        </strong>
+ 
+-      <div className="sectionHead">
++        <span>
++          {activeCount} активных
++        </span>
++      </div>
+ 
+-        <div>
++      {/* PART_V064_K_TASK_SEARCH_UI */}
++      <label className="taskSearch">
++        <span>⌕</span>
+ 
+-          <h2>
+-            Задачи бухгалтерии
+-          </h2>
++        <input
++          id="bo-task-search"
++          value={taskSearch}
++          onChange={(event) =>
++            setTaskSearch(
++              event.target.value
++            )
++          }
++          placeholder="Поиск: ЗК, клиент, задача, МСМ/СТ/ИП, № счёта..."
++        />
+ 
+-          <div className="taskQueueCaption">
+-            Активных задач: {activeCount}
+-          </div>
++        {taskSearch && (
++          <button
++            type="button"
++            className="taskSearchClear"
++            aria-label="Очистить поиск"
++            onClick={() =>
++              setTaskSearch('')
++            }
++          >
++            ×
++          </button>
++        )}
++      </label>
+ 
+-        </div>
++      <div
++        className="taskFilterBar"
++        role="tablist"
++        aria-label="Фильтр задач"
++      >
++        <button
++          type="button"
++          className={
++            'taskFilterButton' +
++            (
++              taskFilter === 'ALL'
++                ? ' active'
++                : ''
++            )
++          }
++          onClick={() =>
++            setTaskFilter('ALL')
++          }
++        >
++          Все
++          <b>{activeCount}</b>
++        </button>
+ 
++        <button
++          type="button"
++          className={
++            'taskFilterButton' +
++            (
++              taskFilter === 'IN_PROGRESS'
++                ? ' active'
++                : ''
++            )
++          }
++          onClick={() =>
++            setTaskFilter('IN_PROGRESS')
++          }
++        >
++          В работе
++          <b>{inProgress.length}</b>
++        </button>
+ 
+-        <span>
+-          {activeCount}
+-        </span>
++        <button
++          type="button"
++          className={
++            'taskFilterButton' +
++            (
++              taskFilter === 'NEW'
++                ? ' active'
++                : ''
++            )
++          }
++          onClick={() =>
++            setTaskFilter('NEW')
++          }
++        >
++          Новые
++          <b>{newTasks.length}</b>
++        </button>
+ 
++        <button
++          type="button"
++          className={
++            'taskFilterButton' +
++            (
++              taskFilter === 'NEED_DATA'
++                ? ' active'
++                : ''
++            )
++          }
++          onClick={() =>
++            setTaskFilter('NEED_DATA')
++          }
++        >
++          Нужно исправить
++          <b>{needData.length}</b>
++        </button>
+       </div>
+ 
+-
+       {loading ? (
+-
+         <div className="empty">
+           Загрузка…
+         </div>
+-
+       ) : activeCount === 0 ? (
+-
+         <div className="empty">
+           Активных задач нет
+         </div>
++      ) : (() => {
++        // PART_V064_K_TASK_SEARCH_FILTER
++        const normalizedTaskSearch =
++          taskSearch
++            .trim()
++            .toLowerCase();
++
++        const visibleTasks = [
++          ...inProgress,
++          ...newTasks,
++          ...needData,
++          ...otherActive,
++        ]
++          .filter(
++            (task) =>
++              taskFilter === 'ALL' ||
++              task.status === taskFilter
++          )
++          .filter((task) => {
++            if (!normalizedTaskSearch) {
++              return true;
++            }
+ 
+-      ) : (
+-
+-        <div className="taskQueue">
+-
+-          {renderGroup(
+-            'В работе',
+-            inProgress,
+-            'taskGroupWorking'
+-          )}
+-
+-
+-          {renderGroup(
+-            'Новые',
+-            newTasks,
+-            'taskGroupNew'
+-          )}
+-
+-
+-          {renderGroup(
+-            'Нужны данные',
+-            needData,
+-            'taskGroupNeedData'
+-          )}
++            const currentInvoice =
++              task.deal.invoices.find(
++                (invoice) =>
++                  invoice.isCurrent
++              ) ??
++              task.deal.invoices[0];
++
++            const taskSellerType =
++              currentInvoice?.sellerType ||
++              task.deal.sellerType;
++
++            const haystack = [
++              task.title,
++              task.description,
++              task.deal.clientName,
++              'ЗК-' +
++                task.deal.internalNumber,
++              sellerLabels[
++                taskSellerType
++              ] ||
++                taskSellerType,
++              currentInvoice?.number,
++              task.supplierPurchase
++                ?.supplierName,
++              task.payload
++                ?.supplierName,
++            ]
++              .filter(Boolean)
++              .join(' ')
++              .toLowerCase();
+ 
++            return haystack.includes(
++              normalizedTaskSearch
++            );
++          });
+ 
+-          {renderGroup(
+-            'Остальные',
+-            otherActive,
+-            'taskGroupOther'
+-          )}
++        return visibleTasks.length > 0 ? (
++          <div className="taskFlatList">
++            {visibleTasks.map(
++              (task) =>
++                renderTask(task)
++            )}
++          </div>
++        ) : (
++          <div className="empty">
++            В этой категории задач нет
++          </div>
++        );
++      })()}
+ 
+-        </div>
+ 
+-      )}
+ 
+ 
+       {completed.length > 0 && (
+@@ -6319,6 +7245,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+     setInvoiceFiles,
+   ] = useState<File[]>([]);
+ 
++  const [
++    invoiceDraftReady,
++    setInvoiceDraftReady,
++  ] = useState(false);
++
+   const [saving, setSaving] =
+     useState(false);
+ 
+@@ -6352,6 +7283,128 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+     task.status,
+   ]);
+ 
++  useEffect(() => {
++
++    if (
++      ![
++        'ISSUE_CLIENT_INVOICE',
++        'CORRECT_CLIENT_INVOICE',
++      ].includes(task.type)
++    ) {
++      setInvoiceDraftReady(true);
++      return;
++    }
++
++
++    let cancelled = false;
++
++    setInvoiceDraftReady(false);
++
++
++    const fields =
++      readInvoiceTaskDraftFields(
++        task.id,
++      );
++
++    setNumber(fields.number);
++    setAmount(fields.amount);
++
++
++    void loadInvoiceTaskDraftFiles(
++      task.id,
++    )
++      .then((files) => {
++
++        if (cancelled) {
++          return;
++        }
++
++        setInvoiceFiles(files);
++        setInvoiceDraftReady(true);
++      })
++      .catch(() => {
++
++        if (!cancelled) {
++          setInvoiceDraftReady(true);
++        }
++      });
++
++
++    return () => {
++      cancelled = true;
++    };
++
++  }, [task.id, task.type]);
++
++
++  useEffect(() => {
++
++    if (
++      !invoiceDraftReady ||
++      ![
++        'ISSUE_CLIENT_INVOICE',
++        'CORRECT_CLIENT_INVOICE',
++      ].includes(task.type)
++    ) {
++      return;
++    }
++
++
++    try {
++      saveInvoiceTaskDraftFields(
++        task.id,
++        {
++          number,
++          amount,
++        },
++      );
++    } catch (e) {
++      console.warn(
++        'Не удалось сохранить поля черновика счёта',
++        e,
++      );
++    }
++
++  }, [
++    invoiceDraftReady,
++    task.id,
++    task.type,
++    number,
++    amount,
++  ]);
++
++
++  useEffect(() => {
++
++    if (
++      !invoiceDraftReady ||
++      ![
++        'ISSUE_CLIENT_INVOICE',
++        'CORRECT_CLIENT_INVOICE',
++      ].includes(task.type)
++    ) {
++      return;
++    }
++
++
++    void saveInvoiceTaskDraftFiles(
++      task.id,
++      invoiceFiles,
++    ).catch((e) => {
++      console.warn(
++        'Не удалось сохранить файлы черновика счёта',
++        e,
++      );
++    });
++
++  }, [
++    invoiceDraftReady,
++    task.id,
++    task.type,
++    invoiceFiles,
++  ]);
++
++
+ 
+   function addInvoiceFiles(
+     files:
+@@ -6493,6 +7546,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       setReturnModalOpen(false);
+       setReturnReason('');
+       setReturnComment('');
++
++      await clearInvoiceTaskDraft(
++        task.id,
++      ).catch(() => undefined);
++
+       onBack();
+ 
+     } catch (e) {
+@@ -6508,7 +7566,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+   }
+ 
+ 
+-  function finishInvoice() {
++  async function finishInvoice() {
+ 
+     setError('');
+ 
+@@ -6533,95 +7591,51 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       parseMoneyInput(amount);
+ 
+ 
+-    setInvoiceFiles([]);
+-
+-
+-    startBackgroundUploadJob({
+-
+-      taskId:
+-        task.id,
+-
+-      title:
+-        'Загружаем готовый счёт',
+-
+-      subtitle:
+-        task.deal.clientName,
+-
+-      files:
+-        filesToUpload,
+-
+-
+-      run:
+-        async ({
+-          upload,
+-          setProgress,
+-        }) => {
+-
+-          const ids:
+-            string[] = [];
+-
+-
+-          for (
+-            let index = 0;
+-            index <
+-              filesToUpload.length;
+-            index++
+-          ) {
+-
+-            const uploaded =
+-              await upload(
+-
+-                task.deal.id,
+-
+-                filesToUpload[
+-                  index
+-                ],
+-
+-                'CLIENT_INVOICE_ATTACHMENT',
+-
+-                index,
++    setSaving(true);
+ 
+-                filesToUpload.length,
+-              );
+ 
++    try {
+ 
+-            ids.push(
+-              uploaded.id
+-            );
+-          }
++      await startInvoiceSubmission({
+ 
++        taskId:
++          task.id,
+ 
+-          setProgress(94);
++        dealId:
++          task.deal.id,
+ 
++        clientName:
++          task.deal.clientName,
+ 
+-          await createInvoice(
+-            task.deal.id,
+-            {
++        number:
++          numberToSave,
+ 
+-              number:
+-                numberToSave,
++        amount:
++          amountToSave,
+ 
+-              amount:
+-                amountToSave,
++        invoiceDate:
++          todayLocalDate(),
+ 
+-              invoiceDate:
+-                todayLocalDate(),
++        actorId:
++          user.id,
+ 
+-              fileId:
+-                ids[0],
++        files:
++          filesToUpload,
++      });
+ 
+-              actorId:
+-                user.id,
+-            },
+-          );
+ 
++      onBack();
+ 
+-          setProgress(99);
+-        },
+-    });
++    } catch (e) {
+ 
++      setError(
++        e instanceof Error
++          ? e.message
++          : String(e)
++      );
+ 
+-    onBack();
++      setSaving(false);
++    }
+   }
+ 
+ 
+@@ -6718,7 +7732,126 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+   return (
+ 
+-    <section className="content form">
++    <section
++      className="content form taskWorkspace"
++      data-task-status={status}
++    >
++
++      {/* PART_1N_K5_V3_RETURN_COMMENT_DETAIL */}
++      {status === 'NEED_DATA' &&
++        String(
++          (task as any).returnComment || ''
++        ).trim() && (
++          <div className="taskReturnCommentDetail">
++            <strong>
++              Комментарий бухгалтера
++            </strong>
++            <p>
++              {
++                String(
++                  (task as any).returnComment
++                )
++              }
++            </p>
++          </div>
++        )}
++
++
++      {/* PART_1N_I1_INVOICE_DATA_CARD */}
++
++      {task.type ===
++        'ISSUE_CLIENT_INVOICE' && (
++
++        <InvoiceRequestDataCard
++          task={task}
++        />
++
++      )}
++
++
++      {/* PART_1N_H1_TASK_DETAIL_DEAL_LINK */}
++
++      <a
++        className="taskDetailDealLink"
++        href={
++          '#deal/' +
++          encodeURIComponent(
++            task.deal.id
++          )
++        }
++      >
++        <strong>
++          ЗК-
++          {task.deal.internalNumber}
++        </strong>
++
++        <span>
++          {task.deal.clientName}
++        </span>
++
++        <b>
++          Открыть сделку →
++        </b>
++      </a>
++
++
++      {/* PART_V064_N2_ETRN_SOURCE_DOCS_UI */}
++      {task.type === 'ETRN' && (
++        <EtrnSourceDocuments task={task} />
++      )}
++
++
++      {/* PART_1N_E1_STRUCTURED_TASK_DETAILS */}
++
++      {[
++        'POWER_OF_ATTORNEY',
++        'ETRN',
++      ].includes(
++        task.type
++      ) &&
++        task.details &&
++        Object.keys(
++          task.details
++        ).length > 0 && (
++
++        <TaskStructuredFields
++          taskType={task.type}
++          value={task.details}
++          readOnly
++        />
++
++      )}
++
++
++      {/* PART_1N_D1_V2_UNIVERSAL_MANAGER_RESUBMIT */}
++      {/* PART_1N_B1_MANAGER_RESUBMIT */}
++
++      {status === 'NEED_DATA' &&
++        user.role !== 'ACCOUNTANT' &&
++        (
++          task.type !== 'ISSUE_CLIENT_INVOICE' &&
++          task.type !== 'PAY_SUPPLIER'
++        ) && (
++
++        <ManagerResubmitPanel
++          taskId={task.id}
++          dealId={task.deal.id}
++          taskType={task.type}
++          actorId={user.id}
++          initialDescription={
++            task.description
++          }
++          initialUrgent={
++            task.urgent
++          }
++          initialDetails={
++            task.details
++          }
++          onResubmitted={onBack}
++        />
++
++      )}
++
+ 
+ 
+       <button
+@@ -6766,6 +7899,9 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+       </div>
+ 
++      {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
++      <TaskContextStrip task={task} />
++
+ 
+       {canAttachInvoice && (
+ 
+@@ -7222,23 +8358,44 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       )}
+ 
+ 
+-      {status === 'NEW' && (
++            {/* PART_1N_D1_V2_UNIVERSAL_ACCOUNTANT_RETURN */}
++      {/* PART_1M_B_POWER_OF_ATTORNEY_RETURN */}
++      {/* PART_1M_C_ETRN_RETURN */}
++
++
++      {(
++      task.type !== 'ISSUE_CLIENT_INVOICE' &&
++      task.type !== 'PAY_SUPPLIER'
++    ) &&
++        (
++          status === 'NEW' ||
++          status === 'IN_PROGRESS'
++        ) && (
++
++        <ReturnToManagerPanel
++          taskId={task.id}
++          actorId={user.id}
++          disabled={saving}
++          onReturned={onBack}
++        />
++
++      )}
++
++
++{status === 'NEW' && (
+ 
+         task.type ===
+           'ISSUE_CLIENT_INVOICE' ? (
+ 
+           <div className="invoiceTaskStartActions">
+ 
+-            <button
+-              type="button"
+-              className="secondary"
++            <ReturnToManagerPanel
++              taskId={task.id}
++              actorId={user.id}
+               disabled={saving}
+-              onClick={() =>
+-                setReturnModalOpen(true)
+-              }
+-            >
+-              Отказать / вернуть
+-            </button>
++              mode="invoice"
++              onReturned={onBack}
++            />
+ 
+             <button
+               className="primary"
+@@ -7260,7 +8417,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+             className="primary wide"
+             disabled={saving}
+             onClick={take}
+-          >
++          
++              hidden>
+             {
+               saving
+                 ? 'Сохраняем…'
+@@ -7288,16 +8446,13 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+           {task.type ===
+             'ISSUE_CLIENT_INVOICE' && (
+-            <button
+-              type="button"
+-              className="secondary compactButton"
++            <ReturnToManagerPanel
++              taskId={task.id}
++              actorId={user.id}
+               disabled={saving}
+-              onClick={() =>
+-                setReturnModalOpen(true)
+-              }
+-            >
+-              Отказать / вернуть
+-            </button>
++              mode="invoice"
++              onReturned={onBack}
++            />
+           )}
+ 
+         </div>
+@@ -7305,7 +8460,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       )}
+ 
+ 
+-      {returnModalOpen &&
++      {false &&
++        returnModalOpen &&
+         task.type ===
+           'ISSUE_CLIENT_INVOICE' && (
+ 
+@@ -7592,6 +8748,10 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+           <div className="microcopy">
+ 
++            Черновик номера, суммы и файлов
++            сохраняется на этом устройстве
++            автоматически.
++
+             Дата счёта ставится
+             автоматически —
+             сегодняшняя.
+@@ -7929,10 +9089,10 @@ function auditLabel(
+       'Изменён статус оплаты',
+ 
+     SUPPLIER_PURCHASE_CREATED:
+-      'Добавлена закупка',
++      'Добавлен входящий счёт',
+ 
+     SUPPLIER_PURCHASE_UPDATED:
+-      'Изменены данные закупки',
++      'Изменены данные входящего счёта',
+ 
+     SUPPLIER_INVOICE_CHANGED:
+       'Изменён входящий счёт поставщика',
+@@ -7986,7 +9146,7 @@ function auditLabel(
+ 
+ function paymentStatusLabel(status: PaymentStatus) { return ({ NO_PREPAYMENT: 'Без предоплаты', WAITING: 'Ожидаем оплату', ADVANCE: 'Аванс', PAID: 'Оплачен', DEFERRED: 'Отсрочка' } as Record<PaymentStatus,string>)[status]; }
+ function paymentMethodLabel(method: ClientPaymentMethod) { return ({ NONCASH: 'Безнал', CASH: 'Наличные', CARD: 'Пластик', ADVANCE: 'Аванс' } as Record<ClientPaymentMethod,string>)[method]; }
+-function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужны данные', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
++function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужно исправить', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
+ 
+ function ThemeToggle() {
+ 
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 9c98533..cd6d3e4 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3354,6 +3354,131 @@ html[data-theme='dark'] .dealUpload-error {
+   }
+ }
+ 
++/* MSM task card upload progress v0.6.0 part 1B */
++
++.taskCard[role='button'] {
++  cursor: pointer;
++}
++
++.taskCard[role='button']:focus-visible {
++  outline: 2px solid #2563eb;
++  outline-offset: 2px;
++}
++
++.taskCardWithUpload {
++  flex-wrap: wrap;
++  align-items: flex-start;
++}
++
++.taskCardWithUpload .taskCardMain {
++  flex: 1 1 240px;
++}
++
++.taskCardWithUpload .taskState {
++  flex: 0 0 auto;
++}
++
++.taskCardUploadState {
++  flex: 0 0 100%;
++  display: grid;
++  gap: 7px;
++  margin-top: 3px;
++  padding-top: 10px;
++  border-top: 1px solid #e7e5e4;
++  cursor: default;
++}
++
++.taskCardUploadTop {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.taskCardUploadTop strong {
++  min-width: 0;
++  font-size: 12px;
++}
++
++.taskCardUploadTop b {
++  flex: 0 0 auto;
++  color: #2563eb;
++  font-size: 11px;
++}
++
++.taskCardUploadBar {
++  height: 6px;
++  overflow: hidden;
++  border-radius: 999px;
++  background: #dbeafe;
++}
++
++.taskCardUploadBar > span {
++  display: block;
++  height: 100%;
++  margin: 0 !important;
++  border-radius: inherit;
++  background: #3b82f6;
++  transition: width 180ms ease;
++}
++
++.taskCardUploadMeta {
++  margin: 0 !important;
++  color: #64748b !important;
++  font-size: 10px !important;
++  overflow-wrap: anywhere;
++}
++
++.taskCardUpload-success .taskCardUploadBar > span {
++  background: #22c55e;
++}
++
++.taskCardUpload-success .taskCardUploadTop b {
++  color: #15803d;
++}
++
++.taskCardUpload-error .taskCardUploadBar > span {
++  background: #ef4444;
++}
++
++.taskCardUpload-error .taskCardUploadTop b {
++  color: #b91c1c;
++}
++
++.taskCardUploadError {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.taskCardUploadError .taskCardUploadMeta {
++  color: #b91c1c !important;
++}
++
++html[data-theme='dark'] .taskCardUploadState {
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .taskCardUploadBar {
++  background: #303846;
++}
++
++html[data-theme='dark'] .taskCardUploadMeta {
++  color: #a8a29e !important;
++}
++
++@media (max-width: 520px) {
++  .taskCardUploadError {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .taskCardUploadError > button {
++    width: 100%;
++  }
++}
++
+ /* MSM deal layout v0.5.5 */
+ .dealOverview { display:grid; gap:14px; padding:16px; border:1px solid #e7e5e4; border-radius:20px; background:#fff; }
+ .dealOverviewHead { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+@@ -4181,3 +4306,5944 @@ html[data-theme='dark'] .powerHead > b {
+     grid-template-columns: 1fr;
+   }
+ }
++
++/* MSM task card waiting-for-network v0.6.0 part 1I */
++
++.taskCardUpload-waiting_network .taskCardUploadBar > div,
++.taskCardUpload-waiting_network .taskCardUploadBar > span {
++  background: #f59e0b;
++}
++
++.taskCardUpload-waiting_network .taskCardUploadTop b {
++  color: #b45309;
++}
++
++.taskCardUploadWaiting {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin-top: 8px;
++}
++
++.taskCardUploadSpinner {
++  flex: 0 0 auto;
++  width: 13px;
++  height: 13px;
++  box-sizing: border-box;
++  border: 2px solid rgba(245, 158, 11, 0.28);
++  border-top-color: #f59e0b;
++  border-radius: 999px;
++  animation: taskCardUploadSpin 0.8s linear infinite;
++}
++
++@keyframes taskCardUploadSpin {
++  to {
++    transform: rotate(360deg);
++  }
++}
++
++html[data-theme='dark'] .taskCardUpload-waiting_network .taskCardUploadTop b {
++  color: #fbbf24;
++}
++
++html[data-theme='dark'] .taskCardUploadSpinner {
++  border-color: rgba(251, 191, 36, 0.28);
++  border-top-color: #fbbf24;
++}
++
++/* MSM task card waiting-for-server v0.6.0 part 1K */
++
++.taskCardUpload-waiting_server .taskCardUploadBar > div,
++.taskCardUpload-waiting_server .taskCardUploadBar > span {
++  background: #d97706;
++}
++
++.taskCardUpload-waiting_server .taskCardUploadTop b {
++  color: #b45309;
++}
++
++.taskCardUploadWaitingServer .taskCardUploadSpinner {
++  border-color:
++    rgba(217, 119, 6, 0.28);
++  border-top-color:
++    #d97706;
++}
++
++html[data-theme='dark'] .taskCardUpload-waiting_server .taskCardUploadTop b {
++  color: #fbbf24;
++}
++
++html[data-theme='dark'] .taskCardUploadWaitingServer .taskCardUploadSpinner {
++  border-color:
++    rgba(251, 191, 36, 0.28);
++  border-top-color:
++    #fbbf24;
++}
++
++/* MSM returned task manager notice v0.6.0 part 1N */
++
++.taskCardStatus-need-data {
++  border-color:
++    rgba(217, 119, 6, 0.38);
++}
++
++.taskReturnNotice {
++  margin: 8px 12px 8px 0;
++  padding: 10px 12px;
++  min-width: 180px;
++  border: 1px solid
++    rgba(217, 119, 6, 0.22);
++  border-radius: 12px;
++  background:
++    rgba(245, 158, 11, 0.09);
++  display: flex;
++  flex-direction: column;
++  align-items: flex-start;
++  gap: 3px;
++  text-align: left;
++}
++
++.taskReturnNotice strong {
++  font-size: 13px;
++  color: #b45309;
++}
++
++.taskReturnNotice span {
++  font-size: 13px;
++  font-weight: 600;
++}
++
++.taskReturnNotice p {
++  margin: 3px 0 0;
++  font-size: 12px;
++  line-height: 1.4;
++  opacity: 0.82;
++}
++
++.taskReturnNotice em {
++  margin-top: 4px;
++  font-size: 12px;
++  font-style: normal;
++  font-weight: 600;
++  color: #b45309;
++}
++
++html[data-theme='dark'] .taskCardStatus-need-data {
++  border-color:
++    rgba(251, 191, 36, 0.34);
++}
++
++html[data-theme='dark'] .taskReturnNotice {
++  border-color:
++    rgba(251, 191, 36, 0.20);
++  background:
++    rgba(245, 158, 11, 0.10);
++}
++
++html[data-theme='dark'] .taskReturnNotice strong,
++html[data-theme='dark'] .taskReturnNotice em {
++  color: #fbbf24;
++}
++
++/* MSM manager resubmit panel v0.6.0 part 1N-B1 */
++
++.managerResubmitPanel {
++  margin-bottom: 16px;
++  padding: 14px;
++  border: 1px solid
++    rgba(217, 119, 6, 0.25);
++  border-radius: 16px;
++  background:
++    rgba(245, 158, 11, 0.08);
++}
++
++.managerResubmitHead {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  margin-bottom: 12px;
++}
++
++.managerResubmitHead strong {
++  font-size: 15px;
++}
++
++.managerResubmitHead span {
++  font-size: 12px;
++  opacity: 0.75;
++}
++
++html[data-theme='dark'] .managerResubmitPanel {
++  border-color:
++    rgba(251, 191, 36, 0.20);
++  background:
++    rgba(245, 158, 11, 0.08);
++}
++
++/* MSM structured task details v0.6.0 part 1N-E1 */
++
++.taskStructuredEdit,
++.taskStructuredRead {
++  margin: 12px 0;
++  padding: 12px;
++  border: 1px solid rgba(120, 120, 120, 0.16);
++  border-radius: 14px;
++}
++
++.taskStructuredTitle {
++  margin-bottom: 10px;
++  font-size: 14px;
++  font-weight: 700;
++}
++
++.taskStructuredRead {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++
++.taskStructuredReadRow {
++  display: grid;
++  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr);
++  gap: 10px;
++  padding-bottom: 7px;
++  border-bottom: 1px solid rgba(120, 120, 120, 0.12);
++}
++
++.taskStructuredReadRow:last-child {
++  padding-bottom: 0;
++  border-bottom: 0;
++}
++
++.taskStructuredReadRow span {
++  font-size: 12px;
++  opacity: 0.68;
++}
++
++.taskStructuredReadRow b {
++  min-width: 0;
++  font-size: 13px;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++
++@media (max-width: 520px) {
++  .taskStructuredReadRow {
++    grid-template-columns: 1fr;
++    gap: 2px;
++  }
++}
++
++/* MSM deal links v0.6.0 part 1N-G1 */
++
++.dealIdentity {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: baseline;
++  gap: 6px 9px;
++  min-width: 0;
++}
++
++.dealInternalNumberLink {
++  position: relative;
++  z-index: 2;
++  font-weight: 800;
++  text-decoration: underline;
++  text-underline-offset: 3px;
++}
++
++.dealInvoiceNumber {
++  font-size: 12px;
++  opacity: 0.72;
++}
++
++.dealClientName {
++  flex-basis: 100%;
++  min-width: 0;
++}
++
++.dealTaskLinks {
++  position: relative;
++  z-index: 2;
++  margin-top: 10px;
++}
++
++.dealTaskLinksLabel {
++  display: block;
++  margin-bottom: 5px;
++  font-size: 11px;
++  font-weight: 700;
++  opacity: 0.58;
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++}
++
++.dealTaskLinksList {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++}
++
++.dealTaskLink {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 9px;
++  padding: 8px 10px;
++  border: 1px solid rgba(120, 120, 120, 0.14);
++  border-radius: 11px;
++  text-decoration: none;
++}
++
++.dealTaskLink strong {
++  min-width: 0;
++  font-size: 12px;
++  overflow-wrap: anywhere;
++}
++
++.dealTaskLink span {
++  flex: none;
++  font-size: 11px;
++  opacity: 0.68;
++}
++
++.dealTaskLinkNeedData {
++  border-color: rgba(210, 140, 40, 0.34);
++}
++
++.dealTaskLinkNeedData span {
++  font-weight: 700;
++  opacity: 1;
++}
++
++.dealCardActionLink {
++  position: relative;
++  z-index: 2;
++  display: inline-block;
++  text-decoration: underline;
++  text-underline-offset: 3px;
++}
++
++/* MSM task-to-deal links v0.6.0 part 1N-H1 */
++
++.taskDealNumberLink {
++  position: relative;
++  z-index: 2;
++  font-weight: 700;
++  text-decoration: underline;
++  text-underline-offset: 3px;
++}
++
++.taskDetailDealLink {
++  display: grid;
++  grid-template-columns: auto minmax(0, 1fr) auto;
++  align-items: center;
++  gap: 8px;
++  margin-bottom: 12px;
++  padding: 10px 12px;
++  border: 1px solid rgba(120, 120, 120, 0.16);
++  border-radius: 12px;
++  text-decoration: none;
++}
++
++.taskDetailDealLink strong {
++  white-space: nowrap;
++}
++
++.taskDetailDealLink span {
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  opacity: 0.72;
++}
++
++.taskDetailDealLink b {
++  white-space: nowrap;
++  font-size: 12px;
++}
++
++@media (max-width: 520px) {
++  .taskDetailDealLink {
++    grid-template-columns: auto minmax(0, 1fr);
++  }
++
++  .taskDetailDealLink b {
++    grid-column: 1 / -1;
++  }
++}
++
++/* MSM invoice task workspace v0.6.0 part 1N-I1 */
++
++.invoiceTaskData {
++  margin: 0 0 14px;
++  padding: 14px;
++  border: 1px solid rgba(120, 120, 120, 0.16);
++  border-radius: 16px;
++}
++
++.invoiceTaskDataHead,
++.invoiceTaskRepairHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.invoiceTaskDataHead > div,
++.invoiceTaskRepairHead > div {
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++}
++
++.invoiceTaskDataHead span,
++.invoiceTaskRepairHead span {
++  font-size: 12px;
++  opacity: 0.68;
++}
++
++.invoiceTaskDataGrid {
++  display: grid;
++  grid-template-columns:
++    repeat(
++      2,
++      minmax(0, 1fr)
++    );
++  gap: 8px;
++  margin-top: 12px;
++}
++
++.invoiceTaskDataGrid > div,
++.invoiceTaskTextBlock {
++  padding: 10px;
++  border-radius: 12px;
++  background: rgba(120, 120, 120, 0.06);
++}
++
++.invoiceTaskDataGrid span,
++.invoiceTaskTextBlock > span,
++.invoiceTaskDocsTitle {
++  display: block;
++  margin-bottom: 4px;
++  font-size: 11px;
++  opacity: 0.62;
++}
++
++.invoiceTaskDataGrid strong {
++  font-size: 13px;
++}
++
++.invoiceTaskTextBlock {
++  margin-top: 8px;
++}
++
++.invoiceTaskTextBlock p {
++  margin: 0;
++  white-space: pre-wrap;
++}
++
++.invoiceTaskDocs {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++  margin-top: 12px;
++}
++
++.invoiceTaskDoc {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  padding: 9px 10px;
++  border: 1px solid rgba(120, 120, 120, 0.14);
++  border-radius: 11px;
++  text-decoration: none;
++}
++
++.invoiceTaskDoc > div {
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++}
++
++.invoiceTaskDoc strong {
++  overflow-wrap: anywhere;
++}
++
++.invoiceTaskDoc span {
++  font-size: 11px;
++  opacity: 0.62;
++}
++
++.invoiceTaskDoc b {
++  flex: none;
++  font-size: 12px;
++}
++
++.invoiceTaskDocsEmpty {
++  font-size: 12px;
++  opacity: 0.6;
++}
++
++.invoiceTaskRepairHead {
++  margin-bottom: 12px;
++}
++
++.invoiceTaskRepairNotice {
++  margin-bottom: 12px;
++  padding: 10px 12px;
++  border-radius: 12px;
++  background: rgba(210, 140, 40, 0.10);
++  font-size: 13px;
++}
++
++.invoiceTaskEdit {
++  padding: 14px;
++  border: 1px solid rgba(120, 120, 120, 0.16);
++  border-radius: 16px;
++}
++
++.invoiceTaskEdit h3 {
++  margin: 0 0 12px;
++}
++
++.invoiceRequestMovedToTask {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 13px;
++  border-radius: 14px;
++  border: 1px solid rgba(210, 140, 40, 0.24);
++}
++
++.invoiceRequestMovedToTask > div {
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++}
++
++.invoiceRequestMovedToTask span {
++  font-size: 12px;
++  opacity: 0.68;
++}
++
++@media (max-width: 520px) {
++  .invoiceTaskDataGrid {
++    grid-template-columns: 1fr;
++  }
++
++  .invoiceTaskRepairHead,
++  .invoiceRequestMovedToTask {
++    align-items: stretch;
++    flex-direction: column;
++  }
++}
++
++/* MSM invoice request symmetry v0.6.0 part 1N-J1 */
++
++.invoiceTaskField {
++  padding: 10px;
++  border-radius: 12px;
++  background: rgba(120, 120, 120, 0.06);
++}
++
++.invoiceTaskField > span {
++  display: block;
++  margin-bottom: 4px;
++  font-size: 11px;
++  opacity: 0.62;
++}
++
++.invoiceTaskField > strong {
++  font-size: 13px;
++}
++
++.invoiceTaskTextBlock p {
++  white-space: pre-wrap;
++}
++
++.invoiceTaskRepairNotice {
++  line-height: 1.4;
++}
++
++
++/* PART_1N_K5_V3_RETURN_COMMENT_DETAIL_STYLES */
++.taskReturnCommentDetail {
++  display: grid;
++  gap: 6px;
++  margin: 0 0 14px;
++  padding: 12px 14px;
++  border-radius: 12px;
++  background: rgba(245, 158, 11, 0.08);
++  border: 1px solid rgba(245, 158, 11, 0.22);
++}
++
++.taskReturnCommentDetail strong {
++  font-size: 13px;
++}
++
++.taskReturnCommentDetail p {
++  margin: 0;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++
++/* PART_V063_BLOCK_OFFICE */
++.boDealsHome,
++.boMobileNav {
++  --bo-panel: #ffffff;
++  --bo-panel-2: #e9ece4;
++  --bo-text: #1d211c;
++  --bo-muted: #71786d;
++  --bo-line: #d8ddd2;
++  --bo-accent: #6e8758;
++  --bo-shadow: 0 8px 24px rgba(25, 30, 20, .07);
++  --bo-stone: #8b9187;
++  --bo-blue: #5e9fc8;
++  --bo-gold: #c59a35;
++  --bo-red: #bd5d50;
++  --bo-green: #648f51;
++  --bo-purple: #655775;
++  --bo-lava: #d06e36;
++}
++
++html[data-theme='dark'] .boDealsHome,
++html[data-theme='dark'] .boMobileNav {
++  --bo-panel: #1d2228;
++  --bo-panel-2: #252b32;
++  --bo-text: #eef1f4;
++  --bo-muted: #9aa3ad;
++  --bo-line: #343b44;
++  --bo-accent: #74879b;
++  --bo-shadow: 0 10px 28px rgba(0, 0, 0, .24);
++  --bo-stone: #9aa3ad;
++  --bo-blue: #72a9d0;
++  --bo-gold: #d4aa50;
++  --bo-red: #d27368;
++  --bo-green: #78a86b;
++  --bo-purple: #8b7a9d;
++  --bo-lava: #e1834d;
++}
++
++.boDealsHome {
++  color: var(--bo-text);
++}
++
++.boToolbar {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  justify-content: space-between;
++  margin-bottom: 14px;
++}
++
++.boSearch {
++  flex: 1 1 360px;
++  min-width: 0;
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  padding: 0 12px;
++}
++
++.boSearch input {
++  width: 100%;
++  border: 0;
++  outline: 0;
++  background: transparent;
++  color: var(--bo-text);
++  padding: 11px 0;
++}
++
++.boToolbarActions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.boViewToggle {
++  display: flex;
++  align-items: center;
++  gap: 3px;
++  padding: 3px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel-2);
++}
++
++.boViewToggle button {
++  min-width: 42px;
++  min-height: 38px;
++  border: 1px solid transparent;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--bo-text);
++  cursor: pointer;
++}
++
++.boViewToggle button.active {
++  border-color: var(--bo-line);
++  background: var(--bo-panel);
++  box-shadow: var(--bo-shadow);
++}
++
++.boCreateDeal {
++  min-height: 44px;
++  border: 0;
++  border-radius: 7px;
++  background: var(--bo-accent);
++  color: #fff;
++  font-weight: 800;
++  padding: 9px 13px;
++  cursor: pointer;
++}
++
++.boDealGrid {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 12px;
++}
++
++.boDealCard {
++  position: relative;
++  overflow: hidden;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 15px;
++  box-shadow: var(--bo-shadow);
++  cursor: pointer;
++}
++
++.boDealCard::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 5px;
++  background: var(--bo-stone);
++}
++
++.boDealCard.boTone-done::before { background: var(--bo-green); }
++.boDealCard.boTone-work::before { background: var(--bo-blue); }
++.boDealCard.boTone-wait::before { background: var(--bo-gold); }
++.boDealCard.boTone-fix::before { background: var(--bo-red); }
++.boDealCard.boTone-closed::before { background: var(--bo-purple); }
++
++.boDealTop {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.boInternalNumber {
++  display: block;
++  font-size: 18px;
++  font-weight: 900;
++}
++
++.boInvoiceNumber {
++  display: block;
++  margin-top: 3px;
++  color: var(--bo-muted);
++  font-size: 13px;
++}
++
++.boAmount {
++  font-size: 20px;
++  font-weight: 900;
++  white-space: nowrap;
++}
++
++.boClientName {
++  margin: 13px 0 9px;
++  font-weight: 750;
++}
++
++.boStateRow {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++}
++
++.boStatus {
++  display: inline-flex;
++  align-items: center;
++  gap: 7px;
++  border-radius: 4px;
++  padding: 5px 8px;
++  font-size: 12px;
++  font-weight: 900;
++  white-space: nowrap;
++}
++
++.boStatus i {
++  width: 9px;
++  height: 9px;
++  border-radius: 1px;
++  background: currentColor;
++}
++
++.boStatus-done { color: var(--bo-green); }
++.boStatus-work,
++.boStatus-new { color: var(--bo-blue); }
++.boStatus-wait { color: var(--bo-gold); }
++.boStatus-fix { color: var(--bo-red); }
++.boStatus-closed { color: var(--bo-purple); }
++
++.boDealDate {
++  color: var(--bo-muted);
++  font-size: 12px;
++}
++
++.boManagerNote {
++  margin-top: 10px;
++  padding: 9px 10px;
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 13px;
++}
++
++.boManagerNote span {
++  display: block;
++  margin-bottom: 3px;
++  font-size: 10px;
++  font-weight: 800;
++  letter-spacing: .04em;
++  text-transform: uppercase;
++}
++
++.boManagerNote strong {
++  color: var(--bo-text);
++  font-weight: 650;
++}
++
++.boTasksBlock {
++  margin-top: 13px;
++}
++
++.boTasksTitle {
++  margin-bottom: 7px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 900;
++  letter-spacing: .04em;
++}
++
++.boTaskStack {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++}
++
++.boTaskRow {
++  display: grid;
++  grid-template-columns: 5px minmax(0, 1fr) auto;
++  align-items: stretch;
++  gap: 10px;
++  min-height: 54px;
++  overflow: hidden;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  text-decoration: none;
++}
++
++.boTaskBar { background: var(--bo-blue); }
++.boTask-new .boTaskBar { background: var(--bo-stone); }
++.boTask-work .boTaskBar { background: var(--bo-blue); }
++.boTask-fix .boTaskBar { background: var(--bo-red); }
++.boTask-urgent .boTaskBar { background: var(--bo-lava); }
++
++.boTaskText {
++  min-width: 0;
++  align-self: center;
++  padding: 8px 0;
++}
++
++.boTaskText strong,
++.boTaskText small {
++  display: block;
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.boTaskText strong {
++  font-size: 13px;
++}
++
++.boTaskText small {
++  margin-top: 3px;
++  color: var(--bo-muted);
++  font-size: 11px;
++}
++
++.boTaskBadge {
++  align-self: center;
++  margin-right: 8px;
++  border-radius: 4px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++  padding: 5px 7px;
++  white-space: nowrap;
++}
++
++.boTaskBadge-fix {
++  color: var(--bo-red);
++}
++
++.boTaskBadge-urgent {
++  color: var(--bo-lava);
++}
++
++.boExpanded {
++  overflow: hidden;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++}
++
++.boExpandedHead,
++.boExpandedRow {
++  display: grid;
++  grid-template-columns:
++    95px
++    105px
++    140px
++    150px
++    minmax(220px, 1.2fr)
++    minmax(190px, 1fr);
++  align-items: center;
++  gap: 10px;
++}
++
++.boExpandedHead {
++  padding: 9px 12px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.boExpandedRow {
++  min-height: 62px;
++  padding: 10px 12px;
++  border-top: 1px solid var(--bo-line);
++  cursor: pointer;
++}
++
++.boExpandedAmount {
++  white-space: nowrap;
++}
++
++.boExpandedTasks {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 5px;
++}
++
++.boExpandedTasks a {
++  border: 1px solid var(--bo-line);
++  border-radius: 4px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  font-size: 11px;
++  padding: 4px 6px;
++  text-decoration: none;
++}
++
++.boExpandedComment {
++  min-width: 0;
++  overflow: hidden;
++  color: var(--bo-muted);
++  font-size: 12px;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.boMuted {
++  color: var(--bo-muted);
++}
++
++.boEmpty {
++  border: 1px dashed var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  padding: 28px;
++  text-align: center;
++}
++
++.boMobileNav {
++  display: none;
++}
++
++@media (max-width: 980px) {
++  .boDealGrid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .boExpandedHead,
++  .boExpandedRow {
++    grid-template-columns:
++      80px
++      90px
++      125px
++      135px
++      minmax(180px, 1fr);
++  }
++
++  .boExpandedHead > :last-child,
++  .boExpandedRow > :last-child {
++    display: none;
++  }
++}
++
++@media (max-width: 640px) {
++  body {
++    padding-bottom: 78px;
++  }
++
++  .boToolbar {
++    display: grid;
++    grid-template-columns: 1fr;
++    gap: 8px;
++  }
++
++  .boToolbarActions {
++    display: grid;
++    grid-template-columns: auto 1fr;
++  }
++
++  .boViewToggle {
++    width: max-content;
++  }
++
++  .boCreateDeal {
++    width: 100%;
++    min-height: 46px;
++  }
++
++  .boDealGrid {
++    grid-template-columns: 1fr;
++  }
++
++  .boDealCard {
++    padding: 14px;
++  }
++
++  .boAmount {
++    font-size: 18px;
++  }
++
++  .boTaskBadge {
++    max-width: 96px;
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++
++  .boExpandedHead {
++    display: none;
++  }
++
++  .boExpanded {
++    border: 0;
++    background: transparent;
++  }
++
++  .boExpandedRow {
++    grid-template-columns: 1fr auto;
++    min-height: 64px;
++    margin-bottom: 7px;
++    border: 1px solid var(--bo-line);
++    border-radius: 7px;
++    background: var(--bo-panel);
++  }
++
++  .boExpandedRow > :nth-child(2),
++  .boExpandedRow > :nth-child(4),
++  .boExpandedRow > :nth-child(5),
++  .boExpandedRow > :nth-child(6) {
++    display: none;
++  }
++
++  .boExpandedAmount {
++    text-align: right;
++  }
++
++  .boMobileNav {
++    position: fixed;
++    z-index: 1000;
++    right: 0;
++    bottom: 0;
++    left: 0;
++    display: grid;
++    grid-template-columns: repeat(5, 1fr);
++    padding:
++      7px
++      max(8px, env(safe-area-inset-right))
++      calc(7px + env(safe-area-inset-bottom))
++      max(8px, env(safe-area-inset-left));
++    border-top: 1px solid var(--bo-line);
++    background: var(--bo-panel);
++    box-shadow: 0 -8px 20px rgba(0, 0, 0, .08);
++  }
++
++  .boMobileNav a,
++  .boMobileNav button {
++    display: block;
++    min-width: 0;
++    min-height: 48px;
++    border: 0;
++    background: transparent;
++    color: var(--bo-muted);
++    font: inherit;
++    font-size: 11px;
++    text-align: center;
++    text-decoration: none;
++    padding: 6px 2px;
++    cursor: pointer;
++  }
++
++  .boMobileNav b {
++    display: block;
++    margin-bottom: 4px;
++    color: var(--bo-text);
++    font-size: 18px;
++    line-height: 18px;
++  }
++
++  .boMobileEmpty {
++    pointer-events: none;
++  }
++
++  .boMobileEmpty b {
++    color: var(--bo-line);
++  }
++}
++/* END_PART_V063_BLOCK_OFFICE */
++
++/* PART_V064_AB_BLOCK_OFFICE_SHELL_DEAL */
++:root {
++  --bo-page-bg: #f1f2ed;
++  --bo-panel: #ffffff;
++  --bo-panel-2: #e9ece4;
++  --bo-text: #1d211c;
++  --bo-muted: #71786d;
++  --bo-line: #d8ddd2;
++  --bo-accent: #6e8758;
++  --bo-accent-strong: #536a43;
++  --bo-shadow: 0 8px 24px rgba(25, 30, 20, .07);
++  --bo-stone: #8b9187;
++  --bo-blue: #5e9fc8;
++  --bo-gold: #c59a35;
++  --bo-red: #bd5d50;
++  --bo-green: #648f51;
++  --bo-purple: #655775;
++  --bo-lava: #d06e36;
++}
++
++html[data-theme='dark'] {
++  --bo-page-bg: #14171b;
++  --bo-panel: #1d2228;
++  --bo-panel-2: #252b32;
++  --bo-text: #eef1f4;
++  --bo-muted: #9aa3ad;
++  --bo-line: #343b44;
++  --bo-accent: #74879b;
++  --bo-accent-strong: #879aae;
++  --bo-shadow: 0 10px 28px rgba(0, 0, 0, .24);
++  --bo-stone: #9aa3ad;
++  --bo-blue: #72a9d0;
++  --bo-gold: #d4aa50;
++  --bo-red: #d27368;
++  --bo-green: #78a86b;
++  --bo-purple: #8b7a9d;
++  --bo-lava: #e1834d;
++}
++
++html,
++body {
++  background: var(--bo-page-bg);
++}
++
++.boShell {
++  color: var(--bo-text);
++}
++
++.boShell .topbar {
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  box-shadow: var(--bo-shadow);
++  padding: 13px 15px;
++  margin-bottom: 14px;
++}
++
++.boShell .topbar h1 {
++  margin: 2px 0 0;
++  color: var(--bo-text);
++  font-size: clamp(20px, 2.2vw, 27px);
++  letter-spacing: -.02em;
++}
++
++.boShell .eyebrow {
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 850;
++  letter-spacing: .08em;
++  text-transform: uppercase;
++}
++
++.boShell .topbarActions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.boShell .userBadge {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boShell .userBadge span {
++  color: var(--bo-muted);
++}
++
++.boShell button,
++.boShell input,
++.boShell textarea,
++.boShell select {
++  font: inherit;
++}
++
++.boShell .primary,
++.boShell button.primary {
++  border: 1px solid transparent;
++  border-radius: 6px;
++  background: var(--bo-accent);
++  color: #fff;
++  box-shadow: none;
++  font-weight: 800;
++}
++
++.boShell .primary:hover,
++.boShell button.primary:hover {
++  background: var(--bo-accent-strong);
++}
++
++.boShell .secondary,
++.boShell button.secondary,
++.boShell .ghost,
++.boShell button.ghost {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++}
++
++.boShell .backLink {
++  display: inline-flex;
++  align-items: center;
++  min-height: 38px;
++  border: 0;
++  background: transparent;
++  color: var(--bo-accent);
++  font-weight: 800;
++  padding: 4px 0;
++  text-decoration: none;
++}
++
++.boShell .content {
++  color: var(--bo-text);
++}
++
++.boShell .form,
++.boShell form {
++  color: var(--bo-text);
++}
++
++.boShell .field {
++  gap: 6px;
++}
++
++.boShell .field > span,
++.boShell label > span {
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-weight: 750;
++}
++
++.boShell input,
++.boShell textarea,
++.boShell select {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  outline: none;
++}
++
++.boShell input:focus,
++.boShell textarea:focus,
++.boShell select:focus {
++  border-color: var(--bo-accent);
++  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bo-accent) 14%, transparent);
++}
++
++.boShell .error {
++  border: 1px solid color-mix(in srgb, var(--bo-red) 45%, var(--bo-line));
++  border-radius: 6px;
++  background: color-mix(in srgb, var(--bo-red) 10%, var(--bo-panel));
++  color: var(--bo-red);
++}
++
++.boShell .empty {
++  border: 1px dashed var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++}
++
++/* Deal page */
++.boView-deal .content {
++  display: block;
++  max-width: 1180px;
++  margin: 0 auto;
++}
++
++.boView-deal .detailHero {
++  position: relative;
++  overflow: hidden;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  box-shadow: var(--bo-shadow);
++  padding: 17px 18px;
++  margin-bottom: 12px;
++}
++
++.boView-deal .detailHero::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 5px;
++  background: var(--bo-blue);
++}
++
++.boView-deal .detailHero h2,
++.boView-deal .detailHero h3 {
++  margin: 3px 0 7px;
++  color: var(--bo-text);
++  font-size: clamp(21px, 2.5vw, 29px);
++  letter-spacing: -.025em;
++}
++
++.boView-deal .detailHero p {
++  margin: 5px 0;
++  color: var(--bo-muted);
++}
++
++.boView-deal .detailHero .eyebrow {
++  color: var(--bo-muted);
++}
++
++.boView-deal .statusPill,
++.boView-deal .paymentMini {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  border: 1px solid var(--bo-line);
++  border-radius: 4px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  font-size: 12px;
++  font-weight: 850;
++  padding: 5px 8px;
++}
++
++.boView-deal .urgent {
++  display: inline-flex;
++  align-items: center;
++  border-radius: 4px;
++  background: color-mix(in srgb, var(--bo-lava) 12%, transparent);
++  color: var(--bo-lava);
++  font-size: 11px;
++  font-weight: 900;
++  padding: 5px 8px;
++}
++
++.boView-deal .panel,
++.boView-deal .infoBox,
++.boView-deal .section,
++.boView-deal .card {
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: none;
++}
++
++.boView-deal .panel,
++.boView-deal .infoBox {
++  padding: 14px;
++}
++
++.boView-deal .panel h2,
++.boView-deal .panel h3,
++.boView-deal .infoBox h2,
++.boView-deal .infoBox h3,
++.boView-deal .sectionTitle {
++  color: var(--bo-text);
++  font-weight: 850;
++  letter-spacing: -.01em;
++}
++
++.boView-deal .note {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boView-deal .microcopy,
++.boView-deal .muted,
++.boView-deal small {
++  color: var(--bo-muted);
++}
++
++.boView-deal .versionList {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++}
++
++.boView-deal .versionRow {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boView-deal .versionRow a {
++  color: var(--bo-accent);
++  font-weight: 800;
++}
++
++.boView-deal .dealTaskLinks,
++.boView-deal .taskList {
++  border-radius: 7px;
++}
++
++.boView-deal .dealTaskLink,
++.boView-deal .taskCard {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++}
++
++.boView-deal .dealTaskLinkNeedData {
++  border-left: 5px solid var(--bo-red);
++}
++
++.boView-deal .dealCardAction,
++.boView-deal .returnBlock {
++  border: 1px solid color-mix(in srgb, var(--bo-red) 35%, var(--bo-line));
++  border-radius: 7px;
++  background: color-mix(in srgb, var(--bo-red) 7%, var(--bo-panel));
++}
++
++.boView-deal .dealCardActionStatus {
++  color: var(--bo-red);
++}
++
++.boView-deal .dealUploadState {
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boView-deal .dealUploadMiniBar {
++  overflow: hidden;
++  border-radius: 3px;
++  background: color-mix(in srgb, var(--bo-line) 70%, transparent);
++}
++
++.boView-deal .dealUploadMiniBar > span {
++  background: var(--bo-blue);
++}
++
++.boView-deal .grid,
++.boView-deal .detailGrid,
++.boView-deal .summaryGrid,
++.boView-deal .actionGrid {
++  gap: 10px;
++}
++
++.boView-deal hr {
++  border: 0;
++  border-top: 1px solid var(--bo-line);
++}
++
++@media (max-width: 720px) {
++  .boShell .topbar {
++    padding: 10px 11px;
++    border-radius: 7px;
++  }
++
++  .boShell .topbarActions {
++    gap: 6px;
++  }
++
++  .boShell .userBadge {
++    max-width: 120px;
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++
++  .boView-deal .content {
++    width: 100%;
++  }
++
++  .boView-deal .detailHero {
++    padding: 14px;
++    border-radius: 7px;
++  }
++
++  .boView-deal .panel,
++  .boView-deal .infoBox {
++    padding: 12px;
++    border-radius: 7px;
++  }
++
++  .boView-deal .grid,
++  .boView-deal .detailGrid,
++  .boView-deal .summaryGrid,
++  .boView-deal .actionGrid,
++  .boView-deal .powerTaskGrid {
++    grid-template-columns: 1fr !important;
++  }
++
++  .boView-deal input,
++  .boView-deal textarea,
++  .boView-deal select,
++  .boView-deal button.primary,
++  .boView-deal .primary.wide {
++    min-height: 44px;
++  }
++
++  .boView-deal .versionRow {
++    align-items: flex-start;
++    gap: 8px;
++  }
++}
++/* END_PART_V064_AB_BLOCK_OFFICE_SHELL_DEAL */
++
++/* PART_V064_C_BLOCK_OFFICE_TASKS */
++.boView-tasks .content {
++  color: var(--bo-text);
++}
++
++.boView-tasks .sectionHead {
++  display: flex;
++  align-items: flex-end;
++  justify-content: space-between;
++  gap: 12px;
++  margin-bottom: 14px;
++  padding: 0 2px;
++}
++
++.boView-tasks .sectionHead h2 {
++  margin: 0;
++  color: var(--bo-text);
++  font-size: clamp(20px, 2.3vw, 27px);
++  letter-spacing: -.02em;
++}
++
++.boView-tasks .sectionHead > span {
++  display: grid;
++  min-width: 34px;
++  min-height: 34px;
++  place-items: center;
++  border: 1px solid var(--bo-line);
++  border-radius: 5px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  font-weight: 900;
++}
++
++.boView-tasks .taskQueueCaption {
++  margin-top: 4px;
++  color: var(--bo-muted);
++  font-size: 12px;
++}
++
++.boView-tasks .taskQueue {
++  display: flex;
++  flex-direction: column;
++  gap: 13px;
++}
++
++.boView-tasks [class*="taskGroup"] {
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  overflow: hidden;
++}
++
++.boView-tasks [class*="taskGroup"] > h3,
++.boView-tasks [class*="taskGroup"] > h4 {
++  margin: 0;
++  padding: 11px 13px;
++  border-bottom: 1px solid var(--bo-line);
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  font-size: 13px;
++  font-weight: 900;
++  letter-spacing: .025em;
++}
++
++.boView-tasks .taskGroupWorking > h3,
++.boView-tasks .taskGroupWorking > h4 {
++  border-left: 5px solid var(--bo-blue);
++}
++
++.boView-tasks .taskGroupNew > h3,
++.boView-tasks .taskGroupNew > h4 {
++  border-left: 5px solid var(--bo-stone);
++}
++
++.boView-tasks .taskGroupNeedData > h3,
++.boView-tasks .taskGroupNeedData > h4 {
++  border-left: 5px solid var(--bo-red);
++}
++
++.boView-tasks .taskCard {
++  position: relative;
++  display: block;
++  width: 100%;
++  min-height: 82px;
++  border: 0;
++  border-bottom: 1px solid var(--bo-line);
++  border-radius: 0;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  text-align: left;
++  box-shadow: none;
++  padding: 13px 15px 13px 18px;
++  cursor: pointer;
++}
++
++.boView-tasks .taskCard:last-child {
++  border-bottom: 0;
++}
++
++.boView-tasks .taskCard::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 5px;
++  background: var(--bo-stone);
++}
++
++.boView-tasks .taskGroupWorking .taskCard::before {
++  background: var(--bo-blue);
++}
++
++.boView-tasks .taskGroupNew .taskCard::before {
++  background: var(--bo-stone);
++}
++
++.boView-tasks .taskGroupNeedData .taskCard::before {
++  background: var(--bo-red);
++}
++
++.boView-tasks .taskCard:hover {
++  background: color-mix(in srgb, var(--bo-panel-2) 55%, var(--bo-panel));
++}
++
++.boView-tasks .taskCard h3,
++.boView-tasks .taskCard h4,
++.boView-tasks .taskCard strong {
++  color: var(--bo-text);
++}
++
++.boView-tasks .taskCard h3,
++.boView-tasks .taskCard h4 {
++  margin: 0 0 5px;
++  font-size: 15px;
++  font-weight: 850;
++  letter-spacing: -.01em;
++}
++
++.boView-tasks .taskCard p {
++  margin: 4px 0;
++  color: var(--bo-muted);
++}
++
++.boView-tasks .taskCardTop,
++.boView-tasks .taskCardHead,
++.boView-tasks .taskCardHeader {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.boView-tasks .taskDealNumberLink {
++  color: var(--bo-accent);
++  font-weight: 900;
++  text-decoration: none;
++}
++
++.boView-tasks .taskDealNumberLink:hover {
++  text-decoration: underline;
++}
++
++.boView-tasks .taskCreated {
++  color: var(--bo-muted);
++  font-size: 11px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskCard .urgent,
++.boView-tasks .urgent {
++  display: inline-flex;
++  border-radius: 4px;
++  background: color-mix(in srgb, var(--bo-lava) 12%, transparent);
++  color: var(--bo-lava);
++  font-size: 11px;
++  font-weight: 900;
++  padding: 5px 7px;
++}
++
++.boView-tasks .taskStatus,
++.boView-tasks .statusPill,
++.boView-tasks [class*="taskStatus"] {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  border: 1px solid var(--bo-line);
++  border-radius: 4px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  font-size: 11px;
++  font-weight: 850;
++  padding: 5px 7px;
++}
++
++.boView-tasks .taskGroupWorking .taskStatus,
++.boView-tasks .taskGroupWorking [class*="taskStatus"] {
++  color: var(--bo-blue);
++}
++
++.boView-tasks .taskGroupNeedData .taskStatus,
++.boView-tasks .taskGroupNeedData [class*="taskStatus"] {
++  color: var(--bo-red);
++}
++
++.boView-tasks .taskCardUploadState {
++  margin-top: 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 9px 10px;
++}
++
++.boView-tasks .taskCardUploadTop {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  font-size: 12px;
++}
++
++.boView-tasks .taskCardUploadBar {
++  height: 5px;
++  overflow: hidden;
++  margin-top: 7px;
++  border-radius: 2px;
++  background: color-mix(in srgb, var(--bo-line) 75%, transparent);
++}
++
++.boView-tasks .taskCardUploadBar > span {
++  display: block;
++  height: 100%;
++  background: var(--bo-blue);
++}
++
++/* Open task */
++.boView-tasks .content.form {
++  max-width: 980px;
++  margin: 0 auto;
++}
++
++.boView-tasks .backLink {
++  margin-bottom: 7px;
++}
++
++.boView-tasks .detailHero {
++  position: relative;
++  overflow: hidden;
++  margin-bottom: 12px;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: var(--bo-shadow);
++  padding: 17px 18px;
++}
++
++.boView-tasks .detailHero::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 5px;
++  background: var(--bo-blue);
++}
++
++.boView-tasks .detailHero h2 {
++  margin: 3px 0 7px;
++  color: var(--bo-text);
++  font-size: clamp(21px, 2.5vw, 29px);
++  letter-spacing: -.025em;
++}
++
++.boView-tasks .detailHero p {
++  margin: 5px 0;
++  color: var(--bo-muted);
++}
++
++.boView-tasks .detailHero .eyebrow {
++  color: var(--bo-muted);
++}
++
++.boView-tasks .powerTaskGrid,
++.boView-tasks .taskStructuredGrid,
++.boView-tasks .structuredFields,
++.boView-tasks .detailGrid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 9px;
++  margin-bottom: 12px;
++}
++
++.boView-tasks .powerTaskGrid > div,
++.boView-tasks .taskStructuredGrid > div,
++.boView-tasks .structuredFields > div {
++  min-width: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 10px 11px;
++}
++
++.boView-tasks .powerTaskGrid span,
++.boView-tasks .taskStructuredGrid span,
++.boView-tasks .structuredFields span {
++  display: block;
++  margin-bottom: 4px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 750;
++}
++
++.boView-tasks .powerTaskGrid b,
++.boView-tasks .taskStructuredGrid b,
++.boView-tasks .structuredFields b {
++  color: var(--bo-text);
++  font-size: 13px;
++}
++
++.boView-tasks .infoBox,
++.boView-tasks .panel,
++.boView-tasks .managerResubmitPanel,
++.boView-tasks .returnPanel,
++.boView-tasks .taskReturnPanel,
++.boView-tasks .taskActionPanel {
++  margin-bottom: 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: none;
++  padding: 13px;
++}
++
++.boView-tasks .infoBox > strong:first-child,
++.boView-tasks .panel > strong:first-child {
++  display: block;
++  margin-bottom: 9px;
++  font-size: 13px;
++  font-weight: 850;
++}
++
++.boView-tasks .versionList {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++  margin-top: 8px;
++}
++
++.boView-tasks .versionRow {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  min-height: 46px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 8px 10px;
++}
++
++.boView-tasks .versionRow a {
++  color: var(--bo-accent);
++  font-weight: 800;
++  text-decoration: none;
++}
++
++.boView-tasks .field {
++  margin-bottom: 10px;
++}
++
++.boView-tasks input,
++.boView-tasks textarea,
++.boView-tasks select {
++  width: 100%;
++}
++
++.boView-tasks .urgentToggle {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  min-height: 42px;
++  width: max-content;
++  margin: 6px 0 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 7px 10px;
++}
++
++.boView-tasks .urgentToggle input {
++  width: auto;
++}
++
++.boView-tasks .primary.wide {
++  width: 100%;
++  min-height: 46px;
++}
++
++.boView-tasks .returnPanel,
++.boView-tasks .taskReturnPanel {
++  border-left: 5px solid var(--bo-red);
++}
++
++.boView-tasks .managerResubmitPanel {
++  border-left: 5px solid var(--bo-gold);
++}
++
++.boView-tasks .error {
++  margin: 8px 0;
++}
++
++@media (max-width: 720px) {
++  .boView-tasks .sectionHead {
++    align-items: center;
++  }
++
++  .boView-tasks .taskQueue {
++    gap: 9px;
++  }
++
++  .boView-tasks [class*="taskGroup"] {
++    border-radius: 7px;
++  }
++
++  .boView-tasks .taskCard {
++    min-height: 76px;
++    padding: 12px 11px 12px 16px;
++  }
++
++  .boView-tasks .taskCardTop,
++  .boView-tasks .taskCardHead,
++  .boView-tasks .taskCardHeader {
++    display: grid;
++    grid-template-columns: 1fr auto;
++  }
++
++  .boView-tasks .taskCreated {
++    white-space: normal;
++    text-align: right;
++  }
++
++  .boView-tasks .detailHero {
++    border-radius: 7px;
++    padding: 14px;
++  }
++
++  .boView-tasks .powerTaskGrid,
++  .boView-tasks .taskStructuredGrid,
++  .boView-tasks .structuredFields,
++  .boView-tasks .detailGrid {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-tasks .infoBox,
++  .boView-tasks .panel,
++  .boView-tasks .managerResubmitPanel,
++  .boView-tasks .returnPanel,
++  .boView-tasks .taskReturnPanel,
++  .boView-tasks .taskActionPanel {
++    padding: 12px;
++  }
++
++  .boView-tasks .versionRow {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++
++  .boView-tasks .versionRow a {
++    display: block;
++    width: 100%;
++    min-height: 38px;
++    padding-top: 7px;
++  }
++}
++/* END_PART_V064_C_BLOCK_OFFICE_TASKS */
++
++/* PART_V064_D_BLOCK_OFFICE_MANAGER_FORMS */
++
++/* New deal / invoice request */
++.boView-new .content.form {
++  max-width: 920px;
++  margin: 0 auto;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  box-shadow: var(--bo-shadow);
++  padding: 18px;
++}
++
++.boView-new .content.form > h2,
++.boView-new .content.form > h3 {
++  margin: 0 0 14px;
++  color: var(--bo-text);
++  font-size: clamp(20px, 2.2vw, 27px);
++  letter-spacing: -.02em;
++}
++
++.boView-new .field,
++.boView-deal .powerForm .field,
++.boView-deal [class*="purchaseForm"] .field,
++.boView-deal [class*="supplierForm"] .field {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  margin-bottom: 11px;
++}
++
++.boView-new .field > span,
++.boView-deal .powerForm .field > span,
++.boView-deal [class*="purchaseForm"] .field > span,
++.boView-deal [class*="supplierForm"] .field > span {
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-weight: 800;
++}
++
++.boView-new input,
++.boView-new textarea,
++.boView-new select,
++.boView-deal .powerForm input,
++.boView-deal .powerForm textarea,
++.boView-deal .powerForm select,
++.boView-deal [class*="purchaseForm"] input,
++.boView-deal [class*="purchaseForm"] textarea,
++.boView-deal [class*="purchaseForm"] select,
++.boView-deal [class*="supplierForm"] input,
++.boView-deal [class*="supplierForm"] textarea,
++.boView-deal [class*="supplierForm"] select {
++  width: 100%;
++  min-height: 44px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 9px 10px;
++  outline: none;
++}
++
++.boView-new textarea,
++.boView-deal .powerForm textarea,
++.boView-deal [class*="purchaseForm"] textarea,
++.boView-deal [class*="supplierForm"] textarea {
++  min-height: 92px;
++  resize: vertical;
++}
++
++.boView-new input:focus,
++.boView-new textarea:focus,
++.boView-new select:focus,
++.boView-deal .powerForm input:focus,
++.boView-deal .powerForm textarea:focus,
++.boView-deal .powerForm select:focus,
++.boView-deal [class*="purchaseForm"] input:focus,
++.boView-deal [class*="purchaseForm"] textarea:focus,
++.boView-deal [class*="purchaseForm"] select:focus,
++.boView-deal [class*="supplierForm"] input:focus,
++.boView-deal [class*="supplierForm"] textarea:focus,
++.boView-deal [class*="supplierForm"] select:focus {
++  border-color: var(--bo-accent);
++  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bo-accent) 14%, transparent);
++}
++
++.boView-new .inline,
++.boView-deal .powerForm .inline,
++.boView-deal [class*="purchaseForm"] .inline,
++.boView-deal [class*="supplierForm"] .inline {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 10px;
++}
++
++.boView-new .segmented,
++.boView-deal .powerForm .segmented,
++.boView-deal [class*="purchaseForm"] .segmented,
++.boView-deal [class*="supplierForm"] .segmented {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px;
++  width: 100%;
++  padding: 4px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel-2);
++}
++
++.boView-new .segmented button,
++.boView-deal .powerForm .segmented button,
++.boView-deal [class*="purchaseForm"] .segmented button,
++.boView-deal [class*="supplierForm"] .segmented button {
++  flex: 1 1 auto;
++  min-height: 38px;
++  border: 1px solid transparent;
++  border-radius: 5px;
++  background: transparent;
++  color: var(--bo-muted);
++  font-weight: 800;
++  cursor: pointer;
++}
++
++.boView-new .segmented button.active,
++.boView-new .segmented button[aria-pressed="true"],
++.boView-deal .powerForm .segmented button.active,
++.boView-deal .powerForm .segmented button[aria-pressed="true"],
++.boView-deal [class*="purchaseForm"] .segmented button.active,
++.boView-deal [class*="purchaseForm"] .segmented button[aria-pressed="true"],
++.boView-deal [class*="supplierForm"] .segmented button.active,
++.boView-deal [class*="supplierForm"] .segmented button[aria-pressed="true"] {
++  border-color: var(--bo-line);
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: var(--bo-shadow);
++}
++
++.boView-new .urgentToggle,
++.boView-deal .powerForm .urgentToggle,
++.boView-deal [class*="purchaseForm"] .urgentToggle,
++.boView-deal [class*="supplierForm"] .urgentToggle {
++  display: flex;
++  align-items: center;
++  gap: 9px;
++  width: max-content;
++  min-height: 42px;
++  margin: 7px 0 11px;
++  border: 1px solid color-mix(in srgb, var(--bo-lava) 35%, var(--bo-line));
++  border-radius: 6px;
++  background: color-mix(in srgb, var(--bo-lava) 7%, var(--bo-panel));
++  color: var(--bo-text);
++  padding: 7px 10px;
++  font-weight: 800;
++}
++
++.boView-new .urgentToggle input,
++.boView-deal .powerForm .urgentToggle input,
++.boView-deal [class*="purchaseForm"] .urgentToggle input,
++.boView-deal [class*="supplierForm"] .urgentToggle input {
++  width: auto;
++  min-height: auto;
++  accent-color: var(--bo-lava);
++}
++
++.boView-new .primary.wide,
++.boView-deal .powerForm .primary.wide,
++.boView-deal [class*="purchaseForm"] .primary.wide,
++.boView-deal [class*="supplierForm"] .primary.wide {
++  width: 100%;
++  min-height: 46px;
++  margin-top: 3px;
++}
++
++/* File pickers / attachments */
++.boView-new [class*="filePicker"],
++.boView-new [class*="FilePicker"],
++.boView-deal [class*="filePicker"],
++.boView-deal [class*="FilePicker"],
++.boView-deal .field:has(input[type="file"]) {
++  border-radius: 7px;
++}
++
++.boView-new input[type="file"],
++.boView-deal input[type="file"] {
++  padding: 8px;
++  border: 1px dashed var(--bo-line);
++  background: var(--bo-panel-2);
++}
++
++.boView-new [class*="fileList"],
++.boView-new [class*="filesList"],
++.boView-deal [class*="fileList"],
++.boView-deal [class*="filesList"] {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  margin-top: 7px;
++}
++
++.boView-new [class*="fileRow"],
++.boView-new [class*="fileItem"],
++.boView-deal [class*="fileRow"],
++.boView-deal [class*="fileItem"] {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++  min-height: 42px;
++  border: 1px solid var(--bo-line);
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 7px 9px;
++}
++
++/* Power of attorney block */
++.boView-deal .powerBox {
++  margin-top: 12px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  overflow: hidden;
++}
++
++.boView-deal .powerHead {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  min-height: 58px;
++  padding: 11px 13px;
++  border-bottom: 1px solid var(--bo-line);
++  background: var(--bo-panel-2);
++}
++
++.boView-deal .powerHead span {
++  display: block;
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 850;
++  letter-spacing: .05em;
++  text-transform: uppercase;
++}
++
++.boView-deal .powerHead strong {
++  display: block;
++  margin-top: 2px;
++  color: var(--bo-text);
++  font-size: 15px;
++}
++
++.boView-deal .powerHead > b {
++  display: grid;
++  min-width: 32px;
++  min-height: 32px;
++  place-items: center;
++  border: 1px solid var(--bo-line);
++  border-radius: 5px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++}
++
++.boView-deal .powerList {
++  display: flex;
++  flex-direction: column;
++}
++
++.boView-deal .powerCard {
++  padding: 12px 13px;
++  border-bottom: 1px solid var(--bo-line);
++  background: var(--bo-panel);
++}
++
++.boView-deal .powerCard:last-child {
++  border-bottom: 0;
++}
++
++.boView-deal .powerCardHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.boView-deal .powerCardHead strong {
++  color: var(--bo-text);
++  font-size: 14px;
++}
++
++.boView-deal .powerMeta {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 7px 12px;
++  margin-top: 7px;
++  color: var(--bo-muted);
++  font-size: 12px;
++}
++
++.boView-deal .powerFiles {
++  margin-top: 9px;
++  padding: 9px 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++}
++
++.boView-deal .powerFiles > span {
++  display: block;
++  margin-bottom: 6px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.boView-deal .powerFiles a {
++  color: var(--bo-accent);
++  font-weight: 800;
++  text-decoration: none;
++}
++
++.boView-deal .powerForm {
++  margin: 12px;
++  border: 1px solid var(--bo-line);
++  border-left: 5px solid var(--bo-gold);
++  border-radius: 7px;
++  background: var(--bo-panel-2);
++  padding: 13px;
++}
++
++/* Purchases / suppliers — scoped only to known form/card-like class names */
++.boView-deal [class*="purchasesBox"],
++.boView-deal [class*="purchaseBox"],
++.boView-deal [class*="supplierBox"] {
++  margin-top: 12px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  overflow: hidden;
++}
++
++.boView-deal [class*="purchaseHead"],
++.boView-deal [class*="purchasesHead"],
++.boView-deal [class*="supplierHead"] {
++  border-bottom: 1px solid var(--bo-line);
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 11px 13px;
++}
++
++.boView-deal [class*="purchaseCard"],
++.boView-deal [class*="supplierCard"] {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: none;
++}
++
++.boView-deal [class*="purchaseForm"],
++.boView-deal [class*="supplierForm"] {
++  border: 1px solid var(--bo-line);
++  border-left: 5px solid var(--bo-blue);
++  border-radius: 7px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 13px;
++}
++
++.boView-deal [class*="purchaseGrid"],
++.boView-deal [class*="supplierGrid"] {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 9px;
++}
++
++/* Structured ETRN/POA edit fields */
++.boShell .taskStructuredEdit {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 9px;
++}
++
++.boShell .taskStructuredEdit > label,
++.boShell .taskStructuredEdit > div {
++  min-width: 0;
++}
++
++.boShell .taskStructuredEdit input,
++.boShell .taskStructuredEdit textarea,
++.boShell .taskStructuredEdit select {
++  width: 100%;
++  min-height: 42px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 8px 9px;
++}
++
++.boShell .taskStructuredEdit textarea {
++  min-height: 84px;
++  resize: vertical;
++}
++
++.boShell .taskStructuredRead {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 8px;
++}
++
++.boShell .taskStructuredRead > div {
++  min-width: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 9px 10px;
++}
++
++.boShell .taskStructuredRead span {
++  display: block;
++  margin-bottom: 3px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 750;
++}
++
++.boShell .taskStructuredRead b {
++  color: var(--bo-text);
++  font-size: 13px;
++}
++
++/* Manager correction / repair / resubmit panels */
++.boShell .managerResubmitPanel,
++.boShell [class*="managerRepair"],
++.boShell [class*="ManagerRepair"],
++.boShell [class*="correctionForm"] {
++  border: 1px solid var(--bo-line);
++  border-left: 5px solid var(--bo-gold);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 13px;
++}
++
++.boShell .managerResubmitPanel h3,
++.boShell [class*="managerRepair"] h3,
++.boShell [class*="correctionForm"] h3 {
++  margin-top: 0;
++  color: var(--bo-text);
++}
++
++.boShell .managerResubmitPanel .field,
++.boShell [class*="managerRepair"] .field,
++.boShell [class*="correctionForm"] .field {
++  margin-bottom: 10px;
++}
++
++@media (max-width: 720px) {
++  .boView-new .content.form {
++    width: 100%;
++    padding: 13px;
++    border-radius: 7px;
++  }
++
++  .boView-new .inline,
++  .boView-deal .powerForm .inline,
++  .boView-deal [class*="purchaseForm"] .inline,
++  .boView-deal [class*="supplierForm"] .inline,
++  .boView-deal [class*="purchaseGrid"],
++  .boView-deal [class*="supplierGrid"],
++  .boShell .taskStructuredEdit,
++  .boShell .taskStructuredRead {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-new .segmented,
++  .boView-deal .powerForm .segmented,
++  .boView-deal [class*="purchaseForm"] .segmented,
++  .boView-deal [class*="supplierForm"] .segmented {
++    display: grid;
++    grid-template-columns: repeat(3, 1fr);
++  }
++
++  .boView-new .urgentToggle,
++  .boView-deal .powerForm .urgentToggle,
++  .boView-deal [class*="purchaseForm"] .urgentToggle,
++  .boView-deal [class*="supplierForm"] .urgentToggle {
++    width: 100%;
++  }
++
++  .boView-deal .powerForm {
++    margin: 9px;
++    padding: 11px;
++  }
++
++  .boView-deal .powerCardHead {
++    display: grid;
++    grid-template-columns: 1fr auto;
++  }
++
++  .boView-deal .powerMeta {
++    display: grid;
++    grid-template-columns: 1fr;
++    gap: 4px;
++  }
++
++  .boShell .managerResubmitPanel,
++  .boShell [class*="managerRepair"],
++  .boShell [class*="ManagerRepair"],
++  .boShell [class*="correctionForm"] {
++    padding: 11px;
++  }
++}
++/* END_PART_V064_D_BLOCK_OFFICE_MANAGER_FORMS */
++
++/* PART_V064_E_BLOCK_OFFICE_ACCOUNTING */
++
++/* =========================================================
++   ONE VISUAL LANGUAGE FOR ALL ATTACH / UPLOAD CONTROLS
++   ========================================================= */
++
++.boShell .field:has(input[type="file"]) > button[type="button"]:not(.primary),
++.boShell .field:has(input[type="file"]) > label:not(.urgentToggle),
++.boShell .field:has(input[type="file"]) > div > button[type="button"]:first-child:not(.primary),
++.boShell .field:has(input[type="file"]) > div > label:first-child:not(.urgentToggle),
++.boShell [class*="singleFile"] > button[type="button"],
++.boShell [class*="singleFile"] > label,
++.boShell [class*="SingleFile"] > button[type="button"],
++.boShell [class*="SingleFile"] > label,
++.boShell [class*="multiFile"] > button[type="button"],
++.boShell [class*="multiFile"] > label,
++.boShell [class*="MultiFile"] > button[type="button"],
++.boShell [class*="MultiFile"] > label,
++.boShell [class*="filePicker"] > button[type="button"],
++.boShell [class*="filePicker"] > label,
++.boShell [class*="FilePicker"] > button[type="button"],
++.boShell [class*="FilePicker"] > label {
++  display: flex !important;
++  align-items: center !important;
++  justify-content: center !important;
++  width: 100% !important;
++  min-height: 54px !important;
++  margin: 0 !important;
++  border: 2px solid color-mix(in srgb, var(--bo-text) 78%, var(--bo-line)) !important;
++  border-radius: 8px !important;
++  background: color-mix(in srgb, var(--bo-panel) 82%, var(--bo-panel-2)) !important;
++  color: var(--bo-text) !important;
++  box-shadow: none !important;
++  font-size: 15px !important;
++  font-weight: 850 !important;
++  line-height: 1.25 !important;
++  text-align: center !important;
++  cursor: pointer !important;
++  padding: 11px 14px !important;
++}
++
++.boShell .field:has(input[type="file"]) > button[type="button"]:not(.primary):hover,
++.boShell .field:has(input[type="file"]) > label:not(.urgentToggle):hover,
++.boShell .field:has(input[type="file"]) > div > button[type="button"]:first-child:not(.primary):hover,
++.boShell [class*="singleFile"] > button[type="button"]:hover,
++.boShell [class*="multiFile"] > button[type="button"]:hover,
++.boShell [class*="filePicker"] > button[type="button"]:hover,
++.boShell [class*="FilePicker"] > button[type="button"]:hover {
++  border-color: var(--bo-accent) !important;
++  background: var(--bo-panel-2) !important;
++}
++
++.boShell .field:has(input[type="file"]) input[type="file"] {
++  position: absolute;
++  width: 1px !important;
++  height: 1px !important;
++  opacity: 0;
++  overflow: hidden;
++  pointer-events: none;
++}
++
++/* Do not turn remove/delete controls for selected files into upload buttons */
++.boShell [class*="fileRow"] button,
++.boShell [class*="fileItem"] button,
++.boShell [class*="selectedFile"] button,
++.boShell [class*="pickedFile"] button {
++  width: auto !important;
++  min-height: 32px !important;
++  border-width: 1px !important;
++  padding: 5px 8px !important;
++  font-size: 12px !important;
++}
++
++/* Selected/uploaded file presentation */
++.boShell [class*="singleFile"],
++.boShell [class*="SingleFile"],
++.boShell [class*="multiFile"],
++.boShell [class*="MultiFile"],
++.boShell [class*="filePicker"],
++.boShell [class*="FilePicker"] {
++  width: 100%;
++}
++
++.boShell [class*="fileName"],
++.boShell [class*="selectedFile"],
++.boShell [class*="pickedFile"] {
++  color: var(--bo-text);
++}
++
++/* =========================================================
++   ACCOUNTANT — REQUEST DATA
++   ========================================================= */
++
++.boView-tasks .invoiceTaskDataCard {
++  margin-bottom: 12px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  overflow: hidden;
++}
++
++.boView-tasks .invoiceTaskDataGrid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 8px;
++}
++
++.boView-tasks .invoiceTaskDataGrid > div,
++.boView-tasks .invoiceTaskField {
++  min-width: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 10px 11px;
++}
++
++.boView-tasks .invoiceTaskDataGrid span,
++.boView-tasks .invoiceTaskField span {
++  display: block;
++  margin-bottom: 4px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.boView-tasks .invoiceTaskDataGrid strong,
++.boView-tasks .invoiceTaskDataGrid b,
++.boView-tasks .invoiceTaskField strong,
++.boView-tasks .invoiceTaskField b {
++  display: block;
++  color: var(--bo-text);
++  font-size: 13px;
++  overflow-wrap: anywhere;
++}
++
++.boView-tasks .invoiceTaskTextBlock {
++  margin-top: 8px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 10px 11px;
++}
++
++.boView-tasks .invoiceTaskTextBlock > span {
++  display: block;
++  margin-bottom: 5px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.boView-tasks .invoiceTaskTextBlock p {
++  margin: 0;
++  color: var(--bo-text);
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++
++/* =========================================================
++   ACCOUNTANT — REQUEST DOCUMENTS
++   ========================================================= */
++
++.boView-tasks .invoiceTaskDocs {
++  margin-top: 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  padding: 11px;
++}
++
++.boView-tasks .invoiceTaskDocsTitle {
++  display: block;
++  margin-bottom: 7px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 900;
++  letter-spacing: .035em;
++  text-transform: uppercase;
++}
++
++.boView-tasks .invoiceTaskDocsEmpty {
++  border: 1px dashed var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  padding: 12px;
++  text-align: center;
++}
++
++.boView-tasks .invoiceTaskDoc {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  min-height: 52px;
++  margin-top: 6px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  padding: 8px 10px;
++  text-decoration: none;
++}
++
++.boView-tasks .invoiceTaskDoc strong {
++  display: block;
++  color: var(--bo-text);
++  overflow-wrap: anywhere;
++}
++
++.boView-tasks .invoiceTaskDoc span {
++  display: block;
++  margin-top: 2px;
++  color: var(--bo-muted);
++  font-size: 11px;
++}
++
++.boView-tasks .invoiceTaskDoc > b {
++  color: var(--bo-accent);
++  font-size: 12px;
++}
++
++/* =========================================================
++   ACCOUNTANT — START / IN WORK / COMPLETE
++   ========================================================= */
++
++.boView-tasks .invoiceTaskStartActions {
++  display: grid;
++  grid-template-columns: 1fr minmax(150px, 220px);
++  gap: 9px;
++  align-items: stretch;
++  margin-top: 11px;
++}
++
++.boView-tasks .invoiceTaskStartActions > .primary {
++  min-height: 46px;
++  width: 100%;
++}
++
++.boView-tasks .invoiceTaskInWorkBox {
++  position: relative;
++  border-left: 5px solid var(--bo-blue);
++  background: var(--bo-panel);
++}
++
++.boView-tasks .invoiceTaskInWorkBox > div:first-child strong {
++  color: var(--bo-text);
++  font-size: 14px;
++}
++
++.boView-tasks .invoiceTaskInWorkBox > div:first-child p {
++  margin: 4px 0 0;
++  color: var(--bo-muted);
++}
++
++.boView-tasks [class*="invoiceFinish"],
++.boView-tasks [class*="invoiceComplete"],
++.boView-tasks [class*="finishInvoice"],
++.boView-tasks [class*="completeInvoice"],
++.boView-tasks [class*="taskFinish"] {
++  margin-top: 10px;
++  border: 1px solid var(--bo-line);
++  border-left: 5px solid var(--bo-green);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 13px;
++}
++
++.boView-tasks [class*="invoiceFinish"] .inline,
++.boView-tasks [class*="invoiceComplete"] .inline,
++.boView-tasks [class*="finishInvoice"] .inline,
++.boView-tasks [class*="completeInvoice"] .inline {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 9px;
++}
++
++.boView-tasks .field {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++}
++
++.boView-tasks .field > span {
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-weight: 800;
++}
++
++.boView-tasks .field input,
++.boView-tasks .field textarea,
++.boView-tasks .field select {
++  min-height: 44px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 9px 10px;
++}
++
++.boView-tasks .field textarea {
++  min-height: 88px;
++  resize: vertical;
++}
++
++/* =========================================================
++   RETURN TO MANAGER
++   ========================================================= */
++
++.boView-tasks [class*="returnToManager"],
++.boView-tasks [class*="ReturnToManager"],
++.boView-tasks .returnPanel,
++.boView-tasks .taskReturnPanel {
++  margin-top: 10px;
++  border: 1px solid color-mix(in srgb, var(--bo-red) 40%, var(--bo-line));
++  border-left: 5px solid var(--bo-red);
++  border-radius: 7px;
++  background: color-mix(in srgb, var(--bo-red) 6%, var(--bo-panel));
++  color: var(--bo-text);
++  padding: 12px;
++}
++
++.boView-tasks [class*="returnToManager"] h3,
++.boView-tasks [class*="ReturnToManager"] h3,
++.boView-tasks .returnPanel h3,
++.boView-tasks .taskReturnPanel h3 {
++  margin: 0 0 9px;
++  color: var(--bo-text);
++  font-size: 14px;
++}
++
++.boView-tasks [class*="returnToManager"] select,
++.boView-tasks [class*="returnToManager"] textarea,
++.boView-tasks [class*="ReturnToManager"] select,
++.boView-tasks [class*="ReturnToManager"] textarea,
++.boView-tasks .returnPanel select,
++.boView-tasks .returnPanel textarea,
++.boView-tasks .taskReturnPanel select,
++.boView-tasks .taskReturnPanel textarea {
++  width: 100%;
++  min-height: 44px;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 9px 10px;
++}
++
++.boView-tasks [class*="returnToManager"] textarea,
++.boView-tasks [class*="ReturnToManager"] textarea,
++.boView-tasks .returnPanel textarea,
++.boView-tasks .taskReturnPanel textarea {
++  min-height: 80px;
++  resize: vertical;
++}
++
++/* =========================================================
++   POWER OF ATTORNEY RESULT / SUPPLIER ACCOUNTING TASKS
++   ========================================================= */
++
++.boView-tasks .powerTaskGrid {
++  margin-bottom: 10px;
++}
++
++.boView-tasks .powerTaskGrid > div {
++  border: 1px solid var(--bo-line);
++  background: var(--bo-panel-2);
++}
++
++.boView-tasks [class*="supplierPayment"],
++.boView-tasks [class*="SupplierPayment"],
++.boView-tasks [class*="balanceCorrection"],
++.boView-tasks [class*="BalanceCorrection"] {
++  color: var(--bo-text);
++}
++
++.boView-tasks [class*="supplierPayment"] .infoBox,
++.boView-tasks [class*="SupplierPayment"] .infoBox,
++.boView-tasks [class*="balanceCorrection"] .infoBox,
++.boView-tasks [class*="BalanceCorrection"] .infoBox {
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++}
++
++.boView-tasks button.primary.wide {
++  min-height: 46px;
++}
++
++/* =========================================================
++   MOBILE
++   ========================================================= */
++
++@media (max-width: 720px) {
++  .boShell .field:has(input[type="file"]) > button[type="button"]:not(.primary),
++  .boShell .field:has(input[type="file"]) > label:not(.urgentToggle),
++  .boShell .field:has(input[type="file"]) > div > button[type="button"]:first-child:not(.primary),
++  .boShell [class*="singleFile"] > button[type="button"],
++  .boShell [class*="multiFile"] > button[type="button"],
++  .boShell [class*="filePicker"] > button[type="button"],
++  .boShell [class*="FilePicker"] > button[type="button"] {
++    min-height: 52px !important;
++    font-size: 14px !important;
++    padding: 10px 11px !important;
++  }
++
++  .boView-tasks .invoiceTaskDataGrid {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-tasks .invoiceTaskDoc {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++
++  .boView-tasks .invoiceTaskDoc > b {
++    display: block;
++    min-height: 34px;
++    padding-top: 6px;
++  }
++
++  .boView-tasks .invoiceTaskStartActions {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-tasks [class*="invoiceFinish"] .inline,
++  .boView-tasks [class*="invoiceComplete"] .inline,
++  .boView-tasks [class*="finishInvoice"] .inline,
++  .boView-tasks [class*="completeInvoice"] .inline {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-tasks [class*="returnToManager"],
++  .boView-tasks [class*="ReturnToManager"],
++  .boView-tasks .returnPanel,
++  .boView-tasks .taskReturnPanel {
++    padding: 11px;
++  }
++}
++/* END_PART_V064_E_BLOCK_OFFICE_ACCOUNTING */
++
++/* PART_V064_F_MOBILE_AND_SUPPLIER_PAYMENT_FIX */
++
++/* Supplier payment options: fix the oversized / split checkbox cards */
++.boShell label[data-bo-payment-choice] {
++  box-sizing: border-box;
++  display: inline-grid !important;
++  grid-template-columns: 28px minmax(0, 1fr) !important;
++  align-items: center !important;
++  gap: 13px !important;
++  width: calc(50% - 7px) !important;
++  min-height: 82px !important;
++  vertical-align: top !important;
++  margin: 6px 10px 6px 0 !important;
++  border: 1px solid var(--bo-line) !important;
++  border-radius: 8px !important;
++  background: var(--bo-panel) !important;
++  color: var(--bo-text) !important;
++  padding: 14px 16px !important;
++  cursor: pointer !important;
++  box-shadow: none !important;
++}
++
++.boShell label[data-bo-payment-choice]:nth-of-type(even) {
++  margin-right: 0 !important;
++}
++
++.boShell label[data-bo-payment-choice] input[type="checkbox"] {
++  appearance: none;
++  -webkit-appearance: none;
++  width: 21px !important;
++  height: 21px !important;
++  min-width: 21px !important;
++  min-height: 21px !important;
++  margin: 0 !important;
++  border: 2px solid var(--bo-stone) !important;
++  border-radius: 4px !important;
++  background: var(--bo-panel-2) !important;
++  display: grid;
++  place-items: center;
++  cursor: pointer;
++}
++
++.boShell label[data-bo-payment-choice] input[type="checkbox"]::after {
++  content: '';
++  width: 9px;
++  height: 5px;
++  border-left: 2px solid #fff;
++  border-bottom: 2px solid #fff;
++  transform: rotate(-45deg) scale(0);
++  transition: transform .12s ease;
++}
++
++.boShell label[data-bo-payment-choice] input[type="checkbox"]:checked {
++  border-color: var(--bo-green) !important;
++  background: var(--bo-green) !important;
++}
++
++.boShell label[data-bo-payment-choice] input[type="checkbox"]:checked::after {
++  transform: rotate(-45deg) scale(1);
++}
++
++.boShell label[data-bo-payment-choice]:has(input:checked) {
++  border-color: color-mix(in srgb, var(--bo-green) 60%, var(--bo-line)) !important;
++  background: color-mix(in srgb, var(--bo-green) 9%, var(--bo-panel)) !important;
++}
++
++.boShell label[data-bo-payment-choice] > div,
++.boShell label[data-bo-payment-choice] > span:not(:first-child) {
++  min-width: 0;
++  text-align: left !important;
++}
++
++.boShell label[data-bo-payment-choice] strong,
++.boShell label[data-bo-payment-choice] b {
++  display: block;
++  margin: 0 0 4px !important;
++  color: var(--bo-text) !important;
++  font-size: 15px !important;
++  font-weight: 850 !important;
++  line-height: 1.25 !important;
++}
++
++.boShell label[data-bo-payment-choice] p,
++.boShell label[data-bo-payment-choice] small,
++.boShell label[data-bo-payment-choice] em {
++  display: block;
++  margin: 0 !important;
++  color: var(--bo-muted) !important;
++  font-size: 12px !important;
++  font-style: normal !important;
++  line-height: 1.4 !important;
++}
++
++.boShell label[data-bo-payment-choice="balance"]:has(input:checked) strong,
++.boShell label[data-bo-payment-choice="balance"]:has(input:checked) b {
++  color: var(--bo-green) !important;
++}
++
++/* Submit payment button gets visual breathing room */
++.boView-tasks button.primary.wide,
++.boView-deal button.primary.wide {
++  border-radius: 7px;
++}
++
++/* ==============================
++   FINAL MOBILE PASS
++   ============================== */
++
++@media (max-width: 720px) {
++  html,
++  body,
++  #root {
++    max-width: 100%;
++    overflow-x: hidden;
++  }
++
++  body {
++    padding-bottom: 82px;
++  }
++
++  .boShell {
++    width: 100%;
++    max-width: 100%;
++    padding-left: 10px !important;
++    padding-right: 10px !important;
++  }
++
++  .boShell .topbar {
++    display: grid !important;
++    grid-template-columns: minmax(0, 1fr) auto !important;
++    align-items: center !important;
++    gap: 8px !important;
++    width: 100%;
++    padding: 10px !important;
++  }
++
++  .boShell .topbar h1 {
++    font-size: 18px !important;
++    line-height: 1.2;
++  }
++
++  .boShell .topbarActions {
++    min-width: 0;
++    justify-content: flex-end;
++  }
++
++  .boShell .topbarActions button {
++    min-height: 42px;
++  }
++
++  .boShell .userBadge {
++    display: none !important;
++  }
++
++  .boShell .content,
++  .boShell .content.form,
++  .boView-deal .content,
++  .boView-tasks .content,
++  .boView-new .content.form {
++    width: 100% !important;
++    max-width: 100% !important;
++    min-width: 0 !important;
++    margin-left: 0 !important;
++    margin-right: 0 !important;
++  }
++
++  .boShell input,
++  .boShell textarea,
++  .boShell select {
++    max-width: 100%;
++    font-size: 16px !important;
++  }
++
++  .boShell button,
++  .boShell a[role="button"],
++  .boShell .primary,
++  .boShell .secondary,
++  .boShell .ghost {
++    touch-action: manipulation;
++  }
++
++  .boShell button:not(.boMobileEmpty),
++  .boShell .primary,
++  .boShell .secondary {
++    min-height: 44px;
++  }
++
++  /* payment choices stack cleanly */
++  .boShell label[data-bo-payment-choice] {
++    display: grid !important;
++    width: 100% !important;
++    min-height: 76px !important;
++    margin: 6px 0 !important;
++    grid-template-columns: 26px minmax(0, 1fr) !important;
++    padding: 12px 13px !important;
++  }
++
++  /* deal */
++  .boView-deal .detailHero,
++  .boView-tasks .detailHero {
++    width: 100%;
++    padding: 13px !important;
++  }
++
++  .boView-deal .detailHero h2,
++  .boView-deal .detailHero h3,
++  .boView-tasks .detailHero h2 {
++    font-size: 21px !important;
++  }
++
++  .boView-deal .panel,
++  .boView-deal .infoBox,
++  .boView-tasks .panel,
++  .boView-tasks .infoBox {
++    width: 100%;
++    min-width: 0;
++  }
++
++  .boView-deal .inline,
++  .boView-tasks .inline,
++  .boView-new .inline,
++  .boShell [class*="Grid"],
++  .boShell [class*="grid"] {
++    grid-template-columns: 1fr !important;
++  }
++
++  /* long invoice/document names */
++  .boShell a,
++  .boShell strong,
++  .boShell b,
++  .boShell p,
++  .boShell span {
++    overflow-wrap: anywhere;
++  }
++
++  /* upload controls */
++  .boShell .field:has(input[type="file"]) > button[type="button"]:not(.primary),
++  .boShell .field:has(input[type="file"]) > label:not(.urgentToggle),
++  .boShell .field:has(input[type="file"]) > div > button[type="button"]:first-child:not(.primary),
++  .boShell [class*="singleFile"] > button[type="button"],
++  .boShell [class*="multiFile"] > button[type="button"],
++  .boShell [class*="filePicker"] > button[type="button"],
++  .boShell [class*="FilePicker"] > button[type="button"] {
++    width: 100% !important;
++    min-height: 50px !important;
++    padding: 10px 12px !important;
++    font-size: 14px !important;
++  }
++
++  /* lists / rows */
++  .boShell .versionRow,
++  .boShell .paymentRow,
++  .boShell [class*="supplierRow"],
++  .boShell [class*="purchaseRow"] {
++    min-width: 0;
++  }
++
++  /* task cards */
++  .boView-tasks .taskCard {
++    width: 100%;
++    min-width: 0;
++  }
++
++  .boView-tasks .taskCardTop,
++  .boView-tasks .taskCardHead,
++  .boView-tasks .taskCardHeader {
++    gap: 7px !important;
++  }
++
++  .boView-tasks .taskCardUploadTop {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++
++  /* return / resubmit */
++  .boShell .managerResubmitPanel,
++  .boView-tasks [class*="returnToManager"],
++  .boView-tasks [class*="ReturnToManager"],
++  .boView-tasks .returnPanel,
++  .boView-tasks .taskReturnPanel {
++    width: 100%;
++    min-width: 0;
++  }
++
++  /* bottom nav: fixed 5 equal zones */
++  .boMobileNav {
++    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
++  }
++
++  .boMobileNav > * {
++    min-width: 0 !important;
++  }
++
++  .boMobileNav span {
++    white-space: nowrap;
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++}
++
++/* very narrow phones */
++@media (max-width: 390px) {
++  .boShell {
++    padding-left: 7px !important;
++    padding-right: 7px !important;
++  }
++
++  .boShell .topbar {
++    padding: 8px !important;
++  }
++
++  .boShell .topbar h1 {
++    font-size: 17px !important;
++  }
++
++  .boView-deal .detailHero,
++  .boView-tasks .detailHero,
++  .boView-new .content.form {
++    padding: 11px !important;
++  }
++
++  .boMobileNav a,
++  .boMobileNav button {
++    font-size: 10px !important;
++  }
++}
++
++/* END_PART_V064_F_MOBILE_AND_SUPPLIER_PAYMENT_FIX */
++
++/* PART_V064_G_DOC_ROWS_DARK_BG */
++
++/* Document row: file name and document type must never merge visually */
++.boView-tasks .invoiceTaskDoc {
++  display: grid !important;
++  grid-template-columns: minmax(0, 1fr) auto !important;
++  align-items: center !important;
++  gap: 14px !important;
++  min-height: 58px !important;
++  padding: 9px 12px !important;
++}
++
++.boView-tasks .invoiceTaskDoc > div {
++  display: flex !important;
++  flex-direction: column !important;
++  align-items: flex-start !important;
++  justify-content: center !important;
++  gap: 3px !important;
++  min-width: 0 !important;
++}
++
++.boView-tasks .invoiceTaskDoc > div > strong {
++  display: block !important;
++  width: 100% !important;
++  margin: 0 !important;
++  color: var(--bo-text) !important;
++  font-size: 13px !important;
++  font-weight: 850 !important;
++  line-height: 1.3 !important;
++  white-space: normal !important;
++  overflow-wrap: anywhere !important;
++}
++
++.boView-tasks .invoiceTaskDoc > div > span {
++  display: block !important;
++  width: 100% !important;
++  margin: 0 !important;
++  color: var(--bo-muted) !important;
++  font-size: 11px !important;
++  font-weight: 600 !important;
++  line-height: 1.3 !important;
++  white-space: normal !important;
++}
++
++.boView-tasks .invoiceTaskDoc > b {
++  display: block !important;
++  flex: 0 0 auto !important;
++  margin: 0 !important;
++  color: var(--bo-accent) !important;
++  font-size: 12px !important;
++  font-weight: 900 !important;
++  white-space: nowrap !important;
++}
++
++/* Generic version rows used by POA and other task documents */
++.boView-tasks .versionRow,
++.boView-deal .versionRow {
++  display: grid !important;
++  grid-template-columns: minmax(0, 1fr) auto !important;
++  align-items: center !important;
++  gap: 14px !important;
++}
++
++.boView-tasks .versionRow > div,
++.boView-deal .versionRow > div {
++  min-width: 0 !important;
++}
++
++.boView-tasks .versionRow > div > b,
++.boView-deal .versionRow > div > b {
++  display: block !important;
++  overflow-wrap: anywhere !important;
++}
++
++.boView-tasks .versionRow > a,
++.boView-deal .versionRow > a {
++  flex: 0 0 auto !important;
++  white-space: nowrap !important;
++}
++
++/* Dark theme must paint the entire viewport, including empty area below content */
++html[data-theme='dark'],
++html[data-theme='dark'] body,
++html[data-theme='dark'] #root {
++  background: #14171b !important;
++  background-color: #14171b !important;
++  min-height: 100% !important;
++}
++
++html[data-theme='dark'] body,
++html[data-theme='dark'] #root,
++html[data-theme='dark'] .shell,
++html[data-theme='dark'] .boShell {
++  min-height: 100vh !important;
++  min-height: 100dvh !important;
++  background: #14171b !important;
++  background-color: #14171b !important;
++}
++
++html[data-theme='dark'] .boShell::before,
++html[data-theme='dark'] .shell::before {
++  background: #14171b !important;
++}
++
++/* Mobile */
++@media (max-width: 720px) {
++  .boView-tasks .invoiceTaskDoc {
++    grid-template-columns: minmax(0, 1fr) auto !important;
++    gap: 10px !important;
++    min-height: 56px !important;
++    padding: 9px 10px !important;
++  }
++
++  .boView-tasks .invoiceTaskDoc > b {
++    min-height: 36px !important;
++    display: flex !important;
++    align-items: center !important;
++  }
++
++  .boView-tasks .versionRow,
++  .boView-deal .versionRow {
++    grid-template-columns: minmax(0, 1fr) auto !important;
++    gap: 10px !important;
++  }
++}
++
++/* END_PART_V064_G_DOC_ROWS_DARK_BG */
++
++/* PART_V064_H_TASK_DETAIL_RETURN_REBUILD */
++
++/* =========================================================
++   TASK DETAIL — ONE CLEAR WORKSPACE
++   ========================================================= */
++
++.boView-tasks .content.form {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  max-width: 1040px;
++  margin: 0 auto;
++}
++
++.boView-tasks .content.form > .backLink {
++  order: -100;
++  width: max-content;
++  margin: 0 0 2px;
++}
++
++.boView-tasks .content.form > .detailHero {
++  order: -90;
++}
++
++.boView-tasks .content.form > .taskDetailDealLink {
++  order: -80;
++}
++
++.boView-tasks .content.form > .invoiceTaskDataCard {
++  order: -70;
++}
++
++.boView-tasks .content.form > .taskStructuredRead,
++.boView-tasks .content.form > .taskStructuredFields {
++  order: -60;
++}
++
++.boView-tasks .content.form > .managerResubmitPanel {
++  order: 60;
++}
++
++/* hero */
++.boView-tasks .detailHero {
++  position: relative;
++  overflow: hidden;
++  margin: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  box-shadow: var(--bo-shadow);
++  padding: 17px 18px 16px;
++}
++
++.boView-tasks .detailHero::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 5px;
++  background: var(--bo-blue);
++}
++
++.boView-tasks .detailHero:has(.statusPill) {
++  padding-left: 19px;
++}
++
++.boView-tasks .detailHero .eyebrow {
++  margin-bottom: 3px;
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 900;
++  letter-spacing: .07em;
++  text-transform: uppercase;
++}
++
++.boView-tasks .detailHero h2 {
++  margin: 3px 0 5px;
++  color: var(--bo-text);
++  font-size: clamp(22px, 2.6vw, 29px);
++  line-height: 1.16;
++  letter-spacing: -.025em;
++}
++
++.boView-tasks .detailHero > p {
++  margin: 3px 0 9px;
++  color: var(--bo-muted);
++}
++
++.boView-tasks .detailHero .statusPill {
++  display: inline-flex;
++  align-items: center;
++  min-height: 29px;
++  border: 1px solid var(--bo-line);
++  border-radius: 4px;
++  background: var(--bo-panel-2);
++  color: var(--bo-blue);
++  font-size: 11px;
++  font-weight: 900;
++  padding: 5px 8px;
++}
++
++.boView-tasks .detailHero .urgent {
++  margin-left: 6px;
++}
++
++/* deal jump */
++.boView-tasks .taskDetailDealLink {
++  display: grid;
++  grid-template-columns: auto minmax(0, 1fr) auto;
++  align-items: center;
++  gap: 10px;
++  min-height: 52px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  text-decoration: none;
++  padding: 9px 11px;
++}
++
++.boView-tasks .taskDetailDealLink strong {
++  color: var(--bo-accent);
++  font-size: 13px;
++  font-weight: 900;
++}
++
++.boView-tasks .taskDetailDealLink span {
++  min-width: 0;
++  overflow: hidden;
++  color: var(--bo-muted);
++  font-size: 12px;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskDetailDealLink b {
++  color: var(--bo-accent);
++  font-size: 12px;
++  white-space: nowrap;
++}
++
++/* request data = "what manager sent" */
++.boView-tasks .invoiceTaskDataCard {
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: none;
++  padding: 13px;
++}
++
++.boView-tasks .invoiceTaskDataHead {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 12px;
++  margin-bottom: 10px;
++}
++
++.boView-tasks .invoiceTaskDataHead strong {
++  display: block;
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.boView-tasks .invoiceTaskDataHead span {
++  display: block;
++  margin-top: 3px;
++  color: var(--bo-muted);
++  font-size: 11px;
++}
++
++.boView-tasks .invoiceTaskDataGrid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 8px;
++}
++
++.boView-tasks .invoiceTaskDataGrid > div,
++.boView-tasks .invoiceTaskTextBlock {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 9px 10px;
++}
++
++.boView-tasks .invoiceTaskTextBlock {
++  margin-top: 8px;
++}
++
++.boView-tasks .invoiceTaskDataGrid span,
++.boView-tasks .invoiceTaskTextBlock > span {
++  display: block;
++  margin-bottom: 4px;
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 850;
++  letter-spacing: .02em;
++}
++
++.boView-tasks .invoiceTaskDataGrid b,
++.boView-tasks .invoiceTaskDataGrid strong,
++.boView-tasks .invoiceTaskTextBlock p {
++  margin: 0;
++  color: var(--bo-text);
++  font-size: 13px;
++  line-height: 1.4;
++  overflow-wrap: anywhere;
++}
++
++/* =========================================================
++   DOCUMENTS
++   ========================================================= */
++
++.boView-tasks .invoiceTaskDocs,
++.boView-tasks .infoBox:has(.versionList) {
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  padding: 12px;
++}
++
++.boView-tasks .invoiceTaskDocsTitle,
++.boView-tasks .infoBox:has(.versionList) > strong:first-child {
++  display: block;
++  margin-bottom: 8px;
++  color: var(--bo-text);
++  font-size: 13px;
++  font-weight: 900;
++  text-transform: none;
++  letter-spacing: 0;
++}
++
++/* =========================================================
++   ACCOUNTANT ACTIONS / RETURN
++   ========================================================= */
++
++.boView-tasks .invoiceTaskStartActions {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 8px;
++  align-items: stretch;
++  margin: 0;
++  padding: 12px;
++  border: 1px solid var(--bo-line);
++  border-left: 5px solid var(--bo-blue);
++  border-radius: 8px;
++  background: var(--bo-panel);
++}
++
++.boView-tasks .invoiceTaskStartActions > * {
++  min-width: 0;
++}
++
++.boView-tasks .invoiceTaskStartActions > button,
++.boView-tasks .invoiceTaskStartActions button.primary {
++  width: 100%;
++  min-height: 46px;
++}
++
++/* universal return container variants */
++.boView-tasks [class*="returnToManager"],
++.boView-tasks [class*="ReturnToManager"],
++.boView-tasks .returnPanel,
++.boView-tasks .taskReturnPanel {
++  width: 100%;
++  min-width: 0;
++  margin: 0;
++  border: 1px solid color-mix(in srgb, var(--bo-red) 42%, var(--bo-line));
++  border-left: 5px solid var(--bo-red);
++  border-radius: 7px;
++  background: color-mix(in srgb, var(--bo-red) 6%, var(--bo-panel));
++  color: var(--bo-text);
++  padding: 11px;
++}
++
++.boView-tasks [class*="returnToManager"] h3,
++.boView-tasks [class*="ReturnToManager"] h3,
++.boView-tasks .returnPanel h3,
++.boView-tasks .taskReturnPanel h3 {
++  margin: 0 0 4px;
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.boView-tasks [class*="returnToManager"] p,
++.boView-tasks [class*="ReturnToManager"] p,
++.boView-tasks .returnPanel p,
++.boView-tasks .taskReturnPanel p {
++  margin: 3px 0 9px;
++  color: var(--bo-muted);
++  font-size: 12px;
++  line-height: 1.4;
++}
++
++.boView-tasks [class*="returnToManager"] .field,
++.boView-tasks [class*="ReturnToManager"] .field,
++.boView-tasks .returnPanel .field,
++.boView-tasks .taskReturnPanel .field {
++  margin-top: 8px;
++}
++
++.boView-tasks [class*="returnToManager"] select,
++.boView-tasks [class*="returnToManager"] textarea,
++.boView-tasks [class*="ReturnToManager"] select,
++.boView-tasks [class*="ReturnToManager"] textarea,
++.boView-tasks .returnPanel select,
++.boView-tasks .returnPanel textarea,
++.boView-tasks .taskReturnPanel select,
++.boView-tasks .taskReturnPanel textarea {
++  width: 100%;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++}
++
++.boView-tasks [class*="returnToManager"] textarea,
++.boView-tasks [class*="ReturnToManager"] textarea,
++.boView-tasks .returnPanel textarea,
++.boView-tasks .taskReturnPanel textarea {
++  min-height: 78px;
++  resize: vertical;
++}
++
++.boView-tasks [class*="returnToManager"] button:not(.ghost),
++.boView-tasks [class*="ReturnToManager"] button:not(.ghost),
++.boView-tasks .returnPanel button:not(.ghost),
++.boView-tasks .taskReturnPanel button:not(.ghost) {
++  min-height: 43px;
++  border-color: var(--bo-red);
++  background: var(--bo-red);
++  color: #fff;
++  font-weight: 900;
++}
++
++/* =========================================================
++   MANAGER — RETURNED TASK / SAME TASK RESUBMIT
++   ========================================================= */
++
++.boView-tasks .managerResubmitPanel {
++  position: relative;
++  overflow: hidden;
++  margin: 4px 0 0;
++  border: 1px solid color-mix(in srgb, var(--bo-red) 38%, var(--bo-line));
++  border-left: 5px solid var(--bo-red);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  padding: 0;
++  box-shadow: none;
++}
++
++.boView-tasks .managerResubmitHead {
++  padding: 13px 14px;
++  border-bottom: 1px solid var(--bo-line);
++  background: color-mix(in srgb, var(--bo-red) 7%, var(--bo-panel));
++}
++
++.boView-tasks .managerResubmitHead::before {
++  content: 'НУЖНО ИСПРАВИТЬ';
++  display: block;
++  margin-bottom: 5px;
++  color: var(--bo-red);
++  font-size: 10px;
++  font-weight: 950;
++  letter-spacing: .07em;
++}
++
++.boView-tasks .managerResubmitHead strong {
++  display: block;
++  color: var(--bo-text);
++  font-size: 15px;
++  font-weight: 900;
++}
++
++.boView-tasks .managerResubmitHead span {
++  display: block;
++  max-width: 760px;
++  margin-top: 4px;
++  color: var(--bo-muted);
++  font-size: 12px;
++  line-height: 1.45;
++}
++
++.boView-tasks .managerResubmitPanel > .taskStructuredEdit,
++.boView-tasks .managerResubmitPanel > .taskStructuredFields,
++.boView-tasks .managerResubmitPanel > label,
++.boView-tasks .managerResubmitPanel > .field,
++.boView-tasks .managerResubmitPanel > .urgentToggle,
++.boView-tasks .managerResubmitPanel > .error,
++.boView-tasks .managerResubmitPanel > button,
++.boView-tasks .managerResubmitPanel > div:not(.managerResubmitHead) {
++  margin-left: 13px;
++  margin-right: 13px;
++}
++
++.boView-tasks .managerResubmitPanel > .managerResubmitHead {
++  margin: 0;
++}
++
++.boView-tasks .managerResubmitPanel > *:last-child {
++  margin-bottom: 13px;
++}
++
++.boView-tasks .managerResubmitPanel .taskStructuredEdit {
++  margin-top: 13px;
++}
++
++.boView-tasks .managerResubmitPanel .field {
++  margin-top: 10px;
++}
++
++.boView-tasks .managerResubmitPanel .urgentToggle {
++  width: calc(100% - 26px);
++}
++
++.boView-tasks .managerResubmitPanel button.primary,
++.boView-tasks .managerResubmitPanel .primary.wide {
++  width: calc(100% - 26px);
++  min-height: 48px;
++  margin-top: 10px;
++  background: var(--bo-accent);
++}
++
++/* invoice-specific repair gets the same hierarchy */
++.boView-tasks .invoiceTaskRepairNotice {
++  border: 1px solid color-mix(in srgb, var(--bo-red) 40%, var(--bo-line));
++  border-left: 5px solid var(--bo-red);
++  border-radius: 7px;
++  background: color-mix(in srgb, var(--bo-red) 7%, var(--bo-panel));
++  color: var(--bo-text);
++  padding: 11px 12px;
++  font-size: 12px;
++  line-height: 1.45;
++}
++
++.boView-tasks .invoiceTaskEdit {
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  padding: 13px;
++}
++
++.boView-tasks .invoiceTaskEdit > h3 {
++  margin: 0 0 12px;
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 900;
++}
++
++/* structured fields */
++.boView-tasks .taskStructuredEdit,
++.boView-tasks .taskStructuredRead {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 8px;
++}
++
++.boView-tasks .taskStructuredRead > div {
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  padding: 9px 10px;
++}
++
++/* in work/result */
++.boView-tasks .invoiceTaskInWorkBox {
++  margin: 0;
++  border-left: 5px solid var(--bo-blue);
++  border-radius: 8px;
++  background: var(--bo-panel);
++}
++
++.boView-tasks .invoiceTaskInWorkBox strong {
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.boView-tasks .invoiceTaskInWorkBox p {
++  margin: 4px 0 0;
++  color: var(--bo-muted);
++  font-size: 12px;
++}
++
++/* =========================================================
++   MOBILE
++   ========================================================= */
++
++@media (max-width: 720px) {
++  .boView-tasks .content.form {
++    gap: 8px;
++  }
++
++  .boView-tasks .detailHero {
++    padding: 13px 13px 12px 16px;
++  }
++
++  .boView-tasks .detailHero h2 {
++    font-size: 21px;
++  }
++
++  .boView-tasks .taskDetailDealLink {
++    grid-template-columns: auto minmax(0, 1fr);
++  }
++
++  .boView-tasks .taskDetailDealLink b {
++    grid-column: 1 / -1;
++    padding-top: 2px;
++  }
++
++  .boView-tasks .invoiceTaskDataGrid,
++  .boView-tasks .taskStructuredEdit,
++  .boView-tasks .taskStructuredRead {
++    grid-template-columns: 1fr;
++  }
++
++  .boView-tasks .invoiceTaskStartActions {
++    grid-template-columns: 1fr;
++    padding: 10px;
++  }
++
++  .boView-tasks .managerResubmitHead {
++    padding: 12px;
++  }
++
++  .boView-tasks .managerResubmitPanel > .taskStructuredEdit,
++  .boView-tasks .managerResubmitPanel > .taskStructuredFields,
++  .boView-tasks .managerResubmitPanel > label,
++  .boView-tasks .managerResubmitPanel > .field,
++  .boView-tasks .managerResubmitPanel > .urgentToggle,
++  .boView-tasks .managerResubmitPanel > .error,
++  .boView-tasks .managerResubmitPanel > button,
++  .boView-tasks .managerResubmitPanel > div:not(.managerResubmitHead) {
++    margin-left: 10px;
++    margin-right: 10px;
++  }
++
++  .boView-tasks .managerResubmitPanel .urgentToggle,
++  .boView-tasks .managerResubmitPanel button.primary,
++  .boView-tasks .managerResubmitPanel .primary.wide {
++    width: calc(100% - 20px);
++  }
++
++  .boView-tasks [class*="returnToManager"],
++  .boView-tasks [class*="ReturnToManager"],
++  .boView-tasks .returnPanel,
++  .boView-tasks .taskReturnPanel {
++    padding: 10px;
++  }
++}
++
++/* END_PART_V064_H_TASK_DETAIL_RETURN_REBUILD */
++
++/* PART_V064_I_TASK_LIST_ERGONOMICS */
++
++/* =========================
++   TASK LIST — ERGONOMICS
++   ========================= */
++
++.boView-tasks .content {
++  max-width: 1040px;
++  margin: 0 auto;
++}
++
++/* second level title should not compete with page title */
++.boView-tasks .content > h2,
++.boView-tasks .sectionTitle,
++.boView-tasks .taskColumnTitle,
++.boView-tasks .taskListTitle {
++  letter-spacing: -.02em;
++}
++
++.boView-tasks .sectionTitle,
++.boView-tasks .taskColumnTitle,
++.boView-tasks .taskListTitle {
++  font-size: clamp(28px, 2.6vw, 34px);
++  line-height: 1.08;
++}
++
++.boView-tasks .taskGroupTitle,
++.boView-tasks .taskSectionTitle,
++.boView-tasks .taskLaneTitle {
++  font-size: 13px;
++  font-weight: 900;
++  letter-spacing: .01em;
++}
++
++/* list group spacing */
++.boView-tasks .taskGroup,
++.boView-tasks .taskLane,
++.boView-tasks .taskSection {
++  margin-top: 10px;
++}
++
++/* main card */
++.boView-tasks .taskCard {
++  position: relative;
++  overflow: hidden;
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 10px 12px;
++  align-items: start;
++  min-height: 126px;
++  padding: 15px 15px 14px 16px;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: linear-gradient(180deg, color-mix(in srgb, var(--bo-panel) 92%, #000 8%) 0%, var(--bo-panel) 100%);
++  box-shadow: var(--bo-shadow);
++}
++
++.boView-tasks .taskCard::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 4px;
++  background: var(--bo-blue);
++  opacity: .95;
++}
++
++.boView-tasks .taskCard.task-new::before,
++.boView-tasks .taskCard[data-status='NEW']::before {
++  background: var(--bo-gold);
++}
++
++.boView-tasks .taskCard.task-need-data::before,
++.boView-tasks .taskCard[data-status='NEED_DATA']::before {
++  background: var(--bo-red);
++}
++
++.boView-tasks .taskCard.task-done::before,
++.boView-tasks .taskCard[data-status='DONE']::before {
++  background: var(--bo-green);
++}
++
++/* left content */
++.boView-tasks .taskCardHead,
++.boView-tasks .taskCardTop,
++.boView-tasks .taskCardHeader {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  min-width: 0;
++}
++
++.boView-tasks .taskCardTitle,
++.boView-tasks .taskCard h3,
++.boView-tasks .taskCard h4 {
++  margin: 0;
++  color: var(--bo-text);
++  font-size: 16px;
++  line-height: 1.24;
++  letter-spacing: -.015em;
++}
++
++.boView-tasks .taskCardClient,
++.boView-tasks .taskCard small,
++.boView-tasks .taskCard .taskCardSub {
++  color: var(--bo-muted);
++  font-size: 12px;
++  line-height: 1.35;
++}
++
++/* deal number becomes more visible */
++.boView-tasks .taskCardDeal,
++.boView-tasks .taskCardDealNumber,
++.boView-tasks .dealNumber,
++.boView-tasks .taskCard b.deal,
++.boView-tasks .taskCard .internalNumber {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  margin-top: 2px;
++  color: var(--bo-text);
++  font-size: 15px;
++  font-weight: 900;
++  line-height: 1.2;
++  letter-spacing: .005em;
++}
++
++.boView-tasks .taskCardDeal::before,
++.boView-tasks .taskCardDealNumber::before,
++.boView-tasks .dealNumber::before,
++.boView-tasks .taskCard .internalNumber::before {
++  content: '■';
++  color: var(--bo-accent);
++  font-size: 9px;
++  transform: translateY(-.5px);
++}
++
++/* invoice/org line */
++.boView-tasks .taskCardInvoiceMeta,
++.boView-tasks .taskCardMetaLine,
++.boView-tasks .taskCardSellerMeta {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  align-items: center;
++  margin-top: 5px;
++}
++
++.boView-tasks .taskCardInvoiceMeta .metaPill,
++.boView-tasks .taskCardMetaLine .metaPill,
++.boView-tasks .taskCardSellerMeta .metaPill {
++  display: inline-flex;
++  align-items: center;
++  min-height: 24px;
++  border: 1px solid var(--bo-line);
++  border-radius: 999px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 850;
++  padding: 4px 8px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskCardInvoiceMeta .metaPill strong,
++.boView-tasks .taskCardMetaLine .metaPill strong,
++.boView-tasks .taskCardSellerMeta .metaPill strong {
++  color: var(--bo-text);
++  margin-left: 4px;
++}
++
++/* created + footer */
++.boView-tasks .taskCardFooter,
++.boView-tasks .taskMetaFooter {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 8px 12px;
++  margin-top: 8px;
++  color: var(--bo-muted);
++  font-size: 11px;
++}
++
++/* right side status */
++.boView-tasks .taskCardSide,
++.boView-tasks .taskCardStatusWrap,
++.boView-tasks .taskStatusSlot {
++  display: flex;
++  flex-direction: column;
++  align-items: flex-end;
++  justify-content: space-between;
++  gap: 10px;
++  min-width: 88px;
++  height: 100%;
++}
++
++.boView-tasks .statusPill,
++.boView-tasks .taskCardStatus,
++.boView-tasks .taskStatusBadge {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 29px;
++  padding: 6px 9px;
++  border-radius: 5px;
++  border: 1px solid var(--bo-line);
++  background: var(--bo-panel-2);
++  color: var(--bo-blue);
++  font-size: 11px;
++  font-weight: 900;
++  white-space: nowrap;
++}
++
++.boView-tasks .statusPill.new,
++.boView-tasks .taskCardStatus.new,
++.boView-tasks .taskStatusBadge.new {
++  color: var(--bo-gold);
++}
++
++.boView-tasks .statusPill.need-data,
++.boView-tasks .taskCardStatus.need-data,
++.boView-tasks .taskStatusBadge.need-data {
++  color: #9b6dff;
++}
++
++.boView-tasks .statusPill.done,
++.boView-tasks .taskCardStatus.done,
++.boView-tasks .taskStatusBadge.done {
++  color: var(--bo-green);
++}
++
++/* need-data return note inside card */
++.boView-tasks .taskNeedDataBox,
++.boView-tasks .needDataBox,
++.boView-tasks .managerFixCard {
++  margin-top: 10px;
++  border: 1px solid color-mix(in srgb, var(--bo-gold) 40%, var(--bo-line));
++  border-radius: 8px;
++  background: color-mix(in srgb, var(--bo-gold) 12%, var(--bo-panel));
++  padding: 11px 12px;
++}
++
++.boView-tasks .taskNeedDataBox strong,
++.boView-tasks .needDataBox strong,
++.boView-tasks .managerFixCard strong {
++  display: block;
++  margin: 0 0 4px;
++  color: #ffbe3d;
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.boView-tasks .taskNeedDataBox p,
++.boView-tasks .needDataBox p,
++.boView-tasks .managerFixCard p {
++  margin: 0 0 4px;
++  color: var(--bo-text);
++  font-size: 12px;
++  line-height: 1.45;
++}
++
++.boView-tasks .taskNeedDataBox a,
++.boView-tasks .needDataBox a,
++.boView-tasks .managerFixCard a {
++  display: inline-flex;
++  margin-top: 5px;
++  color: #ffbe3d;
++  font-size: 12px;
++  font-weight: 900;
++  text-decoration: none;
++}
++
++/* summary counter blocks */
++.boView-tasks .taskCounter,
++.boView-tasks .laneCounter,
++.boView-tasks .taskCountBadge {
++  min-width: 38px;
++  min-height: 38px;
++  border-radius: 8px;
++  font-size: 15px;
++  font-weight: 900;
++}
++
++/* mobile */
++@media (max-width: 720px) {
++  .boView-tasks .taskCard {
++    grid-template-columns: 1fr;
++    gap: 8px;
++    min-height: 0;
++    padding: 13px 12px 12px 14px;
++  }
++
++  .boView-tasks .taskCardSide,
++  .boView-tasks .taskCardStatusWrap,
++  .boView-tasks .taskStatusSlot {
++    min-width: 0;
++    flex-direction: row;
++    align-items: center;
++    justify-content: space-between;
++  }
++
++  .boView-tasks .taskCardTitle,
++  .boView-tasks .taskCard h3,
++  .boView-tasks .taskCard h4 {
++    font-size: 15px;
++  }
++
++  .boView-tasks .taskCardDeal,
++  .boView-tasks .taskCardDealNumber,
++  .boView-tasks .dealNumber,
++  .boView-tasks .taskCard .internalNumber {
++    font-size: 14px;
++  }
++
++  .boView-tasks .taskCardInvoiceMeta,
++  .boView-tasks .taskCardMetaLine,
++  .boView-tasks .taskCardSellerMeta,
++  .boView-tasks .taskCardFooter,
++  .boView-tasks .taskMetaFooter {
++    gap: 6px;
++  }
++
++  .boView-tasks .statusPill,
++  .boView-tasks .taskCardStatus,
++  .boView-tasks .taskStatusBadge {
++    min-height: 27px;
++    font-size: 10px;
++  }
++}
++
++/* END_PART_V064_I_TASK_LIST_ERGONOMICS */
++
++/* PART_V064_J_APPROVED_TASK_LIST */
++
++/* ===== Approved flat task list ===== */
++.boView-tasks .taskListIntro {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 12px;
++  margin: 2px 0 10px;
++}
++
++.boView-tasks .taskListIntro strong {
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.boView-tasks .taskListIntro span {
++  color: var(--bo-muted);
++  font-size: 12px;
++}
++
++.boView-tasks .taskFilterBar {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-bottom: 12px;
++}
++
++.boView-tasks .taskFilterButton {
++  display: inline-flex;
++  align-items: center;
++  gap: 7px;
++  min-height: 36px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-weight: 850;
++  padding: 7px 10px;
++  cursor: pointer;
++}
++
++.boView-tasks .taskFilterButton b {
++  display: inline-grid;
++  place-items: center;
++  min-width: 22px;
++  height: 22px;
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++  font-size: 11px;
++}
++
++.boView-tasks .taskFilterButton.active {
++  border-color: var(--bo-accent);
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boView-tasks .taskFilterButton.active b {
++  background: var(--bo-panel);
++  color: var(--bo-accent);
++}
++
++.boView-tasks .taskFlatList {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++
++/* The old group wrappers are no longer rendered by v064-J. */
++.boView-tasks .taskFlatList .taskCard {
++  position: relative;
++  overflow: hidden;
++  display: grid !important;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 8px 14px;
++  align-items: start;
++  width: 100%;
++  min-height: 106px;
++  margin: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: var(--bo-shadow);
++  padding: 13px 13px 12px 16px;
++  text-align: left;
++}
++
++.boView-tasks .taskFlatList .taskCard::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 4px;
++  background: var(--bo-blue);
++}
++
++.boView-tasks .taskFlatList .taskCard:has(.taskStatus-new)::before {
++  background: var(--bo-gold);
++}
++
++.boView-tasks .taskFlatList .taskCard:has(.taskStatus-need_data)::before,
++.boView-tasks .taskFlatList .taskCard:has(.taskStatus-need-data)::before,
++.boView-tasks .taskFlatList .taskCard:has(.taskReturnNotice)::before {
++  background: var(--bo-red);
++}
++
++.boView-tasks .taskFlatList .taskCard:has(.taskStatus-done)::before {
++  background: var(--bo-green);
++}
++
++/* Existing main text area */
++.boView-tasks .taskFlatList .taskCard > div:first-child {
++  min-width: 0;
++}
++
++.boView-tasks .taskFlatList .taskCard h3,
++.boView-tasks .taskFlatList .taskCard h4,
++.boView-tasks .taskFlatList .taskCard > div:first-child > strong {
++  margin: 0 0 4px;
++  color: var(--bo-text);
++  font-size: 16px;
++  font-weight: 900;
++  line-height: 1.22;
++  letter-spacing: -.01em;
++}
++
++.boView-tasks .taskFlatList .taskCard p {
++  margin: 3px 0;
++  color: var(--bo-muted);
++  font-size: 12px;
++  line-height: 1.4;
++}
++
++/* Deal number: deliberately stronger than secondary text */
++.boView-tasks .taskFlatList .taskDealNumberLink {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: var(--bo-text) !important;
++  font-size: 15px !important;
++  font-weight: 950 !important;
++  text-decoration: none;
++}
++
++.boView-tasks .taskFlatList .taskDealNumberLink::before {
++  content: '■';
++  color: var(--bo-accent);
++  font-size: 8px;
++}
++
++.boView-tasks .taskFlatList .taskDealNumberLink:hover {
++  color: var(--bo-accent) !important;
++}
++
++/* Real seller + current invoice data injected by v064-J */
++.boView-tasks .taskCardInvoiceMeta {
++  display: inline-flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 5px;
++  margin: 6px 0 0;
++}
++
++.boView-tasks .taskMetaPill {
++  display: inline-flex;
++  align-items: center;
++  min-height: 24px;
++  border: 1px solid var(--bo-line);
++  border-radius: 999px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 800;
++  padding: 4px 8px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskMetaSeller {
++  color: var(--bo-text);
++  font-weight: 950;
++}
++
++.boView-tasks .taskMetaPill strong {
++  margin-left: 4px;
++  color: var(--bo-text);
++  font-weight: 900;
++}
++
++/* Created timestamp is intentionally quiet */
++.boView-tasks .taskFlatList .taskCreated {
++  display: block;
++  margin-top: 7px;
++  color: var(--bo-muted);
++  font-size: 10px;
++  white-space: nowrap;
++}
++
++/* Status sits once, at the right */
++.boView-tasks .taskFlatList .taskState {
++  grid-column: 2;
++  grid-row: 1;
++  align-self: start;
++  justify-self: end;
++  margin: 0;
++}
++
++.boView-tasks .taskFlatList .taskStatusBadge {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 29px;
++  border: 1px solid var(--bo-line);
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-blue);
++  font-size: 11px;
++  font-weight: 900;
++  padding: 5px 8px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskFlatList .taskStatus-new {
++  color: var(--bo-gold);
++}
++
++.boView-tasks .taskFlatList .taskStatus-need_data,
++.boView-tasks .taskFlatList .taskStatus-need-data {
++  color: var(--bo-red);
++}
++
++.boView-tasks .taskFlatList .taskStatus-done {
++  color: var(--bo-green);
++}
++
++/* Returned task: a single compact line, not a large yellow box */
++.boView-tasks .taskFlatList .taskReturnNotice {
++  grid-column: 1 / -1;
++  display: grid;
++  grid-template-columns: auto minmax(0, 1fr) auto;
++  align-items: center;
++  gap: 8px;
++  width: 100%;
++  margin: 1px 0 0;
++  border: 0;
++  border-top: 1px solid var(--bo-line);
++  border-radius: 0;
++  background: transparent;
++  padding: 9px 0 0;
++}
++
++.boView-tasks .taskFlatList .taskReturnNotice::before {
++  content: '!';
++  display: grid;
++  place-items: center;
++  width: 22px;
++  height: 22px;
++  border-radius: 5px;
++  background: color-mix(in srgb, var(--bo-red) 12%, transparent);
++  color: var(--bo-red);
++  font-size: 12px;
++  font-weight: 950;
++}
++
++.boView-tasks .taskFlatList .taskReturnNotice strong {
++  display: block;
++  margin: 0;
++  color: var(--bo-red);
++  font-size: 12px;
++  font-weight: 900;
++}
++
++.boView-tasks .taskFlatList .taskReturnNotice span,
++.boView-tasks .taskFlatList .taskReturnNotice p {
++  grid-column: 2;
++  min-width: 0;
++  margin: 1px 0 0;
++  color: var(--bo-muted);
++  font-size: 11px;
++  line-height: 1.35;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++
++.boView-tasks .taskFlatList .taskReturnNotice em {
++  grid-column: 3;
++  grid-row: 1 / span 2;
++  align-self: center;
++  color: var(--bo-accent);
++  font-size: 11px;
++  font-style: normal;
++  font-weight: 900;
++  white-space: nowrap;
++}
++
++/* Upload progress stays visible on the same task */
++.boView-tasks .taskFlatList .taskCardUploadState {
++  grid-column: 1 / -1;
++  width: 100%;
++  margin: 1px 0 0;
++}
++
++/* Completed list uses the same compact card language */
++.boView-tasks .completedTasksBlock {
++  margin-top: 14px;
++}
++
++.boView-tasks .completedToggle {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  width: 100%;
++  min-height: 42px;
++  border: 1px solid var(--bo-line);
++  border-radius: 7px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  font-weight: 800;
++  padding: 8px 10px;
++}
++
++.boView-tasks .completedToggle b {
++  display: grid;
++  place-items: center;
++  min-width: 24px;
++  height: 24px;
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-text);
++}
++
++.boView-tasks .completedTasksList {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin-top: 8px;
++}
++
++@media (max-width: 720px) {
++  .boView-tasks .taskFilterBar {
++    display: grid;
++    grid-template-columns: 1fr 1fr;
++  }
++
++  .boView-tasks .taskFilterButton {
++    width: 100%;
++    justify-content: space-between;
++  }
++
++  .boView-tasks .taskFlatList .taskCard {
++    grid-template-columns: minmax(0, 1fr) auto;
++    min-height: 0;
++    gap: 7px 8px;
++    padding: 12px 10px 11px 14px;
++  }
++
++  .boView-tasks .taskFlatList .taskCard h3,
++  .boView-tasks .taskFlatList .taskCard h4,
++  .boView-tasks .taskFlatList .taskCard > div:first-child > strong {
++    font-size: 15px;
++  }
++
++  .boView-tasks .taskFlatList .taskDealNumberLink {
++    font-size: 14px !important;
++  }
++
++  .boView-tasks .taskFlatList .taskStatusBadge {
++    min-height: 27px;
++    font-size: 10px;
++    padding: 5px 7px;
++  }
++
++  .boView-tasks .taskFlatList .taskReturnNotice {
++    grid-template-columns: auto minmax(0, 1fr);
++  }
++
++  .boView-tasks .taskFlatList .taskReturnNotice em {
++    grid-column: 2;
++    grid-row: auto;
++    justify-self: start;
++    margin-top: 3px;
++  }
++
++  .boView-tasks .taskListIntro {
++    margin-top: 0;
++  }
++}
++
++/* END_PART_V064_J_APPROVED_TASK_LIST */
++
++/* PART_V064_K_TASK_SEARCH */
++
++.boView-tasks .taskSearch {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  min-height: 44px;
++  margin-bottom: 8px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  padding: 0 11px;
++}
++
++.boView-tasks .taskSearch > span {
++  flex: 0 0 auto;
++  color: var(--bo-muted);
++  font-size: 18px;
++}
++
++.boView-tasks .taskSearch input {
++  width: 100%;
++  min-width: 0;
++  min-height: 42px;
++  border: 0 !important;
++  background: transparent !important;
++  color: var(--bo-text);
++  outline: 0;
++  box-shadow: none !important;
++  padding: 8px 0;
++}
++
++.boView-tasks .taskSearch input::placeholder {
++  color: var(--bo-muted);
++  opacity: .8;
++}
++
++.boView-tasks .taskSearch:focus-within {
++  border-color: var(--bo-accent);
++  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bo-accent) 12%, transparent);
++}
++
++.boView-tasks .taskSearchClear {
++  flex: 0 0 auto;
++  min-width: 32px;
++  min-height: 32px !important;
++  border: 0;
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-weight: 900;
++  padding: 4px 8px;
++}
++
++@media (max-width: 720px) {
++  .boView-tasks .taskSearch {
++    min-height: 46px;
++  }
++
++  .boView-tasks .taskSearch input {
++    font-size: 16px !important;
++  }
++}
++
++/* END_PART_V064_K_TASK_SEARCH */
++
++/* PART_V064_L_TASK_WORKSPACE */
++
++/* ===== One visual language for every opened task ===== */
++.boView-tasks section.content.form.taskWorkspace {
++  display: flex;
++  flex-direction: column;
++  width: min(100%, 980px);
++  margin: 0 auto;
++  gap: 0;
++}
++
++/* Old patches occasionally inserted task content before the header.
++   Flex ordering fixes the visual order without moving business logic. */
++.boView-tasks section.taskWorkspace > * {
++  order: 10;
++}
++
++.boView-tasks section.taskWorkspace > .backLink {
++  order: 0;
++}
++
++.boView-tasks section.taskWorkspace > .detailHero {
++  order: 1;
++}
++
++.boView-tasks section.taskWorkspace > .taskContextStrip {
++  order: 2;
++}
++
++.boView-tasks section.taskWorkspace > .managerResubmitPanel {
++  order: 3;
++}
++
++.boView-tasks section.taskWorkspace > .backLink {
++  align-self: flex-start;
++  min-height: 34px;
++  margin: 0 0 8px;
++  border: 0;
++  background: transparent;
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-weight: 850;
++  padding: 4px 2px;
++}
++
++.boView-tasks section.taskWorkspace > .backLink:hover {
++  color: var(--bo-accent);
++}
++
++.boView-tasks section.taskWorkspace > .detailHero {
++  position: relative;
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  grid-template-rows: auto auto auto;
++  gap: 4px 12px;
++  overflow: hidden;
++  margin: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 10px 10px 0 0;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: var(--bo-shadow);
++  padding: 16px 16px 14px 18px;
++}
++
++.boView-tasks section.taskWorkspace > .detailHero::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 4px;
++  background: var(--bo-blue);
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='NEW'] > .detailHero::before {
++  background: var(--bo-gold);
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='NEED_DATA'] > .detailHero::before {
++  background: var(--bo-red);
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='DONE'] > .detailHero::before {
++  background: var(--bo-green);
++}
++
++.boView-tasks section.taskWorkspace > .detailHero .eyebrow {
++  grid-column: 1;
++  grid-row: 1;
++  margin: 0;
++  color: var(--bo-accent);
++  font-size: 14px;
++  font-weight: 950;
++  line-height: 1.2;
++  letter-spacing: .01em;
++}
++
++.boView-tasks section.taskWorkspace > .detailHero h2 {
++  grid-column: 1;
++  grid-row: 2;
++  margin: 1px 0 0;
++  color: var(--bo-text);
++  font-size: clamp(20px, 3vw, 26px);
++  font-weight: 950;
++  line-height: 1.14;
++  letter-spacing: -.02em;
++}
++
++.boView-tasks section.taskWorkspace > .detailHero p {
++  grid-column: 1;
++  grid-row: 3;
++  margin: 2px 0 0;
++  color: var(--bo-muted);
++  font-size: 13px;
++  line-height: 1.35;
++}
++
++.boView-tasks section.taskWorkspace > .detailHero .statusPill {
++  grid-column: 2;
++  grid-row: 1;
++  align-self: start;
++  justify-self: end;
++  min-height: 30px;
++  margin: 0;
++  border: 1px solid var(--bo-line);
++  border-radius: 6px;
++  background: var(--bo-panel-2);
++  color: var(--bo-blue);
++  font-size: 11px;
++  font-weight: 950;
++  padding: 6px 9px;
++  white-space: nowrap;
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='NEW'] > .detailHero .statusPill {
++  color: var(--bo-gold);
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='NEED_DATA'] > .detailHero .statusPill {
++  color: var(--bo-red);
++}
++
++.boView-tasks section.taskWorkspace[data-task-status='DONE'] > .detailHero .statusPill {
++  color: var(--bo-green);
++}
++
++.boView-tasks section.taskWorkspace > .detailHero .urgent {
++  grid-column: 2;
++  grid-row: 2 / span 2;
++  align-self: start;
++  justify-self: end;
++  margin: 2px 0 0;
++  border: 1px solid color-mix(in srgb, var(--bo-red) 35%, var(--bo-line));
++  border-radius: 5px;
++  background: color-mix(in srgb, var(--bo-red) 10%, transparent);
++  color: var(--bo-red);
++  font-size: 10px;
++  font-weight: 950;
++  padding: 5px 7px;
++  white-space: nowrap;
++}
++
++/* Deal / seller / invoice context directly under the task title */
++.boView-tasks .taskContextStrip {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 8px 12px;
++  align-items: center;
++  margin: 0 0 12px;
++  border: 1px solid var(--bo-line);
++  border-top: 0;
++  border-radius: 0 0 10px 10px;
++  background: var(--bo-panel-2);
++  padding: 10px 12px 11px 16px;
++}
++
++.boView-tasks .taskContextDeal {
++  display: grid;
++  grid-template-columns: auto auto minmax(0, 1fr);
++  gap: 6px;
++  align-items: baseline;
++  min-width: 0;
++  color: var(--bo-text);
++  text-decoration: none;
++}
++
++.boView-tasks .taskContextDeal > span {
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 750;
++}
++
++.boView-tasks .taskContextDeal strong {
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 950;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskContextDeal em {
++  min-width: 0;
++  overflow: hidden;
++  color: var(--bo-muted);
++  font-size: 12px;
++  font-style: normal;
++  font-weight: 750;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskContextFacts {
++  grid-column: 1;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 5px;
++}
++
++.boView-tasks .taskContextFacts span {
++  display: inline-flex;
++  align-items: center;
++  min-height: 24px;
++  border: 1px solid var(--bo-line);
++  border-radius: 999px;
++  background: var(--bo-panel);
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 800;
++  padding: 4px 8px;
++}
++
++.boView-tasks .taskContextFacts .taskContextSeller {
++  color: var(--bo-text);
++  font-weight: 950;
++}
++
++.boView-tasks .taskContextOpen {
++  grid-column: 2;
++  grid-row: 1 / span 2;
++  align-self: center;
++  color: var(--bo-accent);
++  font-size: 11px;
++  font-weight: 900;
++  text-decoration: none;
++  white-space: nowrap;
++}
++
++/* The older deal-link block becomes redundant. */
++.boView-tasks section.taskWorkspace > .taskDetailDealLink {
++  display: none !important;
++}
++
++/* Returned task correction block goes immediately after context. */
++.boView-tasks section.taskWorkspace > .managerResubmitPanel {
++  margin: 0 0 12px;
++  border: 1px solid color-mix(in srgb, var(--bo-red) 22%, var(--bo-line));
++  border-left: 4px solid var(--bo-red);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  box-shadow: none;
++  padding: 13px;
++}
++
++.boView-tasks section.taskWorkspace > .managerResubmitPanel .managerResubmitHead {
++  display: grid;
++  gap: 3px;
++  margin-bottom: 10px;
++}
++
++.boView-tasks section.taskWorkspace > .managerResubmitPanel .managerResubmitHead strong {
++  color: var(--bo-red);
++  font-size: 14px;
++  font-weight: 950;
++}
++
++.boView-tasks section.taskWorkspace > .managerResubmitPanel .managerResubmitHead span {
++  color: var(--bo-muted);
++  font-size: 11px;
++  line-height: 1.4;
++}
++
++/* Semantic blocks: small radii, no giant floating cards. */
++.boView-tasks section.taskWorkspace > .infoBox,
++.boView-tasks section.taskWorkspace > .powerTaskGrid,
++.boView-tasks section.taskWorkspace > .balanceCorrectionTaskSummary,
++.boView-tasks section.taskWorkspace > .invoiceTaskBrief {
++  margin: 0 0 10px;
++  border: 1px solid var(--bo-line);
++  border-radius: 8px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: none;
++}
++
++.boView-tasks section.taskWorkspace > .infoBox {
++  padding: 12px 13px;
++}
++
++.boView-tasks section.taskWorkspace > .infoBox > strong {
++  display: block;
++  margin-bottom: 4px;
++  color: var(--bo-text);
++  font-size: 12px;
++  font-weight: 900;
++}
++
++.boView-tasks section.taskWorkspace > .infoBox p {
++  margin: 0;
++  color: var(--bo-muted);
++  font-size: 12px;
++  line-height: 1.45;
++}
++
++.boView-tasks section.taskWorkspace > .powerTaskGrid,
++.boView-tasks section.taskWorkspace > .balanceCorrectionTaskSummary,
++.boView-tasks section.taskWorkspace > .invoiceTaskBrief {
++  padding: 11px 12px;
++}
++
++.boView-tasks section.taskWorkspace > .powerTaskGrid {
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 10px;
++}
++
++.boView-tasks section.taskWorkspace > .powerTaskGrid span,
++.boView-tasks section.taskWorkspace > .balanceCorrectionTaskSummary span,
++.boView-tasks section.taskWorkspace > .invoiceTaskBrief span {
++  color: var(--bo-muted);
++  font-size: 10px;
++}
++
++.boView-tasks section.taskWorkspace > .powerTaskGrid b,
++.boView-tasks section.taskWorkspace > .balanceCorrectionTaskSummary b,
++.boView-tasks section.taskWorkspace > .invoiceTaskBrief b {
++  color: var(--bo-text);
++  font-size: 12px;
++  font-weight: 900;
++}
++
++.boView-tasks section.taskWorkspace .field {
++  margin-bottom: 9px;
++}
++
++.boView-tasks section.taskWorkspace .field > span {
++  margin-bottom: 5px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  font-weight: 750;
++}
++
++.boView-tasks section.taskWorkspace input,
++.boView-tasks section.taskWorkspace select,
++.boView-tasks section.taskWorkspace textarea {
++  border-radius: 7px;
++}
++
++.boView-tasks section.taskWorkspace .primary,
++.boView-tasks section.taskWorkspace .secondary {
++  border-radius: 7px;
++}
++
++@media (max-width: 720px) {
++  .boView-tasks section.taskWorkspace > .detailHero {
++    grid-template-columns: minmax(0, 1fr) auto;
++    padding: 14px 11px 12px 15px;
++  }
++
++  .boView-tasks section.taskWorkspace > .detailHero h2 {
++    font-size: 19px;
++  }
++
++  .boView-tasks section.taskWorkspace > .detailHero .statusPill {
++    font-size: 10px;
++    padding: 5px 7px;
++  }
++
++  .boView-tasks .taskContextStrip {
++    grid-template-columns: minmax(0, 1fr);
++    padding: 10px 10px 11px 14px;
++  }
++
++  .boView-tasks .taskContextDeal {
++    grid-template-columns: auto auto minmax(0, 1fr);
++  }
++
++  .boView-tasks .taskContextFacts {
++    grid-column: 1;
++  }
++
++  .boView-tasks .taskContextOpen {
++    grid-column: 1;
++    grid-row: auto;
++    justify-self: start;
++    margin-top: 2px;
++  }
++
++  .boView-tasks section.taskWorkspace > .powerTaskGrid {
++    grid-template-columns: 1fr;
++  }
++}
++
++/* END_PART_V064_L_TASK_WORKSPACE */
++
++/* PART_V064_M_TASK_LIST_A */
++
++/* =========================================================
++   APPROVED TASK LIST — VARIANT A
++   ========================================================= */
++
++.boView-tasks .taskFlatList,
++.boView-tasks .dealList {
++  gap: 7px;
++}
++
++.boView-tasks .taskFlatList .taskCard,
++.boView-tasks .taskCard {
++  position: relative;
++  overflow: hidden;
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 8px 14px;
++  align-items: start;
++  width: 100%;
++  min-height: 106px;
++  border: 1px solid var(--bo-line);
++  border-radius: 9px;
++  background: var(--bo-panel);
++  color: var(--bo-text);
++  box-shadow: var(--bo-shadow);
++  padding: 12px 13px 11px 16px;
++  text-align: left;
++}
++
++.boView-tasks .taskCard::before {
++  content: '';
++  position: absolute;
++  inset: 0 auto 0 0;
++  width: 4px;
++  background: var(--bo-blue);
++}
++
++.boView-tasks .taskCardStatus-new::before {
++  background: var(--bo-gold);
++}
++
++.boView-tasks .taskCardStatus-need_data::before,
++.boView-tasks .taskCardStatus-need-data::before {
++  background: var(--bo-red);
++}
++
++.boView-tasks .taskCardMain {
++  min-width: 0;
++}
++
++.boView-tasks .taskCardTitle {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 7px;
++  align-items: center;
++}
++
++.boView-tasks .taskCardTitle > strong {
++  color: var(--bo-text);
++  font-size: 15px;
++  font-weight: 900;
++  line-height: 1.23;
++}
++
++.boView-tasks .taskClient {
++  display: block;
++  margin-top: 3px;
++  color: var(--bo-muted);
++  font-size: 11px;
++  line-height: 1.35;
++}
++
++/* Main metadata line approved in Variant A */
++.boView-tasks .taskVariantAMeta {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 5px;
++  margin-top: 8px;
++}
++
++.boView-tasks .taskVariantADeal {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: var(--bo-text);
++  font-size: 14px;
++  font-weight: 950;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskVariantADeal::before {
++  content: '■';
++  color: var(--bo-accent);
++  font-size: 8px;
++}
++
++.boView-tasks .taskVariantAPill {
++  display: inline-flex;
++  align-items: center;
++  min-height: 24px;
++  border: 1px solid var(--bo-line);
++  border-radius: 999px;
++  background: var(--bo-panel-2);
++  color: var(--bo-muted);
++  font-size: 10px;
++  font-weight: 800;
++  padding: 4px 8px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskVariantAInvoice,
++.boView-tasks .taskVariantAManager {
++  color: var(--bo-text);
++  font-weight: 900;
++}
++
++.boView-tasks .taskCreated {
++  display: block;
++  margin-top: 7px;
++  color: var(--bo-muted);
++  font-size: 10px;
++  line-height: 1.35;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskState {
++  align-self: start;
++  justify-self: end;
++}
++
++.boView-tasks .taskStatusBadge {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 29px;
++  border: 1px solid var(--bo-line);
++  border-radius: 5px;
++  background: var(--bo-panel-2);
++  color: var(--bo-blue);
++  font-size: 10px;
++  font-weight: 900;
++  padding: 5px 8px;
++  white-space: nowrap;
++}
++
++.boView-tasks .taskStatus-new {
++  color: var(--bo-gold);
++}
++
++.boView-tasks .taskStatus-need_data,
++.boView-tasks .taskStatus-need-data {
++  color: #a38ad0;
++}
++
++/* Existing v064-J metadata is hidden once the approved A metadata exists. */
++.boView-tasks .taskCard:has(.taskVariantAMeta)
++  .taskCardInvoiceMeta {
++  display: none !important;
++}
++
++/* Return reason remains one compact line. */
++.boView-tasks .taskReturnNotice {
++  grid-column: 1 / -1;
++  margin-top: 1px;
++  border-top: 1px solid var(--bo-line);
++  background: transparent;
++}
++
++/* =========================================================
++   DESKTOP NAV — readable, not almost black on black
++   ========================================================= */
++
++@media (min-width: 721px) {
++  .bottomNav,
++  .boMobileNav {
++    left: 50% !important;
++    right: auto !important;
++    bottom: 14px !important;
++    transform: translateX(-50%);
++    width: min(720px, calc(100vw - 40px)) !important;
++    min-height: 56px;
++    display: grid !important;
++    grid-template-columns: repeat(3, 1fr);
++    gap: 4px;
++    padding: 5px !important;
++    border: 1px solid #3e4752 !important;
++    border-radius: 11px !important;
++    background: #1b2026 !important;
++    box-shadow: 0 12px 30px rgba(0,0,0,.32) !important;
++    opacity: 1 !important;
++  }
++
++  .bottomNav button,
++  .boMobileNav button,
++  .boMobileNav a {
++    min-height: 44px !important;
++    border: 0 !important;
++    border-radius: 7px !important;
++    background: transparent !important;
++    color: #aab4be !important;
++    opacity: 1 !important;
++    font-size: 13px !important;
++    font-weight: 850 !important;
++  }
++
++  .bottomNav button.active,
++  .boMobileNav button.active,
++  .boMobileNav a.active {
++    background: #303944 !important;
++    color: #ffffff !important;
++  }
++
++  .bottomNav button:disabled,
++  .boMobileNav button:disabled {
++    color: #6f7b86 !important;
++    opacity: 1 !important;
++  }
++}
++
++@media (max-width: 720px) {
++  .boView-tasks .taskCard {
++    grid-template-columns: minmax(0, 1fr) auto;
++    min-height: 0;
++    gap: 7px 8px;
++    padding: 12px 10px 11px 14px;
++  }
++
++  .boView-tasks .taskCardTitle > strong {
++    font-size: 15px;
++  }
++
++  .boView-tasks .taskVariantAMeta {
++    gap: 5px;
++  }
++
++  .boView-tasks .taskVariantADeal {
++    font-size: 14px;
++  }
++
++  .boView-tasks .taskVariantAPill {
++    max-width: 100%;
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++}
++
++/* END_PART_V064_M_TASK_LIST_A */
++
++/* PART_V064_N1_V5B_POA_ETRN */
++
++.powerSubmitActions {
++  display: grid;
++  grid-template-columns:
++    minmax(0, 1fr)
++    minmax(0, 1fr);
++  gap: 8px;
++}
++
++.powerSubmitActions > button {
++  width: 100%;
++  min-height: 48px;
++}
++
++.powerEtrnAction {
++  display: grid;
++  gap: 8px;
++  margin-top: 10px;
++  padding-top: 10px;
++  border-top:
++    1px solid
++    var(--bo-line, #343437);
++}
++
++.powerEtrnLinked {
++  display: inline-flex;
++  align-items: center;
++  width: max-content;
++  max-width: 100%;
++  min-height: 28px;
++  border:
++    1px solid
++    color-mix(
++      in srgb,
++      var(--bo-green, #78a86b)
++        38%,
++      var(--bo-line, #343437)
++    );
++  border-radius: 5px;
++  background:
++    color-mix(
++      in srgb,
++      var(--bo-green, #78a86b)
++        10%,
++      transparent
++    );
++  color:
++    var(--bo-green, #78a86b);
++  font-size: 11px;
++  font-weight: 900;
++  padding: 5px 8px;
++}
++
++.powerEtrnForm {
++  display: grid;
++  gap: 10px;
++  border:
++    1px solid
++    var(--bo-line, #343437);
++  border-radius: 8px;
++  background:
++    var(--bo-panel, #1d2228);
++  padding: 12px;
++}
++
++.powerEtrnFormHead {
++  display: grid;
++  gap: 3px;
++}
++
++.powerEtrnFormHead strong {
++  font-size: 14px;
++  font-weight: 900;
++}
++
++.powerEtrnFormHead span {
++  color:
++    var(--bo-muted, #9aa3ad);
++  font-size: 11px;
++  line-height: 1.4;
++}
++
++.powerEtrnFormActions {
++  display: grid;
++  grid-template-columns:
++    minmax(0, .7fr)
++    minmax(0, 1.3fr);
++  gap: 8px;
++}
++
++@media (max-width: 720px) {
++  .powerSubmitActions,
++  .powerEtrnFormActions {
++    grid-template-columns: 1fr;
++  }
++}
++
++/* END_PART_V064_N1_V5B_POA_ETRN */
++
++/* PART_V064_N2_ETRN_FIELDS */
++
++.etrnAutoDocs,
++.etrnTaskDocs {
++  display: grid;
++  gap: 7px;
++}
++
++.etrnTaskDocs {
++  margin-bottom: 10px;
++  border: 1px solid var(--bo-line, #343437);
++  border-radius: 8px;
++  background: var(--bo-panel, #1d2228);
++  padding: 11px;
++}
++
++.etrnAutoDocRow {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 10px;
++  align-items: center;
++  min-height: 52px;
++  border: 1px solid var(--bo-line, #343437);
++  border-radius: 7px;
++  background: var(--bo-panel-2, #242a31);
++  padding: 8px 10px;
++}
++
++.etrnAutoDocRow > div {
++  display: grid;
++  gap: 2px;
++  min-width: 0;
++}
++
++.etrnAutoDocRow span {
++  color: var(--bo-muted, #9aa3ad);
++  font-size: 10px;
++  font-weight: 750;
++}
++
++.etrnAutoDocRow strong {
++  overflow: hidden;
++  color: var(--bo-text, #f4f5f7);
++  font-size: 12px;
++  font-weight: 900;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.etrnAutoDocRow a {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 34px;
++  border: 1px solid var(--bo-line, #343437);
++  border-radius: 6px;
++  background: var(--bo-panel, #1d2228);
++  color: var(--bo-text, #f4f5f7);
++  font-size: 11px;
++  font-weight: 850;
++  padding: 6px 9px;
++  text-decoration: none;
++}
++
++.etrnDocMissing {
++  color: var(--bo-red, #d27368);
++  font-size: 10px;
++  font-weight: 850;
++}
++
++/* END_PART_V064_N2_ETRN_FIELDS */
++
++
++/* PART_V064_O1_DEAL_WORKSPACE_C */
++
++.boView-deal.boShell {
++  max-width: 1180px !important;
++}
++
++.dealWorkspaceCPage {
++  gap: 12px;
++}
++
++.dealWorkspaceCLayout {
++  display: grid;
++  grid-template-columns:
++    320px
++    minmax(0, 1fr);
++  gap: 12px;
++  align-items: start;
++}
++
++.dealWorkspaceCSidebar {
++  position: sticky;
++  top: 88px;
++  min-width: 0;
++}
++
++.dealWorkspaceCSideCard {
++  display: grid;
++  gap: 0;
++  border:
++    1px solid
++    var(--bo-line, #d8dde3);
++  border-radius: 12px;
++  background:
++    var(--bo-panel, #fff);
++  padding: 14px;
++  box-shadow:
++    0 8px 22px
++    rgba(0,0,0,.05);
++}
++
++.dealWorkspaceCDealNo {
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 10px;
++  font-weight: 900;
++  letter-spacing: .07em;
++  text-transform: uppercase;
++}
++
++.dealWorkspaceCClient {
++  margin-top: 4px;
++  overflow-wrap: anywhere;
++  font-size: 20px;
++  font-weight: 950;
++  line-height: 1.15;
++}
++
++.dealWorkspaceCAddress {
++  margin-top: 5px;
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 11px;
++  line-height: 1.35;
++}
++
++.dealWorkspaceCPills {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-top: 12px;
++}
++
++.dealWorkspaceCPill {
++  display: inline-flex;
++  align-items: center;
++  min-height: 26px;
++  border:
++    1px solid
++    var(--bo-line, #d8dde3);
++  border-radius: 999px;
++  background:
++    var(--bo-panel-2, #f4f6f8);
++  padding: 4px 8px;
++  font-size: 10px;
++  font-weight: 900;
++}
++
++.dealWorkspaceCPillBlue {
++  color:
++    var(--bo-blue, #5e7f9f);
++}
++
++.dealWorkspaceCPillGreen {
++  color:
++    var(--bo-green, #62885a);
++}
++
++.dealWorkspaceCPillYellow {
++  color:
++    var(--bo-yellow, #9b7830);
++}
++
++.dealWorkspaceCActions {
++  display: grid;
++  gap: 6px;
++  margin-top: 13px;
++}
++
++.dealWorkspaceCActions > button {
++  width: 100%;
++  min-height: 39px;
++  border-radius: 7px;
++  padding: 8px 10px;
++  text-align: left;
++  font-size: 11px;
++}
++
++.dealWorkspaceCSubhead {
++  margin-top: 16px;
++  padding-top: 13px;
++  border-top:
++    1px solid
++    var(--bo-line, #d8dde3);
++  font-size: 11px;
++  font-weight: 950;
++}
++
++.dealWorkspaceCContact {
++  display: grid;
++  gap: 2px;
++  margin-top: 7px;
++}
++
++.dealWorkspaceCContact strong {
++  font-size: 12px;
++}
++
++.dealWorkspaceCContact span {
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 11px;
++}
++
++.dealWorkspaceCFinance {
++  display: grid;
++  margin-top: 5px;
++}
++
++.dealWorkspaceCFinance > div {
++  display: grid;
++  grid-template-columns:
++    minmax(0, 1fr)
++    auto;
++  gap: 10px;
++  align-items: center;
++  min-height: 37px;
++  border-bottom:
++    1px solid
++    var(--bo-line, #d8dde3);
++}
++
++.dealWorkspaceCFinance > div:last-child {
++  border-bottom: 0;
++}
++
++.dealWorkspaceCFinance span {
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 10px;
++}
++
++.dealWorkspaceCFinance b {
++  font-size: 11px;
++  white-space: nowrap;
++}
++
++.dealWorkspaceCMain {
++  display: grid;
++  gap: 12px;
++  min-width: 0;
++}
++
++.dealWorkspaceCAttention {
++  display: grid;
++  gap: 8px;
++  border:
++    1px solid
++    var(--bo-line, #d8dde3);
++  border-radius: 12px;
++  background:
++    var(--bo-panel, #fff);
++  padding: 13px;
++}
++
++.dealWorkspaceCSectionTitle {
++  font-size: 12px;
++  font-weight: 950;
++}
++
++.dealWorkspaceCAttentionList {
++  display: grid;
++  gap: 6px;
++}
++
++.dealWorkspaceCAttentionRow {
++  display: grid;
++  grid-template-columns:
++    minmax(0, 1fr)
++    auto;
++  gap: 10px;
++  align-items: center;
++  border:
++    1px solid
++    var(--bo-line, #d8dde3);
++  border-left:
++    4px solid
++    var(--bo-yellow, #b49247);
++  border-radius: 8px;
++  background:
++    var(--bo-panel-2, #f4f6f8);
++  color: inherit;
++  padding: 9px 10px;
++  text-decoration: none;
++}
++
++.dealWorkspaceCAttentionRow > div {
++  display: grid;
++  gap: 2px;
++  min-width: 0;
++}
++
++.dealWorkspaceCAttentionRow strong {
++  overflow: hidden;
++  font-size: 11px;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.dealWorkspaceCAttentionRow span {
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 10px;
++}
++
++.dealWorkspaceCAttentionRow > b {
++  color:
++    var(--bo-muted, #78828c);
++}
++
++.dealWorkspaceCQuiet {
++  color:
++    var(--bo-muted, #78828c);
++  font-size: 11px;
++}
++
++.dealCAnchor {
++  scroll-margin-top: 92px;
++}
++
++.dealWorkspaceCMain > .dealOverview,
++.dealWorkspaceCMain > .dealIncomingInvoiceCard,
++.dealWorkspaceCMain > .dealInfoBox,
++.dealWorkspaceCMain > .invoiceBlock,
++.dealWorkspaceCMain > .paymentBox,
++.dealWorkspaceCMain > .purchaseBox,
++.dealWorkspaceCMain > .powerBox,
++.dealWorkspaceCMain > .infoBox,
++.dealCAnchor > .paymentBox,
++.dealCAnchor > .purchaseBox,
++.dealCAnchor > .powerBox,
++.dealCAnchor > .invoiceBlock {
++  margin: 0;
++}
++
++.dealWorkspaceCMain .historyList {
++  margin-top: 8px;
++}
++
++.dealWorkspaceCMain .historyList > div {
++  grid-template-columns:
++    115px
++    minmax(0, 1fr);
++}
++
++@media (max-width: 820px) {
++  .boView-deal.boShell {
++    max-width: 760px !important;
++  }
++
++  .dealWorkspaceCLayout {
++    grid-template-columns: 1fr;
++  }
++
++  .dealWorkspaceCSidebar {
++    position: static;
++  }
++
++  .dealWorkspaceCSideCard {
++    padding: 12px;
++  }
++
++  .dealWorkspaceCActions {
++    grid-template-columns:
++      repeat(2, minmax(0, 1fr));
++  }
++
++  .dealWorkspaceCActions > button {
++    text-align: center;
++  }
++}
++
++@media (max-width: 520px) {
++  .dealWorkspaceCActions {
++    grid-template-columns: 1fr;
++  }
++
++  .dealWorkspaceCClient {
++    font-size: 18px;
++  }
++
++  .dealWorkspaceCMain .historyList > div {
++    grid-template-columns: 1fr;
++  }
++}
++
++/* END_PART_V064_O1_DEAL_WORKSPACE_C */

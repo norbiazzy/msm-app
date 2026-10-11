@@ -1,0 +1,322 @@
+/* PART_V064_N1_V5B_POA_ETRN_PANEL */
+import {
+  useMemo,
+  useState,
+} from 'react';
+
+import {
+  createEtrnTask,
+} from './api';
+
+import {
+  TaskStructuredFields,
+  type TaskDetails,
+} from './TaskStructuredFields';
+
+import type {
+  CurrentUser,
+  Deal,
+} from './types';
+
+function etrnStatusLabel(
+  status: string,
+) {
+  return ({
+    NEW: 'новая',
+    IN_PROGRESS: 'в работе',
+    NEED_DATA: 'нужно исправить',
+    DONE: 'готова',
+    CANCELLED: 'отменена',
+  } as Record<string, string>)[status] || status;
+}
+
+export function PoaEtrnPanel({
+  deal,
+  user,
+  task,
+  onChanged,
+}: {
+  deal: Deal;
+  user: CurrentUser;
+  task: any;
+  onChanged:
+    () =>
+      void |
+      Promise<void>;
+}) {
+  const payload =
+    (
+      task?.payload &&
+      typeof task.payload ===
+        'object'
+    )
+      ? task.payload as
+          Record<
+            string,
+            unknown
+          >
+      : {};
+
+  const poaDetails =
+    (
+      task?.details &&
+      typeof task.details ===
+        'object'
+    )
+      ? task.details as
+          Record<
+            string,
+            unknown
+          >
+      : {};
+
+  const linkedEtrn =
+    useMemo(
+      () =>
+        (
+          (
+            deal.tasks ||
+            []
+          ) as any[]
+        ).find(
+          (candidate) => {
+            if (
+              candidate.type !==
+              'ETRN'
+            ) {
+              return false;
+            }
+
+            const candidatePayload =
+              (
+                candidate.payload &&
+                typeof candidate.payload ===
+                  'object'
+              )
+                ? candidate.payload as
+                    Record<
+                      string,
+                      unknown
+                    >
+                : {};
+
+            return String(
+              candidatePayload
+                .poaTaskId ||
+              ''
+            ) === task.id;
+          }
+        ),
+      [
+        deal.tasks,
+        task.id,
+      ],
+    );
+
+  const [
+    open,
+    setOpen,
+  ] = useState(false);
+
+  const [
+    details,
+    setDetails,
+  ] = useState<TaskDetails>(
+    {}
+  );
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+  if (
+    user.role ===
+      'ACCOUNTANT' ||
+    task.status !==
+      'DONE'
+  ) {
+    return null;
+  }
+
+  if (linkedEtrn) {
+    return (
+      <div className="powerEtrnAction">
+        <span className="powerEtrnLinked">
+          ЭТРН · {
+            etrnStatusLabel(
+              linkedEtrn.status
+            )
+          }
+        </span>
+      </div>
+    );
+  }
+
+  function openForm() {
+    const deliveryAddresses =
+      Array.isArray(
+        deal.deliveryAddresses
+      )
+        ? deal.deliveryAddresses
+        : [];
+
+    setDetails({
+      poaNumber:
+        String(
+          poaDetails.poaNumber ||
+          ''
+        ),
+      buyer:
+        deal.clientName,
+      unloadingAddress:
+        String(
+          deliveryAddresses[0] ||
+          ''
+        ),
+      cargo:
+        String(
+          payload.goodsDescription ||
+          ''
+        ),
+    });
+
+    setError('');
+    setOpen(true);
+  }
+
+  async function submit() {
+    const poaNumber =
+      String(
+        details.poaNumber ||
+        ''
+      ).trim();
+
+    if (!poaNumber) {
+      setError(
+        'Укажите № доверенности.'
+      );
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+      await createEtrnTask({
+        dealId:
+          deal.id,
+        actorId:
+          user.id,
+        urgent:
+          Boolean(
+            task.urgent
+          ),
+        poaTaskId:
+          task.id,
+        supplierName:
+          String(
+            payload.supplierName ||
+            ''
+          ) ||
+          undefined,
+        details,
+      });
+
+      setOpen(false);
+      await onChanged();
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const requestedTogether =
+    Boolean(
+      payload.requestEtrn
+    );
+
+  return (
+    <div className="powerEtrnAction">
+      {!open ? (
+        <button
+          type="button"
+          className={
+            requestedTogether
+              ? 'primary wide'
+              : 'secondary wide'
+          }
+          onClick={openForm}
+        >
+          {requestedTogether
+            ? 'Заполнить данные ЭТРН'
+            : '+ Запросить ЭТРН'}
+        </button>
+      ) : (
+        <div className="powerEtrnForm">
+          <div className="powerEtrnFormHead">
+            <strong>
+              Данные ЭТРН
+            </strong>
+
+            <span>
+              № доверенности и данные сделки
+              уже подставлены. Заполни перевозку
+              и отправь бухгалтерии.
+            </span>
+          </div>
+
+          <TaskStructuredFields
+            taskType="ETRN"
+            value={details}
+            onChange={setDetails}
+          />
+
+          <div className="powerEtrnFormActions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={saving}
+              onClick={() =>
+                setOpen(false)
+              }
+            >
+              Отмена
+            </button>
+
+            <button
+              type="button"
+              className="primary"
+              disabled={saving}
+              onClick={() => {
+                void submit();
+              }}
+            >
+              {saving
+                ? 'Отправляем…'
+                : 'Отправить ЭТРН бухгалтерии'}
+            </button>
+          </div>
+
+          {error && (
+            <div className="error">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* END_PART_V064_N1_V5B_POA_ETRN_PANEL */

@@ -1,0 +1,40 @@
+v064-O2.2 H1 — исправление сборки PurchasesBlock
+
+Причина ошибки TS2304:
+
+O2.2 автоматически добавил:
+
+dealId:
+  deal.id
+
+во все startBackgroundUploadJob внутри PurchasesBlock.tsx.
+
+Но два этих вызова находятся не в основном PurchasesBlock,
+а внутри SupplierPaymentTask. В этом компоненте переменной deal нет.
+Там уже вся работа со сделкой идёт через:
+
+task.deal.id
+
+Поэтому исправляем ТОЛЬКО два места внутри SupplierPaymentTask:
+
+deal.id -> task.deal.id
+
+Никакую другую логику O2.2 не меняем.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o22-h1-supplier-task-deal-id.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o22-h1-supplier-task-deal-id.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o22-h1-supplier-task-deal-id.cjs

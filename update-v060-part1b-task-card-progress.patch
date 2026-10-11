@@ -1,0 +1,513 @@
+diff --git a/frontend/src/backgroundUploads.tsx b/frontend/src/backgroundUploads.tsx
+--- a/frontend/src/backgroundUploads.tsx
++++ b/frontend/src/backgroundUploads.tsx
+@@ -4,6 +4,8 @@
+   totalFiles: number;
+ 
+   error?: string;
++
++  retry?: () => void;
+ };
+ 
+ 
+@@ -33,6 +35,18 @@
+     options.files.length;
+ 
+ 
++  const uploadedFiles =
++    new Map<
++      string,
++      {
++        id: string;
++      }
++    >();
++
++
++  let running = false;
++
++
+   jobs = [
+     {
+       id,
+@@ -64,6 +78,10 @@
+         0,
+ 
+       totalFiles,
++
++      retry: () => {
++        void execute();
++      },
+     },
+ 
+     ...jobs,
+@@ -73,8 +91,38 @@
+   emit();
+ 
+ 
+-  void (
+-    async () => {
++  async function execute() {
++
++    if (running) {
++      return;
++    }
++
++
++    running = true;
++
++
++    updateJob(
++      id,
++      {
++        status:
++          'RUNNING',
++
++        progress:
++          totalFiles
++            ? 0
++            : 15,
++
++        currentFile:
++          undefined,
++
++        completedFiles:
++          0,
++
++        error:
++          undefined,
++      }
++    );
++
+ 
+       try {
+ 
+@@ -110,6 +158,57 @@
+               total,
+             ) => {
+ 
++              const cacheKey =
++                [
++                  dealId,
++                  category,
++                  String(index),
++                  file.name,
++                  String(file.size),
++                  String(
++                    file.lastModified
++                  ),
++                ].join('|');
++
++
++              const cached =
++                uploadedFiles.get(
++                  cacheKey
++                );
++
++
++              if (cached) {
++
++                updateJob(
++                  id,
++                  {
++                    currentFile:
++                      file.name,
++
++                    completedFiles:
++                      index + 1,
++
++                    progress:
++                      Math.round(
++                        (
++                          (
++                            index + 1
++                          ) /
++                          Math.max(
++                            total,
++                            1
++                          )
++                        ) *
++                        90
++                      ),
++                  }
++                );
++
++
++                return cached;
++              }
++
++
+               updateJob(
+                 id,
+                 {
+@@ -159,6 +258,12 @@
+                     );
+                   }
+                 );
++
++
++              uploadedFiles.set(
++                cacheKey,
++                uploaded
++              );
+ 
+ 
+               updateJob(
+@@ -203,9 +308,14 @@
+               undefined,
+           }
+         );
++      } finally {
++
++        running = false;
+       }
+     }
+-  )();
++
++
++  void execute();
+ 
+ 
+   return id;
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -2,7 +2,6 @@
+   RecentActivityPanel,
+ } from './RecentActivityPanel';
+ import {
+-  BackgroundUploadList,
+   type BackgroundUploadJob,
+   startBackgroundUploadJob,
+   useBackgroundUploads,
+@@ -41,25 +40,20 @@
+         );
+ 
+ 
+-
+-    const isBackgroundUploading =
+-      backgroundUploads.some(
++    const uploadJob =
++      backgroundUploads.find(
+         (job) =>
+-          job.taskId === task.id &&
+-          job.status === 'RUNNING'
++          job.taskId === task.id
+       );
+ 
+ 
+-    if (
+-      isBackgroundUploading
+-    ) {
+-      return null;
+-    }
+-
+     return (
+ 
+-      <button
++      <div
+         key={task.id}
++
++        role="button"
++        tabIndex={0}
+ 
+         className={
+           'taskCard taskCardStatus-' +
+@@ -74,12 +68,35 @@
+             completedTask
+               ? ' taskCardCompleted'
+               : ''
++          ) +
++          (
++            uploadJob
++              ? ' taskCardWithUpload'
++              : ''
+           )
+         }
+ 
+         onClick={() =>
+           openTask(task)
+         }
++
++        onKeyDown={(event) => {
++
++          if (
++            event.target !==
++            event.currentTarget
++          ) {
++            return;
++          }
++
++          if (
++            event.key === 'Enter' ||
++            event.key === ' '
++          ) {
++            event.preventDefault();
++            openTask(task);
++          }
++        }}
+       >
+ 
+         <div className="taskCardMain">
+@@ -161,7 +178,119 @@
+ 
+         </div>
+ 
+-      </button>
++
++        {uploadJob && (
++
++          <div
++            className={
++              'taskCardUploadState taskCardUpload-' +
++              uploadJob.status.toLowerCase()
++            }
++
++            onClick={(event) =>
++              event.stopPropagation()
++            }
++          >
++
++            <div className="taskCardUploadTop">
++
++              <strong>
++                {
++                  uploadJob.status === 'SUCCESS'
++                    ? '✓ Отправлено'
++                    : uploadJob.status === 'ERROR'
++                      ? 'Ошибка отправки'
++                      : uploadJob.title
++                }
++              </strong>
++
++              <b>
++                {uploadJob.progress}%
++              </b>
++
++            </div>
++
++
++            <div className="taskCardUploadBar">
++
++              <span
++                style={{
++                  width:
++                    uploadJob.progress + '%',
++                }}
++              />
++
++            </div>
++
++
++            {uploadJob.status === 'RUNNING' && (
++
++              <span className="taskCardUploadMeta">
++                {
++                  uploadJob.totalFiles > 0 &&
++                  uploadJob.completedFiles <
++                    uploadJob.totalFiles
++                    ? 'Загрузка файлов ' +
++                      Math.min(
++                        uploadJob.completedFiles + 1,
++                        uploadJob.totalFiles
++                      ) +
++                      ' из ' +
++                      uploadJob.totalFiles +
++                      ' · ' +
++                      uploadJob.progress +
++                      '%'
++                    : 'Отправляем данные…'
++                }
++              </span>
++
++            )}
++
++
++            {uploadJob.status === 'SUCCESS' && (
++
++              <span className="taskCardUploadMeta">
++                {
++                  uploadJob.successTitle ||
++                  'Готово'
++                }
++              </span>
++
++            )}
++
++
++            {uploadJob.status === 'ERROR' && (
++
++              <div className="taskCardUploadError">
++
++                <span className="taskCardUploadMeta">
++                  {
++                    uploadJob.error ||
++                    'Не удалось отправить'
++                  }
++                </span>
++
++                <button
++                  type="button"
++                  className="secondary compactButton"
++
++                  onClick={(event) => {
++                    event.stopPropagation();
++                    uploadJob.retry?.();
++                  }}
++                >
++                  Повторить
++                </button>
++
++              </div>
++
++            )}
++
++          </div>
++
++        )}
++
++      </div>
+ 
+     );
+   }
+@@ -189,8 +318,4 @@
+ 
+     <section className="content">
+ 
+-      <BackgroundUploadList
+-        jobs={backgroundUploads}
+-      />
+-
+       <div className="sectionHead">
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -8,4 +8,129 @@
+   }
+ }
+ 
++/* MSM task card upload progress v0.6.0 part 1B */
++
++.taskCard[role='button'] {
++  cursor: pointer;
++}
++
++.taskCard[role='button']:focus-visible {
++  outline: 2px solid #2563eb;
++  outline-offset: 2px;
++}
++
++.taskCardWithUpload {
++  flex-wrap: wrap;
++  align-items: flex-start;
++}
++
++.taskCardWithUpload .taskCardMain {
++  flex: 1 1 240px;
++}
++
++.taskCardWithUpload .taskState {
++  flex: 0 0 auto;
++}
++
++.taskCardUploadState {
++  flex: 0 0 100%;
++  display: grid;
++  gap: 7px;
++  margin-top: 3px;
++  padding-top: 10px;
++  border-top: 1px solid #e7e5e4;
++  cursor: default;
++}
++
++.taskCardUploadTop {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.taskCardUploadTop strong {
++  min-width: 0;
++  font-size: 12px;
++}
++
++.taskCardUploadTop b {
++  flex: 0 0 auto;
++  color: #2563eb;
++  font-size: 11px;
++}
++
++.taskCardUploadBar {
++  height: 6px;
++  overflow: hidden;
++  border-radius: 999px;
++  background: #dbeafe;
++}
++
++.taskCardUploadBar > span {
++  display: block;
++  height: 100%;
++  margin: 0 !important;
++  border-radius: inherit;
++  background: #3b82f6;
++  transition: width 180ms ease;
++}
++
++.taskCardUploadMeta {
++  margin: 0 !important;
++  color: #64748b !important;
++  font-size: 10px !important;
++  overflow-wrap: anywhere;
++}
++
++.taskCardUpload-success .taskCardUploadBar > span {
++  background: #22c55e;
++}
++
++.taskCardUpload-success .taskCardUploadTop b {
++  color: #15803d;
++}
++
++.taskCardUpload-error .taskCardUploadBar > span {
++  background: #ef4444;
++}
++
++.taskCardUpload-error .taskCardUploadTop b {
++  color: #b91c1c;
++}
++
++.taskCardUploadError {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.taskCardUploadError .taskCardUploadMeta {
++  color: #b91c1c !important;
++}
++
++html[data-theme='dark'] .taskCardUploadState {
++  border-color: #343437;
++}
++
++html[data-theme='dark'] .taskCardUploadBar {
++  background: #303846;
++}
++
++html[data-theme='dark'] .taskCardUploadMeta {
++  color: #a8a29e !important;
++}
++
++@media (max-width: 520px) {
++  .taskCardUploadError {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .taskCardUploadError > button {
++    width: 100%;
++  }
++}
++
+ /* MSM deal layout v0.5.5 */

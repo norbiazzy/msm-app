@@ -1,0 +1,276 @@
+export type TaskDetails =
+  Record<string, unknown>;
+
+
+function stringValue(
+  value: unknown,
+) {
+  return typeof value === 'string'
+    ? value
+    : '';
+}
+
+
+function Field({
+  title,
+  value,
+  onChange,
+  readOnly,
+  multiline = false,
+  type = 'text',
+}: {
+  title: string;
+  value: string;
+  onChange?: (value: string) => void;
+  readOnly: boolean;
+  multiline?: boolean;
+  type?: string;
+}) {
+
+  if (readOnly) {
+    return (
+      <div className="taskStructuredReadRow">
+        <span>{title}</span>
+        <b>{value || '—'}</b>
+      </div>
+    );
+  }
+
+  return (
+    <label className="field">
+      <span>{title}</span>
+
+      {multiline ? (
+        <textarea
+          rows={3}
+          value={value}
+          onChange={(event) =>
+            onChange?.(
+              event.target.value
+            )
+          }
+        />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(event) =>
+            onChange?.(
+              event.target.value
+            )
+          }
+        />
+      )}
+    </label>
+  );
+}
+
+
+export function TaskStructuredFields({
+  taskType,
+  value,
+  onChange,
+  readOnly = false,
+}: {
+  taskType: string;
+  value?: TaskDetails;
+  onChange?: (
+    value: TaskDetails
+  ) => void;
+  readOnly?: boolean;
+}) {
+
+  const details =
+    value || {};
+
+
+  function set(
+    key: string,
+    nextValue: string,
+  ) {
+    onChange?.({
+      ...details,
+      [key]:
+        nextValue,
+    });
+  }
+
+
+  /* PART_V062_POA_FIELDS */
+  if (
+    taskType ===
+    'POWER_OF_ATTORNEY'
+  ) {
+    return (
+      <div className={
+        readOnly
+          ? 'taskStructuredRead'
+          : 'taskStructuredEdit'
+      }>
+        <div className="taskStructuredTitle">
+          Данные доверенности
+        </div>
+
+        <Field
+          title="Поставщик / завод"
+          value={stringValue(
+            details.supplierOrFactory
+          )}
+          readOnly={readOnly}
+          onChange={(next) =>
+            set(
+              'supplierOrFactory',
+              next
+            )
+          }
+        />
+
+        <Field
+          title="На кого доверенность"
+          value={stringValue(
+            details.attorneyPerson
+          )}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) =>
+            set(
+              'attorneyPerson',
+              next
+            )
+          }
+        />
+
+        <Field
+          title="Что получаем"
+          value={stringValue(
+            details.items
+          )}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) =>
+            set(
+              'items',
+              next
+            )
+          }
+        />
+      </div>
+    );
+  }
+
+
+  if (
+    taskType ===
+    'ETRN'
+  ) {
+    return (
+      <div className={
+        readOnly
+          ? 'taskStructuredRead'
+          : 'taskStructuredEdit'
+      }>
+        <div className="taskStructuredTitle">
+          Данные ЭТРН
+        </div>
+
+        <Field
+          title="№ доверенности"
+          value={stringValue(details.poaNumber)}
+          readOnly={readOnly}
+          onChange={(next) => set('poaNumber', next)}
+        />
+
+        <Field
+          title="Покупатель"
+          value={stringValue(details.buyer)}
+          readOnly={readOnly}
+          onChange={(next) => set('buyer', next)}
+        />
+
+        <Field
+          title="Перевозчик"
+          value={stringValue(details.carrier)}
+          readOnly={readOnly}
+          onChange={(next) => set('carrier', next)}
+        />
+
+        <Field
+          title="Контакты перевозчика"
+          value={stringValue(details.carrierContact)}
+          readOnly={readOnly}
+          onChange={(next) => set('carrierContact', next)}
+        />
+
+        <Field
+          title="Логист"
+          value={stringValue(details.logistician)}
+          readOnly={readOnly}
+          onChange={(next) => set('logistician', next)}
+        />
+
+        <Field
+          title="Телефон логиста"
+          value={stringValue(details.logisticianPhone)}
+          readOnly={readOnly}
+          onChange={(next) => set('logisticianPhone', next)}
+        />
+
+        <Field
+          title="Водитель"
+          value={stringValue(details.driver)}
+          readOnly={readOnly}
+          onChange={(next) => set('driver', next)}
+        />
+
+        <Field
+          title="Машина"
+          value={stringValue(details.vehicle)}
+          readOnly={readOnly}
+          onChange={(next) => set('vehicle', next)}
+        />
+
+        <Field
+          title="Прицеп"
+          value={stringValue(details.trailer)}
+          readOnly={readOnly}
+          onChange={(next) => set('trailer', next)}
+        />
+
+        <Field
+          title="Адрес погрузки"
+          value={stringValue(details.loadingAddress)}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) => set('loadingAddress', next)}
+        />
+
+        <Field
+          title="Адрес выгрузки"
+          value={stringValue(details.unloadingAddress)}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) => set('unloadingAddress', next)}
+        />
+
+        <Field
+          title="Дата перевозки"
+          type="date"
+          value={stringValue(details.transportDate)}
+          readOnly={readOnly}
+          onChange={(next) => set('transportDate', next)}
+        />
+
+        <Field
+          title="Груз / материал"
+          value={stringValue(details.cargo)}
+          readOnly={readOnly}
+          multiline
+          onChange={(next) => set('cargo', next)}
+        />
+      </div>
+    );
+  }
+
+
+  return null;
+}

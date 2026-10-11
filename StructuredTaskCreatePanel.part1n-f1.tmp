@@ -1,0 +1,359 @@
+import {
+  useState,
+} from 'react';
+
+import {
+  createStructuredTask,
+} from './api';
+
+import {
+  startBackgroundUploadJob,
+} from './backgroundUploads';
+
+import {
+  MultiFilePicker,
+} from './MultiFilePicker';
+
+import {
+  TaskStructuredFields,
+  type TaskDetails,
+} from './TaskStructuredFields';
+
+
+type StructuredTaskType =
+  | 'POWER_OF_ATTORNEY'
+  | 'ETRN';
+
+
+function titleForType(
+  type: StructuredTaskType,
+) {
+  return type ===
+    'POWER_OF_ATTORNEY'
+    ? 'Доверенность'
+    : 'ЭТРН';
+}
+
+
+export function StructuredTaskCreatePanel({
+  dealId,
+  actorId,
+}: {
+  dealId: string;
+  actorId: string;
+}) {
+
+  const [
+    type,
+    setType,
+  ] = useState<
+    StructuredTaskType | null
+  >(null);
+
+  const [
+    details,
+    setDetails,
+  ] = useState<TaskDetails>({});
+
+  const [
+    description,
+    setDescription,
+  ] = useState('');
+
+  const [
+    urgent,
+    setUrgent,
+  ] = useState(false);
+
+  const [
+    files,
+    setFiles,
+  ] = useState<File[]>([]);
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+
+  function reset(
+    nextType:
+      StructuredTaskType | null,
+  ) {
+    setType(nextType);
+    setDetails({});
+    setDescription('');
+    setUrgent(false);
+    setFiles([]);
+    setError('');
+  }
+
+
+  async function submit() {
+
+    if (!type) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      const task =
+        await createStructuredTask({
+          dealId,
+          actorId,
+          type,
+          details,
+          description:
+            description.trim() ||
+            undefined,
+          urgent,
+        });
+
+
+      const filesToUpload =
+        [...files];
+
+
+      if (
+        filesToUpload.length > 0
+      ) {
+
+        startBackgroundUploadJob({
+          taskId:
+            task.id,
+          dealId,
+
+          title:
+            type ===
+              'POWER_OF_ATTORNEY'
+              ? 'Отправляем доверенность'
+              : 'Отправляем ЭТРН',
+
+          successTitle:
+            'Задача отправлена бухгалтерии',
+
+          files:
+            filesToUpload,
+
+          run:
+            async ({
+              upload,
+              setProgress,
+            }) => {
+
+              for (
+                let index = 0;
+                index <
+                  filesToUpload.length;
+                index++
+              ) {
+
+                await upload(
+                  dealId,
+                  filesToUpload[index],
+                  'TASK_ATTACHMENT_' +
+                    task.id,
+                  index,
+                  filesToUpload.length,
+                );
+              }
+
+              setProgress(99);
+            },
+        });
+      }
+
+
+      window.location.hash =
+        '#tasks';
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+      setSaving(false);
+    }
+  }
+
+
+  return (
+
+    <div className="structuredTaskCreate">
+
+      <div className="structuredTaskCreateHead">
+
+        <div>
+          <strong>
+            Документы и логистика
+          </strong>
+
+          <span>
+            Создавайте задачи сразу
+            с заполненными данными
+          </span>
+        </div>
+
+      </div>
+
+
+      {!type ? (
+
+        <div className="structuredTaskButtons">
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              reset(
+                'POWER_OF_ATTORNEY'
+              )
+            }
+          >
+            + Доверенность
+          </button>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              reset(
+                'ETRN'
+              )
+            }
+          >
+            + ЭТРН
+          </button>
+
+        </div>
+
+      ) : (
+
+        <div className="structuredTaskForm">
+
+          <div className="structuredTaskFormTop">
+
+            <strong>
+              {titleForType(type)}
+            </strong>
+
+            <button
+              type="button"
+              className="secondary compactButton"
+              disabled={saving}
+              onClick={() =>
+                reset(null)
+              }
+            >
+              Закрыть
+            </button>
+
+          </div>
+
+
+          <TaskStructuredFields
+            taskType={type}
+            value={details}
+            onChange={setDetails}
+          />
+
+
+          <label className="field">
+
+            <span>
+              Общий комментарий
+            </span>
+
+            <textarea
+              rows={3}
+              value={description}
+              disabled={saving}
+              onChange={(event) =>
+                setDescription(
+                  event.target.value
+                )
+              }
+            />
+
+          </label>
+
+
+          <div className="field">
+
+            <span>
+              Документы
+            </span>
+
+            <MultiFilePicker
+              files={files}
+              onChange={setFiles}
+              title="+ Прикрепить документы"
+            />
+
+          </div>
+
+
+          <label className="urgentToggle">
+
+            <input
+              type="checkbox"
+              checked={urgent}
+              disabled={saving}
+              onChange={(event) =>
+                setUrgent(
+                  event.target.checked
+                )
+              }
+            />
+
+            <span>
+              Срочно
+            </span>
+
+          </label>
+
+
+          {error && (
+
+            <div className="error">
+              {error}
+            </div>
+
+          )}
+
+
+          <button
+            type="button"
+            className="primary wide"
+            disabled={saving}
+            onClick={() =>
+              void submit()
+            }
+          >
+            {
+              saving
+                ? 'Создаём задачу…'
+                : 'Отправить бухгалтерии'
+            }
+          </button>
+
+        </div>
+
+      )}
+
+    </div>
+  );
+}

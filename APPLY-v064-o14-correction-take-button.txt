@@ -1,0 +1,34 @@
+v064-O1.4 — вернуть «В работу» в задачу корректировки счёта
+
+Проблема:
+задача CORRECT_CLIENT_INVOICE имеет статус NEW,
+функция take() уже существует и переводит её в IN_PROGRESS,
+но кнопка в JSX не отображается.
+
+Исправление:
+- для CORRECT_CLIENT_INVOICE + NEW показывается кнопка «В работу»;
+- кнопка использует существующий take();
+- «Вернуть менеджеру» сохраняется;
+- backend не меняется;
+- после перехода в IN_PROGRESS продолжает работать существующая форма корректировки.
+
+Меняется только:
+frontend/src/App.tsx
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o14-correction-take-button.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o14-correction-take-button.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o14-correction-take-button.cjs

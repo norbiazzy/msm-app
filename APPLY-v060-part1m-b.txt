@@ -1,0 +1,30 @@
+v0.6.0 Part 1M-B — возврат задачи «Доверенность»
+
+Требует установленный Part 1M-A:
+frontend/src/ReturnToManagerPanel.tsx
+
+Что делает:
+- подключает ReturnToManagerPanel в App.tsx;
+- показывает «Вернуть менеджеру» только для task.type POWER_OF_ATTORNEY;
+- доступно при NEW и IN_PROGRESS;
+- после возврата используется общий backend Part 1L;
+- создаётся НЕ новая задача, а возвращается текущая;
+- данные задачи и вложения не очищаются;
+- остальные типы задач не меняются.
+
+Распаковать ZIP в:
+D:\job\it\msm-app
+
+Проверка:
+node .\apply-v060-part1m-b-power-of-attorney-return.cjs --check
+
+Если всё OK:
+node .\apply-v060-part1m-b-power-of-attorney-return.cjs
+
+Затем:
+git diff --check
+cd .\frontend
+npm run build
+
+Следующий шаг:
+Part 1M-C — тот же возврат для ETRN.

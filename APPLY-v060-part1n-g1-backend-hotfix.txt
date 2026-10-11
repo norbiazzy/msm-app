@@ -1,0 +1,40 @@
+v0.6.0 Part 1N-G1 backend hotfix
+
+Исправляет ошибку TypeScript:
+
+src/tasks/tasks.service.ts:201
+TS1109: Expression expected
+const invoiceTaskDeal =
+
+Причина:
+предыдущий установщик вставил блок invoiceTaskDeal между:
+
+const updated =
+
+и
+
+await tx.task.update(...)
+
+Hotfix:
+- выносит invoiceTaskDeal перед const updated;
+- сохраняет ту же task;
+- сохраняет assigneeId = managerId сделки;
+- frontend не меняет;
+- Prisma migration не нужна.
+
+Установка:
+1. Распаковать в:
+D:\job\it\msm-app
+
+2. Проверка:
+node .\apply-v060-part1n-g1-backend-hotfix.cjs --check
+
+3. Если OK:
+node .\apply-v060-part1n-g1-backend-hotfix.cjs
+
+4. Затем:
+git diff --check
+
+5. Backend:
+cd .\backend
+npm run build

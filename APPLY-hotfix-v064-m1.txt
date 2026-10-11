@@ -1,0 +1,19 @@
+HOTFIX v064-M1
+
+Исправляет только повреждённый JSX карточки задачи после v064-M.
+Не откатывает backend, стили или остальные патчи.
+
+Команды:
+
+cd D:\job\it\msm-app
+node .\apply-hotfix-v064-m1-task-card-jsx.cjs --check
+node .\apply-hotfix-v064-m1-task-card-jsx.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+После успешной сборки:
+cd ..
+node .\audit-hotfix-v064-m1-task-card-jsx.cjs

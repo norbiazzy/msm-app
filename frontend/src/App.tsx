@@ -1,8 +1,12 @@
+import { EtrnSourceDocuments } from './EtrnSourceDocuments';
+import { TaskContextStrip } from './TaskContextStrip';
 import {
   updateDealInfo,
   updateShipmentDate,
   updateSupplierPurchase,
 } from './api';
+import { BlockOfficeHome } from './BlockOfficeHome';
+import { BlockOfficeMobileNav } from './BlockOfficeMobileNav';
 
 import {
   MultiFilePicker,
@@ -17,11 +21,21 @@ import {
   RecentActivityPanel,
 } from './RecentActivityPanel';
 import {
-  BackgroundUploadList,
   type BackgroundUploadJob,
   startBackgroundUploadJob,
   useBackgroundUploads,
 } from './backgroundUploads';
+import {
+  clearInvoiceTaskDraft,
+  loadInvoiceTaskDraftFiles,
+  readInvoiceTaskDraftFields,
+  saveInvoiceTaskDraftFields,
+  saveInvoiceTaskDraftFiles,
+} from './invoiceTaskDraft';
+import {
+  resumePendingInvoiceSubmissions,
+  startInvoiceSubmission,
+} from './invoiceSubmissionQueue';
 
 import {
   PurchasesBlock,
@@ -55,6 +69,23 @@ import {
   type Task,
 } from './api';
 import type { ClientPaymentMethod, CurrentUser, Deal, Invoice, PaymentStatus, SellerType } from './types';
+
+import {
+  ReturnToManagerPanel,
+} from './ReturnToManagerPanel';
+
+import {
+  ManagerResubmitPanel,
+} from './ManagerResubmitPanel';
+
+import {
+  TaskStructuredFields,
+} from './TaskStructuredFields';
+
+import {
+  InvoiceRequestDataCard,
+  InvoiceRequestManagerRepair,
+} from './InvoiceRequestTaskPanel';
 
 const sellerLabels: Record<SellerType, string> = { ST: 'СТ', MSM: 'МСМ', IP: 'ИП' };
 type View = 'home' | 'new' | 'tasks' | 'deal';
@@ -178,6 +209,15 @@ function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    void resumePendingInvoiceSubmissions(
+      user.id
+    );
+  }, [user?.id]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -200,7 +240,7 @@ function App() {
   const title = view === 'new' ? 'Новый запрос на счёт' : view === 'tasks' ? 'Задачи' : view === 'deal' ? 'Сделка' : 'Мои сделки';
 
   return (
-    <main className="shell">
+    <main className={'shell boShell boView-' + view}>
       <header className="topbar">
         <div><div className="eyebrow">МСМ · Telegram Mini App</div><h1>{title}</h1></div>
         <div className="topbarActions">
@@ -210,7 +250,7 @@ function App() {
       </header>
 
       {view === 'home' ? (
-        <Home
+        <BlockOfficeHome
           deals={deals}
           onNew={() => navigate('new')}
           onOpen={(id) => navigate('deal', id)}
@@ -231,8 +271,11 @@ function App() {
           user={user}
           onCancel={() => navigate('home')}
           onCreated={async () => {
-            await reload();
+            // PART_V064_O21_V2_DEAL_UPLOAD_VISIBLE_IMMEDIATELY
+            // Сначала открываем список сделок:
+            // progress становится виден сразу.
             navigate('home');
+            await reload();
           }}
         />
       )}
@@ -242,6 +285,8 @@ function App() {
         <button className={view === 'tasks' ? 'active' : ''} onClick={() => navigate('tasks')}>Задачи</button>
         <button disabled>Месяц</button>
       </nav>
+    
+      <BlockOfficeMobileNav />
     </main>
   );
 }
@@ -491,7 +536,28 @@ function Home({
     useBackgroundUploads();
 
 
-  const active =
+  
+
+  // PART_V064_O24_DEAL_LIST_UPLOAD_BINDING
+  const dealUploadJobFor =
+    (dealId: string) =>
+      backgroundUploads.find(
+        (job) =>
+          job.dealId === dealId &&
+          (
+            job.scope === 'DEAL' ||
+            (
+              !job.taskId &&
+              (
+                !job.scope ||
+                job.scope === 'TASK'
+              )
+            )
+          )
+      );
+
+  // PART_V064_O25_DEAL_LIST_PROGRESS_FORCE_VISIBLE
+const active =
     useMemo(
       () =>
         deals
@@ -514,6 +580,24 @@ function Home({
               )
           ),
       [deals]
+    );
+
+
+  // PART_V064_O21_V2_DEAL_UPLOAD_VISIBLE_IMMEDIATELY
+  // Пока серверный reload ещё не вернул новую ЗК,
+  // показываем её upload job как временную карточку.
+  const pendingDealUploads =
+    backgroundUploads.filter(
+      (job) =>
+        Boolean(job.dealId) &&
+        (
+          !job.scope ||
+          job.scope === 'DEAL'
+        ) &&
+        !deals.some(
+          (deal) =>
+            deal.id === job.dealId
+        )
     );
 
 
@@ -548,6 +632,100 @@ function Home({
 
           <div className="dealList">
 
+            {pendingDealUploads.map(
+              (job) => (
+                <div
+                  className="dealCard dealUploadGhostCard"
+                  key={job.id}
+                >
+                  <div className="dealTop">
+                    <div>
+                      <strong>
+                        Новая сделка
+                      </strong>
+                      <span>
+                        {
+                          job.subtitle ||
+                          'Создаём сделку'
+                        }
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="dealMeta">
+                    <span>
+                      Счёт на создании
+                    </span>
+                  </div>
+
+                  <div
+                    className={
+                      'dealUploadState dealUpload-' +
+                      job.status.toLowerCase()
+                    }
+                  >
+                    <div className="dealUploadStateTop">
+                      <strong>
+                        {
+                          job.status === 'SUCCESS'
+                            ? '✓ ' +
+                              (
+                                job.successTitle ||
+                                job.title
+                              )
+                            : job.status === 'ERROR'
+                              ? 'Не удалось отправить документы'
+                              : job.title
+                        }
+                      </strong>
+
+                      <b>
+                        {job.progress}%
+                      </b>
+                    </div>
+
+                    <div className="dealUploadMiniBar">
+                      <span
+                        style={{
+                          width:
+                            Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                job.progress
+                              )
+                            ) + '%',
+                        }}
+                      />
+                    </div>
+
+                    <span>
+                      {
+                        job.status === 'RUNNING'
+                          ? (
+                              job.currentFile
+                                ? (
+                                    job.completedFiles +
+                                    ' из ' +
+                                    job.totalFiles +
+                                    ' · ' +
+                                    job.currentFile
+                                  )
+                                : 'Подготавливаем отправку…'
+                            )
+                          : job.status === 'SUCCESS'
+                            ? 'Готово'
+                            : (
+                                job.error ||
+                                'Ошибка загрузки'
+                              )
+                      }
+                    </span>
+                  </div>
+                </div>
+              )
+            )}
+
             {active.length === 0 && (
 
               <div className="empty">
@@ -564,9 +742,8 @@ function Home({
                 key={deal.id}
                 deal={deal}
                 uploadJob={
-                  backgroundUploads.find(
-                    (job) =>
-                      job.dealId === deal.id
+                  dealUploadJobFor(
+                    deal.id
                   )
                 }
                 onOpen={() =>
@@ -601,8 +778,25 @@ function DealCard({
   onOpen: () => void;
   uploadJob?: BackgroundUploadJob;
 }) {
-  const invoice = deal.invoices[0];
-  const urgent = deal.tasks.some((t) => t.urgent);
+  const invoice =
+    deal.invoices[0];
+
+  const urgent =
+    deal.tasks.some(
+      (task) =>
+        task.urgent
+    );
+
+  const activeTasks =
+    deal.tasks.filter(
+      (task) =>
+        ![
+          'DONE',
+          'CANCELLED',
+        ].includes(
+          task.status
+        )
+    );
 
   const needsManagerAction =
     invoiceRequestNeedsManager(
@@ -610,7 +804,7 @@ function DealCard({
     );
 
   const returnedInvoiceTask =
-    deal.tasks.find(
+    activeTasks.find(
       (task) =>
         task.type ===
           'ISSUE_CLIENT_INVOICE' &&
@@ -622,13 +816,7 @@ function DealCard({
     deal.auditEvents?.find(
       (event) =>
         event.action ===
-          'INVOICE_REQUEST_RETURNED' &&
-        (
-          !returnedInvoiceTask ||
-          !event.entityId ||
-          event.entityId ===
-            returnedInvoiceTask.id
-        )
+        'INVOICE_REQUEST_RETURNED'
     );
 
   const returnReason =
@@ -639,8 +827,20 @@ function DealCard({
       'Нужно уточнить данные для счёта'
     );
 
+
+  function stopCardOpen(
+    event: {
+      stopPropagation:
+        () => void;
+    }
+  ) {
+    event.stopPropagation();
+  }
+
+
   return (
-    <button
+
+    <div
       className={
         'dealCard clickable' +
         (
@@ -649,52 +849,221 @@ function DealCard({
             : ''
         )
       }
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={(event) => {
+
+        if (
+          event.key ===
+            'Enter' ||
+          event.key ===
+            ' '
+        ) {
+
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
+
       <div className="dealTop">
-        <div>
-          <strong>{invoice ? `${sellerLabels[invoice.sellerType || deal.sellerType]}-${invoice.number}` : `ЗК-${deal.internalNumber}`}</strong>
-          <span>{deal.clientName}</span>
+
+        <div className="dealIdentity">
+
+          <a
+            className="dealInternalNumberLink"
+            href={
+              '#deal/' +
+              encodeURIComponent(
+                deal.id
+              )
+            }
+            onClick={
+              stopCardOpen
+            }
+          >
+            ЗК-
+            {deal.internalNumber}
+          </a>
+
+
+          {invoice && (
+
+            <span className="dealInvoiceNumber">
+              {
+                sellerLabels[
+                  deal.sellerType
+                ]
+              }
+              -
+              {invoice.number}
+            </span>
+
+          )}
+
+
+          <span className="dealClientName">
+            {deal.clientName}
+          </span>
+
         </div>
-        {urgent && <b className="urgent">СРОЧНО</b>}
+
+
+        {urgent && (
+
+          <b className="urgent">
+            СРОЧНО
+          </b>
+
+        )}
+
       </div>
 
+
       <div className="dealMeta">
-        <span>Отгрузка: {deal.plannedShipmentAt ? new Date(deal.plannedShipmentAt).toLocaleDateString('ru-RU') : 'не указана'}</span>
+
+        <span>
+          Отгрузка:{' '}
+          {
+            deal.plannedShipmentAt
+              ? new Date(
+                  deal.plannedShipmentAt
+                )
+                  .toLocaleDateString(
+                    'ru-RU'
+                  )
+              : 'не указана'
+          }
+        </span>
+
 
         {needsManagerAction ? (
+
           <b className="dealCardActionStatus">
             Нужны данные
           </b>
+
         ) : (
+
           <span>
             {
-              uploadJob?.status === 'RUNNING' &&
-              !invoice
-                ? 'Счёт на создании'
-                : dealInvoiceWorkflowLabel(deal)
+              invoice
+                ? statusLabel(
+                    invoice.status
+                  )
+                : 'Ожидаем счёт'
             }
           </span>
+
         )}
+
       </div>
 
-      <div className="paymentMini">{paymentStatusLabel(deal.paymentStatus)}</div>
+
+      <div className="paymentMini">
+        {
+          paymentStatusLabel(
+            deal.paymentStatus
+          )
+        }
+      </div>
+
+
+      {activeTasks.length > 0 && (
+
+        <div
+          className="dealTaskLinks"
+          onClick={
+            stopCardOpen
+          }
+        >
+
+          <span className="dealTaskLinksLabel">
+            {
+              activeTasks.length === 1
+                ? 'Задача'
+                : 'Задачи'
+            }
+          </span>
+
+
+          <div className="dealTaskLinksList">
+
+            {activeTasks.map(
+              (task) => (
+
+                <a
+                  key={task.id}
+                  className={
+                    'dealTaskLink' +
+                    (
+                      task.status ===
+                        'NEED_DATA'
+                        ? ' dealTaskLinkNeedData'
+                        : ''
+                    )
+                  }
+                  href={
+                    '#tasks/' +
+                    encodeURIComponent(
+                      task.id
+                    )
+                  }
+                  onClick={
+                    stopCardOpen
+                  }
+                >
+                  <strong>
+                    {task.title}
+                  </strong>
+
+                  <span>
+                    {
+                      task.status ===
+                        'NEED_DATA'
+                        ? 'Нужно исправить'
+                        : taskStatus(
+                            task.status
+                          )
+                    }
+                  </span>
+                </a>
+
+              )
+            )}
+
+          </div>
+
+        </div>
+
+      )}
+
 
       {uploadJob && (
+
         <div
           className={
             'dealUploadState dealUpload-' +
-            uploadJob.status.toLowerCase()
+            uploadJob.status
+              .toLowerCase()
           }
         >
+
           <div className="dealUploadStateTop">
+
             <strong>
               {
-                uploadJob.status === 'SUCCESS'
+                uploadJob.status ===
+                  'SUCCESS'
                   ? '✓ ' +
-                    (uploadJob.successTitle ||
-                      uploadJob.title)
-                  : uploadJob.status === 'ERROR'
+                    (
+                      uploadJob
+                        .successTitle ||
+                      uploadJob.title
+                    )
+                  : uploadJob.status ===
+                      'ERROR'
                     ? 'Не удалось отправить файлы'
                     : uploadJob.title
               }
@@ -703,65 +1072,126 @@ function DealCard({
             <b>
               {uploadJob.progress}%
             </b>
+
           </div>
 
+
           <div className="dealUploadMiniBar">
+
             <span
               style={{
                 width:
-                  uploadJob.progress + '%',
+                  uploadJob.progress +
+                  '%',
               }}
             />
+
           </div>
 
-          {uploadJob.status === 'RUNNING' && (
+
+          {uploadJob.status ===
+            'RUNNING' && (
+
             <span>
-              {uploadJob.currentFile
-                ? 'Загружаем: ' +
-                  uploadJob.currentFile
-                : 'Подготавливаем отправку…'}
+              {
+                uploadJob.currentFile
+                  ? 'Загружаем: ' +
+                    uploadJob.currentFile
+                  : 'Подготавливаем отправку…'
+              }
             </span>
+
           )}
 
-          {uploadJob.status === 'ERROR' &&
+
+          {uploadJob.status ===
+            'ERROR' &&
             uploadJob.error && (
-              <span>
-                {uploadJob.error}
-              </span>
-            )}
+
+            <span>
+              {uploadJob.error}
+            </span>
+
+          )}
+
         </div>
+
       )}
 
+
       {needsManagerAction ? (
+
         <div className="dealCardActionBox">
+
           <div className="dealCardActionHead">
+
             <strong>
               Бухгалтерия вернула запрос
             </strong>
+
             <span>
               {returnReason}
             </span>
+
           </div>
 
+
           {latestReturn?.reason && (
+
             <p>
               {latestReturn.reason}
             </p>
+
           )}
 
-          <span className="dealCardActionCta">
-            Исправить и повторно отправить →
-          </span>
+
+          {returnedInvoiceTask ? (
+
+            <a
+              className="dealCardActionCta dealCardActionLink"
+              href={
+                '#tasks/' +
+                encodeURIComponent(
+                  returnedInvoiceTask.id
+                )
+              }
+              onClick={
+                stopCardOpen
+              }
+            >
+              Открыть задачу и исправить →
+            </a>
+
+          ) : (
+
+            <span className="dealCardActionCta">
+              Исправить и повторно отправить →
+            </span>
+
+          )}
+
         </div>
+
       ) : (
+
         <>
-          {deal.managerComment && <div className="note">📝 {deal.managerComment}</div>}
-          {deal.tasks.length > 0 && <div className="tasksHint">Активных задач: {deal.tasks.length}</div>}
+
+          {deal.managerComment && (
+
+            <div className="note">
+              📝 {deal.managerComment}
+            </div>
+
+          )}
+
         </>
+
       )}
-    </button>
+
+    </div>
   );
 }
+
 
 function DealDetail({
   dealId,
@@ -1271,12 +1701,30 @@ function DealDetail({
         )
     );
 
+  // PART_1N_J1_TS_INVOICE_NEED_DATA
+  const invoiceRequestNeedsData: boolean =
+    Boolean(
+      invoiceRequestTask &&
+      invoiceRequestTask.status ===
+        'NEED_DATA'
+    );
+
+
 
   const invoiceRequestUploadJob =
     backgroundUploads.find(
       (job) =>
-        job.dealId === dealId
+        job.dealId === dealId &&
+        (
+          !job.scope ||
+          job.scope === 'DEAL'
+        )
     );
+
+
+  // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+  const dealUploadJob =
+    invoiceRequestUploadJob;
 
 
   const correctionTask =
@@ -2322,6 +2770,10 @@ function DealDetail({
           taskId:
             task.id,
 
+          // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
+          dealId:
+            activeDeal.id,
+
           title:
             'Отправляем документы на корректировку',
 
@@ -2418,7 +2870,116 @@ function DealDetail({
 
   return (
 
-    <section className="content form">
+    <section className="content form dealWorkspaceCPage">
+      {/* PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS */}
+      {dealUploadJob && (
+        <div className={'dealGeneralUploadProgress dealUpload-' + dealUploadJob.status.toLowerCase()}>
+          <div className="dealGeneralUploadTop">
+            <strong>
+              {dealUploadJob.status === 'SUCCESS'
+                ? '✓ ' + (dealUploadJob.successTitle || dealUploadJob.title)
+                : dealUploadJob.status === 'ERROR'
+                  ? 'Ошибка отправки документов'
+                  : '↑ ' + dealUploadJob.title}
+            </strong>
+            <b>{dealUploadJob.progress}%</b>
+          </div>
+
+          <div className="dealGeneralUploadBar">
+            <span style={{
+              width: Math.max(0, Math.min(100, dealUploadJob.progress)) + '%',
+            }} />
+          </div>
+
+          <div className="dealGeneralUploadMeta">
+            {dealUploadJob.status === 'RUNNING'
+              ? (dealUploadJob.totalFiles > 0
+                  ? dealUploadJob.completedFiles + ' из ' + dealUploadJob.totalFiles + ' файлов'
+                  : 'Выполняем запрос…')
+              : dealUploadJob.status === 'SUCCESS'
+                ? 'Готово'
+                : (dealUploadJob.error || 'Не удалось завершить отправку')}
+            {dealUploadJob.currentFile ? ' · ' + dealUploadJob.currentFile : ''}
+          </div>
+        </div>
+      )}
+
+
+      {/* PART_V064_O19_V3_UNIFIED_UPLOAD_UX */}
+      {invoiceRequestUploadJob && (
+        <div
+          className={
+            'dealPageUploadProgress taskUpload-' +
+            invoiceRequestUploadJob.status.toLowerCase()
+          }
+        >
+          <div className="taskUploadTop">
+            <strong>
+              {
+                invoiceRequestUploadJob.status === 'SUCCESS'
+                  ? '✓ ' +
+                    (
+                      invoiceRequestUploadJob.successTitle ||
+                      invoiceRequestUploadJob.title
+                    )
+                  : invoiceRequestUploadJob.status === 'ERROR'
+                    ? 'Ошибка загрузки'
+                    : '↑ ' +
+                      invoiceRequestUploadJob.title
+              }
+            </strong>
+
+            <b>
+              {invoiceRequestUploadJob.progress}%
+            </b>
+          </div>
+
+          <div className="taskUploadBar">
+            <div
+              style={{
+                width:
+                  Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      invoiceRequestUploadJob.progress
+                    )
+                  ) + '%',
+              }}
+            />
+          </div>
+
+          <div className="taskUploadMeta">
+            {
+              invoiceRequestUploadJob.status === 'RUNNING'
+                ? (
+                    invoiceRequestUploadJob.totalFiles > 0
+                      ? (
+                          invoiceRequestUploadJob.completedFiles +
+                          ' из ' +
+                          invoiceRequestUploadJob.totalFiles +
+                          ' файлов'
+                        )
+                      : 'Сохраняем данные…'
+                  )
+                : invoiceRequestUploadJob.status === 'SUCCESS'
+                  ? 'Готово'
+                  : (
+                      invoiceRequestUploadJob.error ||
+                      'Не удалось загрузить файлы'
+                    )
+            }
+
+            {
+              invoiceRequestUploadJob.currentFile
+                ? ' · ' +
+                  invoiceRequestUploadJob.currentFile
+                : ''
+            }
+          </div>
+        </div>
+      )}
+
 
       <button
         className="backLink"
@@ -2426,6 +2987,354 @@ function DealDetail({
       >
         ← К сделкам
       </button>
+
+      {/* PART_V064_O1_DEAL_WORKSPACE_C */}
+      <div className="dealWorkspaceCLayout">
+
+        <aside className="dealWorkspaceCSidebar">
+          <div className="dealWorkspaceCSideCard">
+
+            <div className="dealWorkspaceCDealNo">
+              ЗК-{deal.internalNumber}
+            </div>
+
+            <div className="dealWorkspaceCClient">
+              {deal.clientName}
+            </div>
+
+            <div className="dealWorkspaceCAddress">
+              {
+                deal.deliveryAddresses?.[0] ||
+                'Адрес доставки не указан'
+              }
+            </div>
+
+            <div className="dealWorkspaceCPills">
+              {current && (
+                <span className="dealWorkspaceCPill dealWorkspaceCPillBlue">
+                  {
+                    sellerLabels[
+                      current.sellerType ||
+                      deal.sellerType
+                    ]
+                  }
+                  {' - '}
+                  {current.number}
+                </span>
+              )}
+
+              <span className="dealWorkspaceCPill dealWorkspaceCPillGreen">
+                {
+                  paymentStatusLabel(
+                    deal.paymentStatus
+                  )
+                }
+              </span>
+
+              {
+                deal.tasks.filter(
+                  (task) =>
+                    ![
+                      'DONE',
+                      'CANCELLED',
+                    ].includes(
+                      task.status
+                    )
+                ).length > 0 && (
+                  <span className="dealWorkspaceCPill dealWorkspaceCPillYellow">
+                    {
+                      deal.tasks.filter(
+                        (task) =>
+                          ![
+                            'DONE',
+                            'CANCELLED',
+                          ].includes(
+                            task.status
+                          )
+                      ).length
+                    }
+                    {' '}
+                    {
+                      deal.tasks.filter(
+                        (task) =>
+                          ![
+                            'DONE',
+                            'CANCELLED',
+                          ].includes(
+                            task.status
+                          )
+                      ).length === 1
+                        ? 'задача'
+                        : 'задачи'
+                    }
+                  </span>
+                )
+              }
+            </div>
+
+            <div className="dealWorkspaceCActions">
+
+              <button
+                type="button"
+                className="primary"
+                onClick={() =>
+                  document
+                    .getElementById(
+                      'dealCInvoice'
+                    )
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }
+              >
+                Счёт
+              </button>
+
+              <button
+                type="button"
+                className="secondary"
+                onClick={() =>
+                  document
+                    .getElementById(
+                      'dealCPayments'
+                    )
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }
+              >
+                Оплата клиента
+              </button>
+
+              <button
+                type="button"
+                className="secondary"
+                onClick={() =>
+                  document
+                    .getElementById(
+                      'dealCIncoming'
+                    )
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }
+              >
+                Входящие счета
+              </button>
+
+              <button
+                type="button"
+                className="secondary"
+                onClick={() =>
+                  document
+                    .getElementById(
+                      'dealCDocuments'
+                    )
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }
+              >
+                Доверенность / ЭТРН
+              </button>
+
+              {canManageDeal && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setDealInfoOpen(true);
+
+                    window.setTimeout(
+                      () =>
+                        document
+                          .getElementById(
+                            'dealCClient'
+                          )
+                          ?.scrollIntoView({
+                            behavior:
+                              'smooth',
+                            block:
+                              'start',
+                          }),
+                      0
+                    );
+                  }}
+                >
+                  Редактировать сделку
+                </button>
+              )}
+
+            </div>
+
+            <div className="dealWorkspaceCSubhead">
+              Контакт на объекте
+            </div>
+
+            <div className="dealWorkspaceCContact">
+              <strong>
+                {
+                  deal.contactName ||
+                  'Не указан'
+                }
+              </strong>
+
+              <span>
+                {
+                  deal.clientPhone ||
+                  'Телефон не указан'
+                }
+              </span>
+            </div>
+
+            <div className="dealWorkspaceCSubhead">
+              Финансы
+            </div>
+
+            <div className="dealWorkspaceCFinance">
+
+              <div>
+                <span>
+                  Сумма сделки
+                </span>
+                <b>
+                  {
+                    current?.amount
+                      ? money(
+                          current.amount
+                        )
+                      : '—'
+                  }
+                </b>
+              </div>
+
+              <div>
+                <span>
+                  Получено от клиента
+                </span>
+                <b>
+                  {
+                    money(
+                      (
+                        deal.clientPayments ||
+                        []
+                      ).reduce(
+                        (
+                          sum,
+                          payment,
+                        ) =>
+                          sum +
+                          Number(
+                            payment.amount ||
+                            0
+                          ),
+                        0
+                      )
+                    )
+                  }
+                </b>
+              </div>
+
+              <div>
+                <span>
+                  Входящие счета
+                </span>
+                <b>
+                  {
+                    incomingTotal > 0
+                      ? money(
+                          incomingTotal
+                        )
+                      : '—'
+                  }
+                </b>
+              </div>
+
+            </div>
+
+          </div>
+        </aside>
+
+        <div className="dealWorkspaceCMain">
+
+          <div className="dealWorkspaceCAttention">
+
+            <div className="dealWorkspaceCSectionTitle">
+              Сейчас требует внимания
+            </div>
+
+            {
+              deal.tasks.filter(
+                (task) =>
+                  ![
+                    'DONE',
+                    'CANCELLED',
+                  ].includes(
+                    task.status
+                  )
+              ).length > 0 ? (
+
+              <div className="dealWorkspaceCAttentionList">
+                {
+                  deal.tasks
+                    .filter(
+                      (task) =>
+                        ![
+                          'DONE',
+                          'CANCELLED',
+                        ].includes(
+                          task.status
+                        )
+                    )
+                    .slice(0, 3)
+                    .map(
+                      (task) => (
+                        <a
+                          className="dealWorkspaceCAttentionRow"
+                          key={task.id}
+                          href={
+                            '#tasks/' +
+                            encodeURIComponent(
+                              task.id
+                            )
+                          }
+                        >
+                          <div>
+                            <strong>
+                              {task.title}
+                            </strong>
+
+                            <span>
+                              {
+                                task.status ===
+                                  'NEED_DATA'
+                                  ? 'Нужно исправить'
+                                  : taskStatus(
+                                      task.status
+                                    )
+                              }
+                            </span>
+                          </div>
+
+                          <b>→</b>
+                        </a>
+                      )
+                    )
+                }
+              </div>
+
+            ) : (
+
+              <div className="dealWorkspaceCQuiet">
+                Активных задач нет
+              </div>
+
+            )}
+          </div>
 
 
       <div className="dealOverview">
@@ -2774,7 +3683,7 @@ function DealDetail({
                   {
                     supplierPurchases.length > 1
                       ? 'Сумма рассчитана по нескольким поставщикам. Измените нужную закупку в блоке «Поставщики».'
-                      : 'Сначала добавьте поставщика и сумму закупки.'
+                      : 'Сначала добавьте поставщика и сумму входящего счёта.'
                   }
                 </div>
 
@@ -3014,7 +3923,7 @@ function DealDetail({
 
       )}
 
-      <div className="dealInfoBox">
+      <div id="dealCClient" className="dealInfoBox dealCAnchor">
 
         <div className="dealInfoHead">
 
@@ -3462,6 +4371,10 @@ function DealDetail({
       </div>
 
 
+      <div
+        id="dealCInvoice"
+        className="dealCAnchor"
+      >
       {current ? (
 
         <InvoiceBlock
@@ -3488,6 +4401,7 @@ function DealDetail({
         </div>
 
       )}
+      </div>
 
 
       {!current &&
@@ -3678,17 +4592,13 @@ function DealDetail({
 
 
           {(
-            invoiceRequestTask?.status ===
-              'NEED_DATA' ||
-            (
-              !invoiceRequestTask &&
-              invoiceRequestEditOpen
-            )
+            !invoiceRequestTask &&
+            invoiceRequestEditOpen
           ) ? (
 
             <>
 
-              {invoiceRequestTask?.status === 'NEED_DATA' ? (
+              {invoiceRequestNeedsData ? (
 
                 <>
                   <div className="invoiceRequestReturnedHead">
@@ -3929,14 +4839,14 @@ function DealDetail({
                   {
                     saving
                       ? 'Отправляем…'
-                      : invoiceRequestTask?.status === 'NEED_DATA'
+                      : invoiceRequestNeedsData
                         ? 'Сохранить и повторно отправить'
                         : 'Сохранить и отправить бухгалтерии'
                   }
                 </button>
 
 
-                {invoiceRequestTask?.status === 'NEED_DATA' ? (
+                {invoiceRequestNeedsData ? (
                   <button
                     type="button"
                     className="purchaseCancelButton"
@@ -3964,6 +4874,40 @@ function DealDetail({
             </>
 
           ) : invoiceRequestTask ? (
+
+            <>
+              {/* PART_1N_I1_DEAL_REPAIR_MOVED */}
+
+              {invoiceRequestNeedsData ? (
+
+                <div className="invoiceRequestMovedToTask">
+                  <div>
+                    <strong>
+                      Бухгалтерия вернула запрос
+                    </strong>
+
+                    <span>
+                      Исправление теперь выполняется
+                      непосредственно в задаче.
+                    </span>
+                  </div>
+
+                  <a
+                    className="primary"
+                    href={
+                      '#tasks/' +
+                      encodeURIComponent(
+                        invoiceRequestTask.id
+                      )
+                    }
+                  >
+                    Открыть задачу и исправить
+                  </a>
+                </div>
+
+              ) : (
+
+          
 
             <div className="invoiceRequestStateRow">
               <div>
@@ -4000,6 +4944,12 @@ function DealDetail({
                 </button>
               )}
             </div>
+
+          
+
+              )}
+
+            </>
 
           ) : (
 
@@ -4378,6 +5328,10 @@ function DealDetail({
       )}
 
 
+      <div
+        id="dealCPayments"
+        className="dealCAnchor"
+      >
       <PaymentBlock
         deal={deal}
         user={user}
@@ -4385,8 +5339,13 @@ function DealDetail({
           reload(false)
         }
       />
+      </div>
 
 
+      <div
+        id="dealCIncoming"
+        className="dealCAnchor"
+      >
       <PurchasesBlock
         deal={deal}
         user={user}
@@ -4394,8 +5353,13 @@ function DealDetail({
           reload(false)
         }
       />
+      </div>
 
 
+      <div
+        id="dealCDocuments"
+        className="dealCAnchor"
+      >
       <PowerOfAttorneyBlock
         deal={deal}
         user={user}
@@ -4403,6 +5367,7 @@ function DealDetail({
           reload(false)
         }
       />
+      </div>
 
 
       <div className="infoBox">
@@ -4486,7 +5451,7 @@ function DealDetail({
         <div className="infoBox">
 
           <strong>
-            Последние события
+            Лента сделки
           </strong>
 
 
@@ -4548,6 +5513,9 @@ function DealDetail({
         </div>
 
       )}
+
+        </div>
+      </div>
 
     </section>
   );
@@ -4846,29 +5814,116 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
   }
 
   async function addPayment() {
-    
-    setSaving(true); setError('');
-    try {
-      let fileId: string | undefined;
-      if (file) {
-        const uploaded = await uploadDealFile(deal.id, file, 'CLIENT_PAYMENT');
-        fileId = uploaded.id;
-      }
-      await addClientPayment(deal.id, {
-        amount: parseMoneyInput(amount) || 0,
-        paidAt,
-        method,
-        comment: comment.trim() || undefined,
-        actorId: user.id,
-        fileId,
+    setError('');
+
+    const amountToSave =
+      parseMoneyInput(amount) || 0;
+
+    const paidAtToSave =
+      paidAt;
+
+    const methodToSave =
+      method;
+
+    const commentToSave =
+      comment.trim() ||
+      undefined;
+
+    const fileToUpload =
+      file;
+
+    if (fileToUpload) {
+      startBackgroundUploadJob({
+        dealId: deal.id,
+        scope: 'DEAL',
+        title:
+          'Загружаем подтверждение оплаты',
+        successTitle:
+          'Оплата клиента сохранена',
+        subtitle:
+          deal.clientName,
+        files: [fileToUpload],
+
+        run: async ({
+          upload,
+          setProgress,
+        }) => {
+          const uploaded =
+            await upload(
+              deal.id,
+              fileToUpload,
+              'CLIENT_PAYMENT',
+              0,
+              1,
+            );
+
+          setProgress(94);
+
+          await addClientPayment(
+            deal.id,
+            {
+              amount:
+                amountToSave,
+              paidAt:
+                paidAtToSave,
+              method:
+                methodToSave,
+              comment:
+                commentToSave,
+              actorId:
+                user.id,
+              fileId:
+                uploaded.id,
+            }
+          );
+
+          setProgress(99);
+          await onChanged();
+        },
       });
+
+      setAmount('');
+      setComment('');
+      setFile(null);
+      setAdding(false);
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      await addClientPayment(
+        deal.id,
+        {
+          amount:
+            amountToSave,
+          paidAt:
+            paidAtToSave,
+          method:
+            methodToSave,
+          comment:
+            commentToSave,
+          actorId:
+            user.id,
+        }
+      );
+
       setAmount('');
       setComment('');
       setFile(null);
       setAdding(false);
       await onChanged();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setSaving(false); }
+
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+    } finally {
+      setSaving(false);
+    }
   }
 
   return <div className="paymentBox">
@@ -4931,14 +5986,9 @@ function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: CurrentUser
 
 function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCancel: () => void; onCreated: () => void }) {
 
+  /* PART_V061_SELLER_REQUIRED */
   const [sellerType, setSellerType] =
-    useState<SellerType>('MSM');
-
-  const [requestMode, setRequestMode] =
-    useState<
-      'TEXT' |
-      'INCOMING_INVOICE'
-    >('TEXT');
+    useState<SellerType | ''>('');
 
   const [clientName, setClientName] =
     useState('');
@@ -5066,6 +6116,15 @@ async function submit(
       const extraFilesToUpload =
         [...attachments];
 
+      /* PART_V061_VALIDATE_SELLER */
+      if (!sellerType) {
+        setError(
+          'Выберите, от какой организации выставлять счёт: СТ, МСМ или ИП.'
+        );
+        return;
+      }
+
+
       const primaryIncomingInvoice =
         incomingInvoice;
 
@@ -5132,102 +6191,100 @@ async function submit(
         });
 
 
-      if (
-        filesToUpload.length > 0
-      ) {
+      // PART_V064_O20_DEAL_ON_MANAGER_SUBMIT
+      // Сделка уже создана выше.
+      // Сразу запускаем фоновую отправку и возвращаем
+      // менеджера в список сделок. Создание задачи
+      // бухгалтеру больше не блокирует появление сделки.
+      startBackgroundUploadJob({
 
-        startBackgroundUploadJob({
+        dealId:
+          deal.id,
 
-          dealId:
-            deal.id,
+        title:
+          filesToUpload.length > 0
+            ? 'Отправляем бухгалтерии'
+            : 'Создаём запрос на счёт',
 
-          title:
-            'Отправляем бухгалтерии',
+        successTitle:
+          'Запрос отправлен бухгалтерии',
 
-          successTitle:
-            'Запрос отправлен бухгалтерии',
+        subtitle:
+          clientName.trim() ||
+          'Новая сделка',
 
-          subtitle:
-            clientName.trim() ||
-            'Новая сделка',
+        files:
+          filesToUpload,
 
-          files:
-            filesToUpload,
+        run:
+          async ({
+            upload,
+            setProgress,
+          }) => {
 
-
-          run:
-            async ({
-              upload,
-              setProgress,
-            }) => {
-
-              let uploadIndex = 0;
-
-
-              if (primaryIncomingInvoice) {
-
-                await upload(
-                  deal.id,
-                  primaryIncomingInvoice,
-                  'CUSTOMER_INVOICE_PRIMARY',
-                  uploadIndex,
-                  filesToUpload.length,
-                );
-
-                uploadIndex++;
-              }
+            let uploadIndex = 0;
 
 
-              for (
-                let index = 0;
-                index <
-                  extraFilesToUpload.length;
-                index++
-              ) {
+            if (primaryIncomingInvoice) {
 
-                await upload(
-                  deal.id,
-                  extraFilesToUpload[
-                    index
-                  ],
-                  'MANAGER_ATTACHMENT',
-                  uploadIndex,
-                  filesToUpload.length,
-                );
-
-                uploadIndex++;
-              }
-
-
-              setProgress(96);
-
-              await submitInvoiceRequest(
+              await upload(
                 deal.id,
-                {
-                  actorId:
-                    user.id,
-                  urgent,
-                },
+                primaryIncomingInvoice,
+                'CUSTOMER_INVOICE_PRIMARY',
+                uploadIndex,
+                filesToUpload.length,
               );
 
-              setProgress(99);
-            },
-        });
+              uploadIndex++;
+            }
 
-      } else {
 
-        await submitInvoiceRequest(
-          deal.id,
-          {
-            actorId:
-              user.id,
-            urgent,
+            for (
+              let index = 0;
+              index <
+                extraFilesToUpload.length;
+              index++
+            ) {
+
+              await upload(
+                deal.id,
+                extraFilesToUpload[
+                  index
+                ],
+                'MANAGER_ATTACHMENT',
+                uploadIndex,
+                filesToUpload.length,
+              );
+
+              uploadIndex++;
+            }
+
+
+            setProgress(
+              filesToUpload.length > 0
+                ? 96
+                : 70
+            );
+
+            await submitInvoiceRequest(
+              deal.id,
+              {
+                actorId:
+                  user.id,
+                urgent,
+              },
+            );
+
+            setProgress(99);
           },
-        );
-      }
+      });
 
 
+      // С этого момента ЗК уже должна быть видна
+      // менеджеру в списке сделок независимо от
+      // скорости загрузки файлов / создания задачи.
       onCreated();
+
 
 
     } catch (e) {
@@ -5507,7 +6564,7 @@ async function submit(
 
 
 
-      <Field title="Комментарий бухгалтерии">
+      <Field title="Комментарий для бухгалтерии">
 
         <textarea
           rows={3}
@@ -5635,6 +6692,25 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
     showCompleted,
     setShowCompleted,
   ] = useState(false);
+
+  // PART_V064_J_TASK_FILTER_STATE
+  const [
+    taskFilter,
+    setTaskFilter,
+  ] = useState<
+    'ALL' |
+    'IN_PROGRESS' |
+    'NEW' |
+    'NEED_DATA'
+  >('ALL');
+
+  // PART_V064_K_TASK_SEARCH_STATE
+  const [
+    taskSearch,
+    setTaskSearch,
+  ] = useState('');
+
+
 
 
   async function reloadTasks(
@@ -5907,6 +6983,7 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
     completedTask = false
   ) {
 
+    // PART_V064_M2_CLEAN_RENDER_TASK
     const statusClass =
       task.status
         .toLowerCase()
@@ -5915,27 +6992,92 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
           '-'
         );
 
+    const currentInvoice =
+      task.deal.invoices.find(
+        (invoice) =>
+          invoice.isCurrent
+      ) ??
+      task.deal.invoices[0];
 
+    const sellerType =
+      currentInvoice?.sellerType ||
+      task.deal.sellerType;
 
-    const isBackgroundUploading =
-      backgroundUploads.some(
+    const managerName =
+      [
+        task.createdBy?.firstName,
+        task.createdBy?.lastName,
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+    // PART_V064_O15_V3_ACCOUNTANT_RETURN_MESSAGE
+    const accountantReturnEvent =
+      task.deal.auditEvents?.find(
+        (event) =>
+          event.entityId === task.id &&
+          (
+            event.action ===
+              'INVOICE_REQUEST_RETURNED' ||
+            event.action ===
+              'TASK_RETURNED_TO_MANAGER'
+          )
+      );
+
+    const accountantReturnReason =
+      task.status === 'NEED_DATA'
+        ? String(
+            accountantReturnEvent
+              ?.newValue
+              ?.reasonLabel ||
+            task.payload?.returnReason ||
+            'Бухгалтер вернул задачу на исправление'
+          )
+        : '';
+
+    const accountantReturnComment =
+      task.status === 'NEED_DATA'
+        ? String(
+            accountantReturnEvent?.reason ||
+            task.payload?.returnComment ||
+            ''
+          )
+        : '';
+
+    const createdLabel =
+      task.createdAt
+        ? new Date(
+            task.createdAt
+          )
+            .toLocaleString(
+              'ru-RU',
+              {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }
+            )
+            .replace(',', ' ·')
+        : '';
+
+    // PART_V064_O18_V2_TASK_UPLOAD_PROGRESS
+    const taskUploadJob =
+      backgroundUploads.find(
         (job) =>
           job.taskId === task.id &&
-          job.status === 'RUNNING'
+          (
+            !job.scope ||
+            job.scope === 'TASK'
+          )
       );
 
 
-    if (
-      isBackgroundUploading
-    ) {
-      return null;
-    }
-
     return (
-
       <button
         key={task.id}
-
+        type="button"
         className={
           'taskCard taskCardStatus-' +
           statusClass +
@@ -5951,96 +7093,248 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
               : ''
           )
         }
-
         onClick={() =>
           openTask(task)
         }
       >
-
         <div className="taskCardMain">
-
           <div className="taskCardTitle">
-
             <strong>
               {task.title}
             </strong>
 
-
             {task.urgent &&
               !completedTask && (
-
               <b className="urgent">
                 СРОЧНО
               </b>
-
             )}
-
           </div>
 
-
           <span className="taskClient">
-
             {task.deal.clientName}
-
-            {' · '}
-
-            ЗК-
-            {task.deal.internalNumber}
-
           </span>
 
-
-          {task.createdAt && (
-
-            <span className="taskCreated">
-
-              Создана{' '}
-
-              {
-                new Date(
-                  task.createdAt
-                ).toLocaleString(
-                  'ru-RU',
-                  {
-                    day: '2-digit',
-                    month: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }
-                )
-              }
-
+          <div className="taskVariantAMeta">
+            <span className="taskVariantADeal">
+              ЗК-{task.deal.internalNumber}
             </span>
 
-          )}
+            {currentInvoice?.number && (
+              <span className="taskVariantAPill taskVariantAInvoice">
+                {sellerLabels[sellerType] || sellerType}
+                {' - '}
+                {currentInvoice.number}
+              </span>
+            )}
 
+            {managerName && (
+              <span className="taskVariantAPill taskVariantAManager">
+                Менеджер: {managerName}
+              </span>
+            )}
+          </div>
+
+          {createdLabel && (
+            <span className="taskCreated">
+              {createdLabel}
+            </span>
+          )}
         </div>
 
-
         <div className="taskState">
-
           <span
             className={
               'taskStatusBadge taskStatus-' +
               statusClass
             }
           >
-
             {
               taskStatus(
                 task.status
               )
             }
-
           </span>
-
         </div>
 
-      </button>
+        {/* PART_V064_O17_RETURN_TASK_VARIANT_A */}
+        {task.status === 'NEED_DATA' && (
+          <div className="taskReturnNotice taskReturnNoticeV4">
 
+            <div className="taskReturnNoticeTop">
+              <span className="taskReturnNoticeIcon">
+                ↩
+              </span>
+
+              <strong>
+                Вернул бухгалтер
+              </strong>
+            </div>
+
+            <b className="taskReturnReasonText">
+              {accountantReturnReason}
+            </b>
+
+            {accountantReturnComment && (
+              <p className="taskReturnCommentText">
+                {accountantReturnComment}
+              </p>
+            )}
+
+          </div>
+        )}
+
+        {taskUploadJob && (
+          <div
+            className={
+              'taskUploadInline taskUpload-' +
+              taskUploadJob.status.toLowerCase()
+            }
+          >
+            <div className="taskUploadTop">
+              <strong>
+                {
+                  taskUploadJob.status === 'SUCCESS'
+                    ? '✓ ' +
+                      (
+                        taskUploadJob.successTitle ||
+                        taskUploadJob.title
+                      )
+                    : taskUploadJob.status === 'ERROR'
+                      ? 'Ошибка загрузки'
+                      : '↑ ' + taskUploadJob.title
+                }
+              </strong>
+
+              <b>
+                {taskUploadJob.progress}%
+              </b>
+            </div>
+
+            <div className="taskUploadBar">
+              <div
+                style={{
+                  width:
+                    Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        taskUploadJob.progress
+                      )
+                    ) + '%',
+                }}
+              />
+            </div>
+
+            <div className="taskUploadMeta">
+              {
+                taskUploadJob.status === 'RUNNING'
+                  ? (
+                      taskUploadJob.totalFiles > 0
+                        ? (
+                            taskUploadJob.completedFiles +
+                            ' из ' +
+                            taskUploadJob.totalFiles +
+                            ' файлов'
+                          )
+                        : 'Сохраняем данные…'
+                    )
+                  : taskUploadJob.status === 'SUCCESS'
+                    ? 'Готово'
+                    : (
+                        taskUploadJob.error ||
+                        'Не удалось загрузить файлы'
+                      )
+              }
+
+              {
+                taskUploadJob.currentFile
+                  ? ' · ' +
+                    taskUploadJob.currentFile
+                  : ''
+              }
+            </div>
+          </div>
+        )}
+
+
+        {taskUploadJob && (
+          <div
+            className={
+              'taskUploadProgressCard taskUpload-' +
+              taskUploadJob.status.toLowerCase()
+            }
+          >
+            <div className="taskUploadProgressTop">
+              <strong>
+                {
+                  taskUploadJob.status === 'SUCCESS'
+                    ? '✓ ' +
+                      (
+                        taskUploadJob.successTitle ||
+                        taskUploadJob.title
+                      )
+                    : taskUploadJob.status === 'ERROR'
+                      ? 'Ошибка отправки'
+                      : '↑ ' +
+                        taskUploadJob.title
+                }
+              </strong>
+
+              <b>
+                {taskUploadJob.progress}%
+              </b>
+            </div>
+
+            <div className="taskUploadProgressBar">
+              <span
+                style={{
+                  width:
+                    Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        taskUploadJob.progress
+                      )
+                    ) + '%',
+                }}
+              />
+            </div>
+
+            <div className="taskUploadProgressMeta">
+              {
+                taskUploadJob.status === 'RUNNING'
+                  ? (
+                      taskUploadJob.totalFiles > 0
+                        ? (
+                            taskUploadJob.completedFiles +
+                            ' из ' +
+                            taskUploadJob.totalFiles +
+                            ' файлов'
+                          )
+                        : 'Выполняем отправку…'
+                    )
+                  : taskUploadJob.status === 'SUCCESS'
+                    ? 'Готово'
+                    : (
+                        taskUploadJob.error ||
+                        'Не удалось отправить'
+                      )
+              }
+
+              {
+                taskUploadJob.currentFile
+                  ? ' · ' +
+                    taskUploadJob.currentFile
+                  : ''
+              }
+            </div>
+          </div>
+        )}
+
+      </button>
     );
   }
-
 
   function renderGroup(
     title: string,
@@ -6093,6 +7387,37 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
 
 
   if (selected) {
+
+    // PART_1N_I1_INVOICE_MANAGER_TASK
+    if (
+      selected.type ===
+        'ISSUE_CLIENT_INVOICE' &&
+      selected.status ===
+        'NEED_DATA' &&
+      user.role !==
+        'ACCOUNTANT'
+    ) {
+
+      return (
+        <InvoiceRequestManagerRepair
+          task={selected}
+          user={user}
+          onResubmitted={() => {
+            window.location.hash =
+              '#tasks';
+
+            setSelected(null);
+
+            void reloadTasks(
+              false
+            );
+
+            onChanged();
+          }}
+        />
+      );
+    }
+
 
     return selected.type === 'POWER_OF_ATTORNEY' ? (
 
@@ -6176,78 +7501,215 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
 
     <section className="content">
 
-      <BackgroundUploadList
-        jobs={backgroundUploads}
-      />
+      {/* PART_V064_J_APPROVED_TASK_LIST */}
 
-      <div className="sectionHead">
-
-        <div>
-
-          <h2>
-            Задачи бухгалтерии
-          </h2>
-
-          <div className="taskQueueCaption">
-            Активных задач: {activeCount}
-          </div>
-
-        </div>
-
+      <div className="taskListIntro">
+        <strong>
+          {
+            user.role === 'ACCOUNTANT'
+              ? 'Бухгалтерия'
+              : user.role === 'MANAGER'
+                ? 'Менеджер'
+                : user.role === 'LEADER'
+                  ? 'Руководитель'
+                  : 'Все роли'
+          }
+        </strong>
 
         <span>
-          {activeCount}
+          {activeCount} активных
         </span>
-
       </div>
 
+      {/* PART_V064_K_TASK_SEARCH_UI */}
+      <label className="taskSearch">
+        <span>⌕</span>
+
+        <input
+          id="bo-task-search"
+          value={taskSearch}
+          onChange={(event) =>
+            setTaskSearch(
+              event.target.value
+            )
+          }
+          placeholder="Поиск: ЗК, клиент, задача, МСМ/СТ/ИП, № счёта..."
+        />
+
+        {taskSearch && (
+          <button
+            type="button"
+            className="taskSearchClear"
+            aria-label="Очистить поиск"
+            onClick={() =>
+              setTaskSearch('')
+            }
+          >
+            ×
+          </button>
+        )}
+      </label>
+
+      <div
+        className="taskFilterBar"
+        role="tablist"
+        aria-label="Фильтр задач"
+      >
+        <button
+          type="button"
+          className={
+            'taskFilterButton' +
+            (
+              taskFilter === 'ALL'
+                ? ' active'
+                : ''
+            )
+          }
+          onClick={() =>
+            setTaskFilter('ALL')
+          }
+        >
+          Все
+          <b>{activeCount}</b>
+        </button>
+
+        <button
+          type="button"
+          className={
+            'taskFilterButton' +
+            (
+              taskFilter === 'IN_PROGRESS'
+                ? ' active'
+                : ''
+            )
+          }
+          onClick={() =>
+            setTaskFilter('IN_PROGRESS')
+          }
+        >
+          В работе
+          <b>{inProgress.length}</b>
+        </button>
+
+        <button
+          type="button"
+          className={
+            'taskFilterButton' +
+            (
+              taskFilter === 'NEW'
+                ? ' active'
+                : ''
+            )
+          }
+          onClick={() =>
+            setTaskFilter('NEW')
+          }
+        >
+          Новые
+          <b>{newTasks.length}</b>
+        </button>
+
+        <button
+          type="button"
+          className={
+            'taskFilterButton' +
+            (
+              taskFilter === 'NEED_DATA'
+                ? ' active'
+                : ''
+            )
+          }
+          onClick={() =>
+            setTaskFilter('NEED_DATA')
+          }
+        >
+          Нужно исправить
+          <b>{needData.length}</b>
+        </button>
+      </div>
 
       {loading ? (
-
         <div className="empty">
           Загрузка…
         </div>
-
       ) : activeCount === 0 ? (
-
         <div className="empty">
           Активных задач нет
         </div>
+      ) : (() => {
+        // PART_V064_K_TASK_SEARCH_FILTER
+        const normalizedTaskSearch =
+          taskSearch
+            .trim()
+            .toLowerCase();
 
-      ) : (
+        const visibleTasks = [
+          ...inProgress,
+          ...newTasks,
+          ...needData,
+          ...otherActive,
+        ]
+          .filter(
+            (task) =>
+              taskFilter === 'ALL' ||
+              task.status === taskFilter
+          )
+          .filter((task) => {
+            if (!normalizedTaskSearch) {
+              return true;
+            }
 
-        <div className="taskQueue">
+            const currentInvoice =
+              task.deal.invoices.find(
+                (invoice) =>
+                  invoice.isCurrent
+              ) ??
+              task.deal.invoices[0];
 
-          {renderGroup(
-            'В работе',
-            inProgress,
-            'taskGroupWorking'
-          )}
+            const taskSellerType =
+              currentInvoice?.sellerType ||
+              task.deal.sellerType;
+
+            const haystack = [
+              task.title,
+              task.description,
+              task.deal.clientName,
+              'ЗК-' +
+                task.deal.internalNumber,
+              sellerLabels[
+                taskSellerType
+              ] ||
+                taskSellerType,
+              currentInvoice?.number,
+              task.supplierPurchase
+                ?.supplierName,
+              task.payload
+                ?.supplierName,
+            ]
+              .filter(Boolean)
+              .join(' ')
+              .toLowerCase();
+
+            return haystack.includes(
+              normalizedTaskSearch
+            );
+          });
+
+        return visibleTasks.length > 0 ? (
+          <div className="taskFlatList">
+            {visibleTasks.map(
+              (task) =>
+                renderTask(task)
+            )}
+          </div>
+        ) : (
+          <div className="empty">
+            В этой категории задач нет
+          </div>
+        );
+      })()}
 
 
-          {renderGroup(
-            'Новые',
-            newTasks,
-            'taskGroupNew'
-          )}
-
-
-          {renderGroup(
-            'Нужны данные',
-            needData,
-            'taskGroupNeedData'
-          )}
-
-
-          {renderGroup(
-            'Остальные',
-            otherActive,
-            'taskGroupOther'
-          )}
-
-        </div>
-
-      )}
 
 
       {completed.length > 0 && (
@@ -6319,6 +7781,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     setInvoiceFiles,
   ] = useState<File[]>([]);
 
+  const [
+    invoiceDraftReady,
+    setInvoiceDraftReady,
+  ] = useState(false);
+
   const [saving, setSaving] =
     useState(false);
 
@@ -6351,6 +7818,128 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     task.id,
     task.status,
   ]);
+
+  useEffect(() => {
+
+    if (
+      ![
+        'ISSUE_CLIENT_INVOICE',
+        'CORRECT_CLIENT_INVOICE',
+      ].includes(task.type)
+    ) {
+      setInvoiceDraftReady(true);
+      return;
+    }
+
+
+    let cancelled = false;
+
+    setInvoiceDraftReady(false);
+
+
+    const fields =
+      readInvoiceTaskDraftFields(
+        task.id,
+      );
+
+    setNumber(fields.number);
+    setAmount(fields.amount);
+
+
+    void loadInvoiceTaskDraftFiles(
+      task.id,
+    )
+      .then((files) => {
+
+        if (cancelled) {
+          return;
+        }
+
+        setInvoiceFiles(files);
+        setInvoiceDraftReady(true);
+      })
+      .catch(() => {
+
+        if (!cancelled) {
+          setInvoiceDraftReady(true);
+        }
+      });
+
+
+    return () => {
+      cancelled = true;
+    };
+
+  }, [task.id, task.type]);
+
+
+  useEffect(() => {
+
+    if (
+      !invoiceDraftReady ||
+      ![
+        'ISSUE_CLIENT_INVOICE',
+        'CORRECT_CLIENT_INVOICE',
+      ].includes(task.type)
+    ) {
+      return;
+    }
+
+
+    try {
+      saveInvoiceTaskDraftFields(
+        task.id,
+        {
+          number,
+          amount,
+        },
+      );
+    } catch (e) {
+      console.warn(
+        'Не удалось сохранить поля черновика счёта',
+        e,
+      );
+    }
+
+  }, [
+    invoiceDraftReady,
+    task.id,
+    task.type,
+    number,
+    amount,
+  ]);
+
+
+  useEffect(() => {
+
+    if (
+      !invoiceDraftReady ||
+      ![
+        'ISSUE_CLIENT_INVOICE',
+        'CORRECT_CLIENT_INVOICE',
+      ].includes(task.type)
+    ) {
+      return;
+    }
+
+
+    void saveInvoiceTaskDraftFiles(
+      task.id,
+      invoiceFiles,
+    ).catch((e) => {
+      console.warn(
+        'Не удалось сохранить файлы черновика счёта',
+        e,
+      );
+    });
+
+  }, [
+    invoiceDraftReady,
+    task.id,
+    task.type,
+    invoiceFiles,
+  ]);
+
 
 
   function addInvoiceFiles(
@@ -6493,6 +8082,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       setReturnModalOpen(false);
       setReturnReason('');
       setReturnComment('');
+
+      await clearInvoiceTaskDraft(
+        task.id,
+      ).catch(() => undefined);
+
       onBack();
 
     } catch (e) {
@@ -6508,7 +8102,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
   }
 
 
-  function finishInvoice() {
+  async function finishInvoice() {
 
     setError('');
 
@@ -6533,95 +8127,51 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       parseMoneyInput(amount);
 
 
-    setInvoiceFiles([]);
+    setSaving(true);
 
 
-    startBackgroundUploadJob({
+    try {
 
-      taskId:
-        task.id,
+      await startInvoiceSubmission({
 
-      title:
-        'Загружаем готовый счёт',
+        taskId:
+          task.id,
 
-      subtitle:
-        task.deal.clientName,
+        dealId:
+          task.deal.id,
 
-      files:
-        filesToUpload,
+        clientName:
+          task.deal.clientName,
 
+        number:
+          numberToSave,
 
-      run:
-        async ({
-          upload,
-          setProgress,
-        }) => {
+        amount:
+          amountToSave,
 
-          const ids:
-            string[] = [];
+        invoiceDate:
+          todayLocalDate(),
 
+        actorId:
+          user.id,
 
-          for (
-            let index = 0;
-            index <
-              filesToUpload.length;
-            index++
-          ) {
-
-            const uploaded =
-              await upload(
-
-                task.deal.id,
-
-                filesToUpload[
-                  index
-                ],
-
-                'CLIENT_INVOICE_ATTACHMENT',
-
-                index,
-
-                filesToUpload.length,
-              );
+        files:
+          filesToUpload,
+      });
 
 
-            ids.push(
-              uploaded.id
-            );
-          }
+      onBack();
 
+    } catch (e) {
 
-          setProgress(94);
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
 
-
-          await createInvoice(
-            task.deal.id,
-            {
-
-              number:
-                numberToSave,
-
-              amount:
-                amountToSave,
-
-              invoiceDate:
-                todayLocalDate(),
-
-              fileId:
-                ids[0],
-
-              actorId:
-                user.id,
-            },
-          );
-
-
-          setProgress(99);
-        },
-    });
-
-
-    onBack();
+      setSaving(false);
+    }
   }
 
 
@@ -6718,7 +8268,126 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
   return (
 
-    <section className="content form">
+    <section
+      className="content form taskWorkspace"
+      data-task-status={status}
+    >
+
+      {/* PART_1N_K5_V3_RETURN_COMMENT_DETAIL */}
+      {status === 'NEED_DATA' &&
+        String(
+          (task as any).returnComment || ''
+        ).trim() && (
+          <div className="taskReturnCommentDetail">
+            <strong>
+              Комментарий бухгалтера
+            </strong>
+            <p>
+              {
+                String(
+                  (task as any).returnComment
+                )
+              }
+            </p>
+          </div>
+        )}
+
+
+      {/* PART_1N_I1_INVOICE_DATA_CARD */}
+
+      {task.type ===
+        'ISSUE_CLIENT_INVOICE' && (
+
+        <InvoiceRequestDataCard
+          task={task}
+        />
+
+      )}
+
+
+      {/* PART_1N_H1_TASK_DETAIL_DEAL_LINK */}
+
+      <a
+        className="taskDetailDealLink"
+        href={
+          '#deal/' +
+          encodeURIComponent(
+            task.deal.id
+          )
+        }
+      >
+        <strong>
+          ЗК-
+          {task.deal.internalNumber}
+        </strong>
+
+        <span>
+          {task.deal.clientName}
+        </span>
+
+        <b>
+          Открыть сделку →
+        </b>
+      </a>
+
+
+      {/* PART_V064_N2_ETRN_SOURCE_DOCS_UI */}
+      {task.type === 'ETRN' && (
+        <EtrnSourceDocuments task={task} />
+      )}
+
+
+      {/* PART_1N_E1_STRUCTURED_TASK_DETAILS */}
+
+      {[
+        'POWER_OF_ATTORNEY',
+        'ETRN',
+      ].includes(
+        task.type
+      ) &&
+        task.details &&
+        Object.keys(
+          task.details
+        ).length > 0 && (
+
+        <TaskStructuredFields
+          taskType={task.type}
+          value={task.details}
+          readOnly
+        />
+
+      )}
+
+
+      {/* PART_1N_D1_V2_UNIVERSAL_MANAGER_RESUBMIT */}
+      {/* PART_1N_B1_MANAGER_RESUBMIT */}
+
+      {status === 'NEED_DATA' &&
+        user.role !== 'ACCOUNTANT' &&
+        (
+          task.type !== 'ISSUE_CLIENT_INVOICE' &&
+          task.type !== 'PAY_SUPPLIER'
+        ) && (
+
+        <ManagerResubmitPanel
+          taskId={task.id}
+          dealId={task.deal.id}
+          taskType={task.type}
+          actorId={user.id}
+          initialDescription={
+            task.description
+          }
+          initialUrgent={
+            task.urgent
+          }
+          initialDetails={
+            task.details
+          }
+          onResubmitted={onBack}
+        />
+
+      )}
+
 
 
       <button
@@ -6765,6 +8434,9 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
         )}
 
       </div>
+
+      {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
+      <TaskContextStrip task={task} />
 
 
       {canAttachInvoice && (
@@ -6874,6 +8546,31 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
             </div>
 
           </div>
+
+        </div>
+
+      )}
+
+
+      {/* PART_V064_O14_V2_CORRECTION_TAKE_BUTTON */}
+      {task.type ===
+        'CORRECT_CLIENT_INVOICE' &&
+        status === 'NEW' && (
+
+        <div className="correctionTaskStartActions">
+
+          <button
+            type="button"
+            className="primary wide"
+            disabled={saving}
+            onClick={take}
+          >
+            {
+              saving
+                ? 'Сохраняем…'
+                : 'В работу'
+            }
+          </button>
 
         </div>
 
@@ -7222,23 +8919,44 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {status === 'NEW' && (
+            {/* PART_1N_D1_V2_UNIVERSAL_ACCOUNTANT_RETURN */}
+      {/* PART_1M_B_POWER_OF_ATTORNEY_RETURN */}
+      {/* PART_1M_C_ETRN_RETURN */}
+
+
+      {(
+      task.type !== 'ISSUE_CLIENT_INVOICE' &&
+      task.type !== 'PAY_SUPPLIER'
+    ) &&
+        (
+          status === 'NEW' ||
+          status === 'IN_PROGRESS'
+        ) && (
+
+        <ReturnToManagerPanel
+          taskId={task.id}
+          actorId={user.id}
+          disabled={saving}
+          onReturned={onBack}
+        />
+
+      )}
+
+
+{status === 'NEW' && (
 
         task.type ===
           'ISSUE_CLIENT_INVOICE' ? (
 
           <div className="invoiceTaskStartActions">
 
-            <button
-              type="button"
-              className="secondary"
+            <ReturnToManagerPanel
+              taskId={task.id}
+              actorId={user.id}
               disabled={saving}
-              onClick={() =>
-                setReturnModalOpen(true)
-              }
-            >
-              Отказать / вернуть
-            </button>
+              mode="invoice"
+              onReturned={onBack}
+            />
 
             <button
               className="primary"
@@ -7260,7 +8978,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
             className="primary wide"
             disabled={saving}
             onClick={take}
-          >
+          
+              hidden>
             {
               saving
                 ? 'Сохраняем…'
@@ -7288,16 +9007,13 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
           {task.type ===
             'ISSUE_CLIENT_INVOICE' && (
-            <button
-              type="button"
-              className="secondary compactButton"
+            <ReturnToManagerPanel
+              taskId={task.id}
+              actorId={user.id}
               disabled={saving}
-              onClick={() =>
-                setReturnModalOpen(true)
-              }
-            >
-              Отказать / вернуть
-            </button>
+              mode="invoice"
+              onReturned={onBack}
+            />
           )}
 
         </div>
@@ -7305,7 +9021,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {returnModalOpen &&
+      {false &&
+        returnModalOpen &&
         task.type ===
           'ISSUE_CLIENT_INVOICE' && (
 
@@ -7591,6 +9308,10 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
 
           <div className="microcopy">
+
+            Черновик номера, суммы и файлов
+            сохраняется на этом устройстве
+            автоматически.
 
             Дата счёта ставится
             автоматически —
@@ -7929,10 +9650,10 @@ function auditLabel(
       'Изменён статус оплаты',
 
     SUPPLIER_PURCHASE_CREATED:
-      'Добавлена закупка',
+      'Добавлен входящий счёт',
 
     SUPPLIER_PURCHASE_UPDATED:
-      'Изменены данные закупки',
+      'Изменены данные входящего счёта',
 
     SUPPLIER_INVOICE_CHANGED:
       'Изменён входящий счёт поставщика',
@@ -7986,7 +9707,7 @@ function auditLabel(
 
 function paymentStatusLabel(status: PaymentStatus) { return ({ NO_PREPAYMENT: 'Без предоплаты', WAITING: 'Ожидаем оплату', ADVANCE: 'Аванс', PAID: 'Оплачен', DEFERRED: 'Отсрочка' } as Record<PaymentStatus,string>)[status]; }
 function paymentMethodLabel(method: ClientPaymentMethod) { return ({ NONCASH: 'Безнал', CASH: 'Наличные', CARD: 'Пластик', ADVANCE: 'Аванс' } as Record<ClientPaymentMethod,string>)[method]; }
-function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужны данные', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
+function taskStatus(status: string) { return ({ NEW: 'Новая', IN_PROGRESS: 'В работе', NEED_DATA: 'Нужно исправить', DONE: 'Выполнена', CANCELLED: 'Отменена' } as Record<string,string>)[status] || status; }
 
 function ThemeToggle() {
 

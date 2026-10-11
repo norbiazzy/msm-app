@@ -1,0 +1,183 @@
+import {
+  useState,
+} from 'react';
+
+import {
+  resubmitTaskToAccounting,
+} from './api';
+
+
+export function ManagerResubmitPanel({
+  taskId,
+  actorId,
+  initialDescription,
+  initialUrgent,
+  onResubmitted,
+}: {
+  taskId: string;
+  actorId: string;
+  initialDescription?: string;
+  initialUrgent: boolean;
+  onResubmitted:
+    () =>
+      void |
+      Promise<void>;
+}) {
+
+  const [
+    description,
+    setDescription,
+  ] = useState(
+    initialDescription || ''
+  );
+
+
+  const [
+    urgent,
+    setUrgent,
+  ] = useState(
+    initialUrgent
+  );
+
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+
+  async function submit() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await resubmitTaskToAccounting(
+        taskId,
+        {
+          actorId,
+
+          description:
+            description.trim() ||
+            undefined,
+
+          urgent,
+        },
+      );
+
+
+      await onResubmitted();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  return (
+
+    <div className="managerResubmitPanel">
+
+      <div className="managerResubmitHead">
+
+        <strong>
+          Исправьте данные
+        </strong>
+
+        <span>
+          После сохранения эта же задача
+          снова уйдёт бухгалтерии.
+        </span>
+
+      </div>
+
+
+      <label className="field">
+
+        <span>
+          Данные / комментарий
+        </span>
+
+        <textarea
+          rows={5}
+          value={description}
+          disabled={saving}
+          onChange={(event) =>
+            setDescription(
+              event.target.value
+            )
+          }
+          placeholder="Исправьте данные, которые вернула бухгалтерия"
+        />
+
+      </label>
+
+
+      <label className="urgentToggle">
+
+        <input
+          type="checkbox"
+          checked={urgent}
+          disabled={saving}
+          onChange={(event) =>
+            setUrgent(
+              event.target.checked
+            )
+          }
+        />
+
+        <span>
+          Срочно
+        </span>
+
+      </label>
+
+
+      {error && (
+
+        <div className="error">
+          {error}
+        </div>
+
+      )}
+
+
+      <button
+        type="button"
+        className="primary wide"
+        disabled={saving}
+        onClick={() =>
+          void submit()
+        }
+      >
+
+        {
+          saving
+            ? 'Отправляем…'
+            : 'Сохранить и повторно отправить бухгалтерии'
+        }
+
+      </button>
+
+    </div>
+  );
+}

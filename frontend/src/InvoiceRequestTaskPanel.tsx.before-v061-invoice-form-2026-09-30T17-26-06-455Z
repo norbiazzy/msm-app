@@ -1,0 +1,1271 @@
+import {
+  useMemo,
+  useState,
+} from 'react';
+
+import {
+  dealFileUrl,
+  submitInvoiceRequest,
+  updateDealInfo,
+  type Task,
+} from './api';
+
+import {
+  SingleFilePicker,
+  MultiFilePicker,
+} from './MultiFilePicker';
+
+import {
+  startBackgroundUploadJob,
+} from './backgroundUploads';
+
+import type {
+  CurrentUser,
+  SellerType,
+} from './types';
+
+
+const sellerLabels:
+  Record<SellerType, string> = {
+    ST: 'СТ',
+    MSM: 'МСМ',
+    IP: 'ИП',
+  };
+
+
+type InvoiceSnapshot = {
+  requestMode: string;
+  sellerType: SellerType;
+  clientName: string;
+  contactName: string;
+  clientPhone: string;
+  deliveryAddresses: string[];
+  requestText: string;
+  marginMode: string;
+  marginValue: string;
+  accountingComment: string;
+};
+
+
+function stringValue(
+  value: unknown,
+  fallback = '',
+) {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number'
+  )
+    ? String(value)
+    : fallback;
+}
+
+
+function invoiceSnapshot(
+  task: Task,
+): InvoiceSnapshot {
+
+  const typedTask =
+    task as Task & {
+      details?:
+        Record<string, unknown>;
+    };
+
+  const details =
+    typedTask.details || {};
+
+  const deal =
+    task.deal as typeof task.deal & {
+      requestMode?: string;
+    };
+
+
+  const detailsAddresses =
+    Array.isArray(
+      details.deliveryAddresses
+    )
+      ? details.deliveryAddresses
+          .filter(
+            (
+              value,
+            ): value is string =>
+              typeof value ===
+              'string'
+          )
+      : null;
+
+
+  const seller =
+    stringValue(
+      details.sellerType,
+      deal.sellerType,
+    );
+
+
+  return {
+    requestMode:
+      stringValue(
+        details.requestMode,
+        deal.requestMode ||
+          'TEXT',
+      ),
+
+    sellerType:
+      (
+        seller === 'ST' ||
+        seller === 'MSM' ||
+        seller === 'IP'
+      )
+        ? seller
+        : deal.sellerType,
+
+    clientName:
+      stringValue(
+        details.clientName,
+        deal.clientName,
+      ),
+
+    contactName:
+      stringValue(
+        details.contactName,
+        deal.contactName || '',
+      ),
+
+    clientPhone:
+      stringValue(
+        details.clientPhone,
+        deal.clientPhone || '',
+      ),
+
+    deliveryAddresses:
+      detailsAddresses ||
+      (
+        Array.isArray(
+          deal.deliveryAddresses
+        )
+          ? deal.deliveryAddresses
+          : []
+      ),
+
+    requestText:
+      stringValue(
+        details.requestText,
+        deal.requestText || '',
+      ),
+
+    marginMode:
+      stringValue(
+        details.marginMode,
+        deal.marginMode ||
+          'TOTAL_PLUS',
+      ),
+
+    marginValue:
+      stringValue(
+        details.marginValue,
+        deal.marginValue != null
+          ? String(
+              deal.marginValue
+            )
+          : '',
+      ),
+
+    accountingComment:
+      stringValue(
+        details.accountingComment,
+        deal.accountingComment || '',
+      ),
+  };
+}
+
+
+function requestModeLabel(
+  value: string,
+) {
+  return value ===
+    'INCOMING_INVOICE'
+    ? 'По входящему счёту'
+    : 'Текстом / позициями';
+}
+
+
+function marginModeLabel(
+  value: string,
+) {
+  if (value === 'PERCENT') {
+    return '± %';
+  }
+
+  if (value === 'TOTAL_PLUS') {
+    return '+ к сумме';
+  }
+
+  if (value === 'UNIT_PLUS') {
+    return '+ за единицу';
+  }
+
+  if (value === 'FINAL') {
+    return 'Итоговая цена';
+  }
+
+  return value || 'Не указано';
+}
+
+
+function invoiceRequestFiles(
+  task: Task,
+) {
+  const files =
+    task.deal.files || [];
+
+
+  const primaryHistory =
+    files
+      .filter(
+        (file) =>
+          file.category ===
+          'CUSTOMER_INVOICE_PRIMARY'
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt || 0
+          ).getTime() -
+          new Date(
+            b.createdAt || 0
+          ).getTime()
+      );
+
+
+  const primary =
+    primaryHistory[
+      primaryHistory.length - 1
+    ];
+
+
+  const attachments =
+    files.filter(
+      (file) =>
+        file.category ===
+          'MANAGER_ATTACHMENT' ||
+        file.category ===
+          'TASK_ATTACHMENT_' +
+            task.id
+    );
+
+
+  return {
+    primary,
+    attachments,
+  };
+}
+
+
+function RequestField({
+  title,
+  value,
+}: {
+  title: string;
+  value: string;
+}) {
+
+  return (
+    <div className="invoiceTaskField">
+      <span>
+        {title}
+      </span>
+
+      <strong>
+        {value || 'Не указано'}
+      </strong>
+    </div>
+  );
+}
+
+
+export function InvoiceRequestDataCard({
+  task,
+}: {
+  task: Task;
+}) {
+
+  const data =
+    useMemo(
+      () =>
+        invoiceSnapshot(
+          task
+        ),
+      [
+        task.id,
+        task.updatedAt,
+        task.deal,
+      ]
+    );
+
+
+  const {
+    primary,
+    attachments,
+  } = useMemo(
+    () =>
+      invoiceRequestFiles(
+        task
+      ),
+    [
+      task.id,
+      task.deal.files,
+    ]
+  );
+
+
+  return (
+
+    <div className="invoiceTaskData">
+
+      <div className="invoiceTaskDataHead">
+
+        <div>
+          <strong>
+            Запрос менеджера
+          </strong>
+
+          <span>
+            Эти же поля вернутся
+            менеджеру при возврате
+          </span>
+        </div>
+
+        {task.urgent && (
+          <b className="urgent">
+            СРОЧНО
+          </b>
+        )}
+
+      </div>
+
+
+      <div className="invoiceTaskDataGrid">
+
+        <RequestField
+          title="Формат запроса"
+          value={
+            requestModeLabel(
+              data.requestMode
+            )
+          }
+        />
+
+        <RequestField
+          title="От кого выставляем"
+          value={
+            sellerLabels[
+              data.sellerType
+            ]
+          }
+        />
+
+        <RequestField
+          title="На кого выставлять"
+          value={
+            data.clientName
+          }
+        />
+
+        <RequestField
+          title="Контактное лицо"
+          value={
+            data.contactName
+          }
+        />
+
+        <RequestField
+          title="Телефон"
+          value={
+            data.clientPhone
+          }
+        />
+
+        <RequestField
+          title="Условия"
+          value={
+            marginModeLabel(
+              data.marginMode
+            )
+          }
+        />
+
+        <RequestField
+          title="Значение"
+          value={
+            data.marginValue
+          }
+        />
+
+      </div>
+
+
+      <div className="invoiceTaskTextBlock">
+        <span>
+          Адрес / адреса доставки
+        </span>
+
+        <p>
+          {
+            data.deliveryAddresses
+              .length
+              ? data
+                  .deliveryAddresses
+                  .join('\n')
+              : 'Не указано'
+          }
+        </p>
+      </div>
+
+
+      <div className="invoiceTaskTextBlock">
+        <span>
+          Что выставляем / текст запроса
+        </span>
+
+        <p>
+          {
+            data.requestText ||
+            'Не указано'
+          }
+        </p>
+      </div>
+
+
+      <div className="invoiceTaskTextBlock">
+        <span>
+          Комментарий бухгалтерии
+        </span>
+
+        <p>
+          {
+            data
+              .accountingComment ||
+            'Не указано'
+          }
+        </p>
+      </div>
+
+
+      <div className="invoiceTaskDocs">
+
+        <span className="invoiceTaskDocsTitle">
+          Документы менеджера
+        </span>
+
+
+        {!primary &&
+          attachments.length === 0 && (
+
+          <div className="invoiceTaskDocsEmpty">
+            Документы не прикреплены
+          </div>
+
+        )}
+
+
+        {primary && (
+
+          <a
+            className="invoiceTaskDoc"
+            href={
+              dealFileUrl(
+                primary.id
+              )
+            }
+            target="_blank"
+            rel="noreferrer"
+          >
+            <div>
+              <strong>
+                {
+                  primary
+                    .originalName
+                }
+              </strong>
+
+              <span>
+                Входящий счёт
+              </span>
+            </div>
+
+            <b>
+              Открыть
+            </b>
+          </a>
+
+        )}
+
+
+        {attachments.map(
+          (file) => (
+
+            <a
+              key={file.id}
+              className="invoiceTaskDoc"
+              href={
+                dealFileUrl(
+                  file.id
+                )
+              }
+              target="_blank"
+              rel="noreferrer"
+            >
+              <div>
+                <strong>
+                  {
+                    file.originalName
+                  }
+                </strong>
+
+                <span>
+                  Дополнительный документ
+                </span>
+              </div>
+
+              <b>
+                Открыть
+              </b>
+            </a>
+
+          )
+        )}
+
+      </div>
+
+    </div>
+  );
+}
+
+
+export function InvoiceRequestManagerRepair({
+  task,
+  user,
+  onResubmitted,
+}: {
+  task: Task;
+  user: CurrentUser;
+  onResubmitted:
+    () => void | Promise<void>;
+}) {
+
+  const initial =
+    useMemo(
+      () =>
+        invoiceSnapshot(
+          task
+        ),
+      [task.id]
+    );
+
+
+  const [
+    requestMode,
+    setRequestMode,
+  ] = useState(
+    initial.requestMode
+  );
+
+  const [
+    sellerType,
+    setSellerType,
+  ] = useState<SellerType>(
+    initial.sellerType
+  );
+
+  const [
+    clientName,
+    setClientName,
+  ] = useState(
+    initial.clientName
+  );
+
+  const [
+    contactName,
+    setContactName,
+  ] = useState(
+    initial.contactName
+  );
+
+  const [
+    clientPhone,
+    setClientPhone,
+  ] = useState(
+    initial.clientPhone
+  );
+
+  const [
+    deliveryAddresses,
+    setDeliveryAddresses,
+  ] = useState(
+    initial
+      .deliveryAddresses
+      .join('\n')
+  );
+
+  const [
+    requestText,
+    setRequestText,
+  ] = useState(
+    initial.requestText
+  );
+
+  const [
+    marginMode,
+    setMarginMode,
+  ] = useState(
+    initial.marginMode
+  );
+
+  const [
+    marginValue,
+    setMarginValue,
+  ] = useState(
+    initial.marginValue
+  );
+
+  const [
+    accountingComment,
+    setAccountingComment,
+  ] = useState(
+    initial
+      .accountingComment
+  );
+
+  const [
+    urgent,
+    setUrgent,
+  ] = useState(
+    Boolean(
+      task.urgent
+    )
+  );
+
+  const [
+    primaryFile,
+    setPrimaryFile,
+  ] = useState<File | null>(
+    null
+  );
+
+  const [
+    extraFiles,
+    setExtraFiles,
+  ] = useState<File[]>([]);
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+
+  async function saveData() {
+
+    const numericMargin =
+      marginValue.trim()
+        ? Number(
+            marginValue
+              .replace(',', '.')
+          )
+        : undefined;
+
+
+    if (
+      numericMargin !==
+        undefined &&
+      !Number.isFinite(
+        numericMargin
+      )
+    ) {
+      throw new Error(
+        'Проверьте значение условий'
+      );
+    }
+
+
+    const addresses =
+      deliveryAddresses
+        .split(/\r?\n/)
+        .map(
+          (value) =>
+            value.trim()
+        )
+        .filter(Boolean);
+
+
+    await updateDealInfo(
+      task.deal.id,
+      {
+        requestMode:
+          requestMode ||
+          'TEXT',
+
+        sellerType,
+
+        clientName:
+          clientName.trim() ||
+          task.deal.clientName,
+
+        contactName,
+        clientPhone,
+
+        deliveryAddresses:
+          addresses,
+
+        requestText,
+
+        marginMode,
+
+        marginValue:
+          numericMargin,
+
+        accountingComment,
+
+        actorId:
+          user.id,
+      },
+    );
+
+
+    await submitInvoiceRequest(
+      task.deal.id,
+      {
+        actorId:
+          user.id,
+        urgent,
+      },
+    );
+  }
+
+
+  async function submit() {
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      const files = [
+        ...(primaryFile
+          ? [primaryFile]
+          : []),
+
+        ...extraFiles,
+      ];
+
+
+      if (
+        files.length === 0
+      ) {
+
+        await saveData();
+
+        await onResubmitted();
+
+        return;
+      }
+
+
+      startBackgroundUploadJob({
+
+        taskId:
+          task.id,
+
+        dealId:
+          task.deal.id,
+
+        title:
+          'Отправляем исправления по счёту',
+
+        successTitle:
+          'Исправления отправлены бухгалтерии',
+
+        files,
+
+        run:
+          async ({
+            upload,
+            setProgress,
+          }) => {
+
+            let index = 0;
+
+
+            if (primaryFile) {
+
+              await upload(
+                task.deal.id,
+                primaryFile,
+                'CUSTOMER_INVOICE_PRIMARY',
+                index,
+                files.length,
+              );
+
+              index++;
+            }
+
+
+            for (
+              const file
+              of extraFiles
+            ) {
+
+              await upload(
+                task.deal.id,
+                file,
+                'TASK_ATTACHMENT_' +
+                  task.id,
+                index,
+                files.length,
+              );
+
+              index++;
+            }
+
+
+            setProgress(94);
+
+            await saveData();
+
+            setProgress(99);
+          },
+      });
+
+
+      await onResubmitted();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+      setSaving(false);
+    }
+  }
+
+
+  return (
+
+    <section className="content">
+
+      <div className="invoiceTaskRepairHead">
+
+        <div>
+          <div className="eyebrow">
+            Нужно исправить
+          </div>
+
+          <h2>
+            Выставить счёт
+          </h2>
+
+          <span>
+            ЗК-
+            {
+              task.deal
+                .internalNumber
+            }
+            {' · '}
+            {
+              task.deal
+                .clientName
+            }
+          </span>
+        </div>
+
+
+        <a
+          className="secondary"
+          href={
+            '#deal/' +
+            encodeURIComponent(
+              task.deal.id
+            )
+          }
+        >
+          Открыть сделку
+        </a>
+
+      </div>
+
+
+      <div className="invoiceTaskRepairNotice">
+        Ниже тот же набор полей,
+        который получил бухгалтер.
+        Исправьте нужное и повторно
+        отправьте эту же задачу.
+      </div>
+
+
+      <InvoiceRequestDataCard
+        task={task}
+      />
+
+
+      <div className="invoiceTaskEdit">
+
+        <h3>
+          Исправить запрос
+        </h3>
+
+
+        <label className="field">
+
+          <span>
+            Формат запроса
+          </span>
+
+          <select
+            value={requestMode}
+            disabled={saving}
+            onChange={(event) =>
+              setRequestMode(
+                event.target.value
+              )
+            }
+          >
+            <option value="TEXT">
+              Текстом / позициями
+            </option>
+
+            <option value="INCOMING_INVOICE">
+              По входящему счёту
+            </option>
+          </select>
+
+        </label>
+
+
+        <div className="field">
+
+          <span>
+            От кого выставляем
+          </span>
+
+          <div className="segmented">
+
+            {(
+              [
+                'ST',
+                'MSM',
+                'IP',
+              ] as SellerType[]
+            ).map(
+              (value) => (
+
+                <button
+                  type="button"
+                  key={value}
+                  className={
+                    sellerType ===
+                      value
+                      ? 'selected'
+                      : ''
+                  }
+                  disabled={saving}
+                  onClick={() =>
+                    setSellerType(
+                      value
+                    )
+                  }
+                >
+                  {
+                    sellerLabels[
+                      value
+                    ]
+                  }
+                </button>
+
+              )
+            )}
+
+          </div>
+
+        </div>
+
+
+        <label className="field">
+
+          <span>
+            На кого выставлять
+          </span>
+
+          <input
+            value={clientName}
+            disabled={saving}
+            onChange={(event) =>
+              setClientName(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        <div className="inline">
+
+          <label className="field">
+
+            <span>
+              Контактное лицо
+            </span>
+
+            <input
+              value={contactName}
+              disabled={saving}
+              onChange={(event) =>
+                setContactName(
+                  event.target.value
+                )
+              }
+            />
+
+          </label>
+
+
+          <label className="field">
+
+            <span>
+              Телефон
+            </span>
+
+            <input
+              value={clientPhone}
+              disabled={saving}
+              onChange={(event) =>
+                setClientPhone(
+                  event.target.value
+                )
+              }
+            />
+
+          </label>
+
+        </div>
+
+
+        <label className="field">
+
+          <span>
+            Адрес / адреса доставки
+          </span>
+
+          <textarea
+            rows={3}
+            value={
+              deliveryAddresses
+            }
+            disabled={saving}
+            onChange={(event) =>
+              setDeliveryAddresses(
+                event.target.value
+              )
+            }
+            placeholder="Каждый адрес с новой строки"
+          />
+
+        </label>
+
+
+        <label className="field">
+
+          <span>
+            Что выставляем / текст запроса
+          </span>
+
+          <textarea
+            rows={5}
+            value={requestText}
+            disabled={saving}
+            onChange={(event) =>
+              setRequestText(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        <div
+          /* PART_1N_K4_V3_HIDE_TERMS_UI */
+          hidden className="inline">
+
+          <label className="field">
+
+            <span>
+              Условия
+            </span>
+
+            <select
+              value={marginMode}
+              disabled={saving}
+              onChange={(event) =>
+                setMarginMode(
+                  event.target.value
+                )
+              }
+            >
+              <option value="PERCENT">
+                ± %
+              </option>
+
+              <option value="TOTAL_PLUS">
+                + к сумме
+              </option>
+
+              <option value="UNIT_PLUS">
+                + за единицу
+              </option>
+
+              <option value="FINAL">
+                Итоговая цена
+              </option>
+            </select>
+
+          </label>
+
+
+          <label className="field">
+
+            <span>
+              Значение
+            </span>
+
+            <input
+              inputMode="decimal"
+              value={marginValue}
+              disabled={saving}
+              onChange={(event) =>
+                setMarginValue(
+                  event.target.value
+                )
+              }
+            />
+
+          </label>
+
+        </div>
+
+
+        <label className="field">
+
+          <span>
+            Комментарий бухгалтерии
+          </span>
+
+          <textarea
+            rows={3}
+            value={
+              accountingComment
+            }
+            disabled={saving}
+            onChange={(event) =>
+              setAccountingComment(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        <div className="field">
+
+          <span>
+            Новый входящий счёт,
+            если изменился
+          </span>
+
+          <SingleFilePicker
+            file={primaryFile}
+            onChange={
+              setPrimaryFile
+            }
+            title="+ Новый входящий счёт"
+            accept="application/pdf,image/*"
+          />
+
+        </div>
+
+
+        <div className="field">
+
+          <span>
+            Новые дополнительные документы
+          </span>
+
+          <MultiFilePicker
+            files={extraFiles}
+            onChange={
+              setExtraFiles
+            }
+            title="+ Прикрепить документы"
+          />
+
+        </div>
+
+
+        <label className="urgentToggle">
+
+          <input
+            type="checkbox"
+            checked={urgent}
+            disabled={saving}
+            onChange={(event) =>
+              setUrgent(
+                event.target.checked
+              )
+            }
+          />
+
+          <span>
+            Срочно
+          </span>
+
+        </label>
+
+
+        {error && (
+
+          <div className="error">
+            {error}
+          </div>
+
+        )}
+
+
+        <button
+          type="button"
+          className="primary wide"
+          disabled={saving}
+          onClick={() =>
+            void submit()
+          }
+        >
+          {
+            saving
+              ? 'Отправляем…'
+              : 'Сохранить и повторно отправить'
+          }
+        </button>
+
+      </div>
+
+    </section>
+  );
+}

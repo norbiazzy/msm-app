@@ -1,0 +1,411 @@
+[1mdiff --git a/frontend/src/App.tsx b/frontend/src/App.tsx[m
+[1mindex 3380c22..ae389d3 100644[m
+[1m--- a/frontend/src/App.tsx[m
+[1m+++ b/frontend/src/App.tsx[m
+[36m@@ -17,11 +17,17 @@[m [mimport {[m
+   RecentActivityPanel,[m
+ } from './RecentActivityPanel';[m
+ import {[m
+[31m-  BackgroundUploadList,[m
+   type BackgroundUploadJob,[m
+   startBackgroundUploadJob,[m
+   useBackgroundUploads,[m
+ } from './backgroundUploads';[m
+[32m+[m[32mimport {[m
+[32m+[m[32m  clearInvoiceTaskDraft,[m
+[32m+[m[32m  loadInvoiceTaskDraftFiles,[m
+[32m+[m[32m  readInvoiceTaskDraftFields,[m
+[32m+[m[32m  saveInvoiceTaskDraftFields,[m
+[32m+[m[32m  saveInvoiceTaskDraftFiles,[m
+[32m+[m[32m} from './invoiceTaskDraft';[m
+ [m
+ import {[m
+   PurchasesBlock,[m
+[36m@@ -5916,26 +5922,21 @@[m [mfunction TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo[m
+         );[m
+ [m
+ [m
+[31m-[m
+[31m-    const isBackgroundUploading =[m
+[31m-      backgroundUploads.some([m
+[32m+[m[32m    const uploadJob =[m
+[32m+[m[32m      backgroundUploads.find([m
+         (job) =>[m
+[31m-          job.taskId === task.id &&[m
+[31m-          job.status === 'RUNNING'[m
+[32m+[m[32m          job.taskId === task.id[m
+       );[m
+ [m
+ [m
+[31m-    if ([m
+[31m-      isBackgroundUploading[m
+[31m-    ) {[m
+[31m-      return null;[m
+[31m-    }[m
+[31m-[m
+     return ([m
+ [m
+[31m-      <button[m
+[32m+[m[32m      <div[m
+         key={task.id}[m
+ [m
+[32m+[m[32m        role="button"[m
+[32m+[m[32m        tabIndex={0}[m
+[32m+[m
+         className={[m
+           'taskCard taskCardStatus-' +[m
+           statusClass +[m
+[36m@@ -5949,12 +5950,35 @@[m [mfunction TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo[m
+             completedTask[m
+               ? ' taskCardCompleted'[m
+               : ''[m
+[32m+[m[32m          ) +[m
+[32m+[m[32m          ([m
+[32m+[m[32m            uploadJob[m
+[32m+[m[32m              ? ' taskCardWithUpload'[m
+[32m+[m[32m              : ''[m
+           )[m
+         }[m
+ [m
+         onClick={() =>[m
+           openTask(task)[m
+         }[m
+[32m+[m
+[32m+[m[32m        onKeyDown={(event) => {[m
+[32m+[m
+[32m+[m[32m          if ([m
+[32m+[m[32m            event.target !==[m
+[32m+[m[32m            event.currentTarget[m
+[32m+[m[32m          ) {[m
+[32m+[m[32m            return;[m
+[32m+[m[32m          }[m
+[32m+[m
+[32m+[m[32m          if ([m
+[32m+[m[32m            event.key === 'Enter' ||[m
+[32m+[m[32m            event.key === ' '[m
+[32m+[m[32m          ) {[m
+[32m+[m[32m            event.preventDefault();[m
+[32m+[m[32m            openTask(task);[m
+[32m+[m[32m          }[m
+[32m+[m[32m        }}[m
+       >[m
+ [m
+         <div className="taskCardMain">[m
+[36m@@ -6036,7 +6060,119 @@[m [mfunction TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo[m
+ [m
+         </div>[m
+ [m
+[31m-      </button>[m
+[32m+[m
+[32m+[m[32m        {uploadJob && ([m
+[32m+[m
+[32m+[m[32m          <div[m
+[32m+[m[32m            className={[m
+[32m+[m[32m              'taskCardUploadState taskCardUpload-' +[m
+[32m+[m[32m              uploadJob.status.toLowerCase()[m
+[32m+[m[32m            }[m
+[32m+[m
+[32m+[m[32m            onClick={(event) =>[m
+[32m+[m[32m              event.stopPropagation()[m
+[32m+[m[32m            }[m
+[32m+[m[32m          >[m
+[32m+[m
+[32m+[m[32m            <div className="taskCardUploadTop">[m
+[32m+[m
+[32m+[m[32m              <strong>[m
+[32m+[m[32m                {[m
+[32m+[m[32m                  uploadJob.status === 'SUCCESS'[m
+[32m+[m[32m                    ? '✓ Отправлено'[m
+[32m+[m[32m                    : uploadJob.status === 'ERROR'[m
+[32m+[m[32m                      ? 'Ошибка отправки'[m
+[32m+[m[32m                      : uploadJob.title[m
+[32m+[m[32m                }[m
+[32m+[m[32m              </strong>[m
+[32m+[m
+[32m+[m[32m              <b>[m
+[32m+[m[32m                {uploadJob.progress}%[m
+[32m+[m[32m              </b>[m
+[32m+[m
+[32m+[m[32m            </div>[m
+[32m+[m
+[32m+[m
+[32m+[m[32m            <div className="taskCardUploadBar">[m
+[32m+[m
+[32m+[m[32m              <span[m
+[32m+[m[32m                style={{[m
+[32m+[m[32m                  width:[m
+[32m+[m[32m                    uploadJob.progress + '%',[m
+[32m+[m[32m                }}[m
+[32m+[m[32m              />[m
+[32m+[m
+[32m+[m[32m            </div>[m
+[32m+[m
+[32m+[m
+[32m+[m[32m            {uploadJob.status === 'RUNNING' && ([m
+[32m+[m
+[32m+[m[32m              <span className="taskCardUploadMeta">[m
+[32m+[m[32m                {[m
+[32m+[m[32m                  uploadJob.totalFiles > 0 &&[m
+[32m+[m[32m                  uploadJob.completedFiles <[m
+[32m+[m[32m                    uploadJob.totalFiles[m
+[32m+[m[32m                    ? 'Загрузка файлов ' +[m
+[32m+[m[32m                      Math.min([m
+[32m+[m[32m                        uploadJob.completedFiles + 1,[m
+[32m+[m[32m                        uploadJob.totalFiles[m
+[32m+[m[32m                      ) +[m
+[32m+[m[32m                      ' из ' +[m
+[32m+[m[32m                      uploadJob.totalFiles +[m
+[32m+[m[32m                      ' · ' +[m
+[32m+[m[32m                      uploadJob.progress +[m
+[32m+[m[32m                      '%'[m
+[32m+[m[32m                    : 'Отправляем данные…'[m
+[32m+[m[32m                }[m
+[32m+[m[32m              </span>[m
+[32m+[m
+[32m+[m[32m            )}[m
+[32m+[m
+[32m+[m
+[32m+[m[32m            {uploadJob.status === 'SUCCESS' && ([m
+[32m+[m
+[32m+[m[32m              <span className="taskCardUploadMeta">[m
+[32m+[m[32m                {[m
+[32m+[m[32m                  uploadJob.successTitle ||[m
+[32m+[m[32m                  'Готово'[m
+[32m+[m[32m                }[m
+[32m+[m[32m              </span>[m
+[32m+[m
+[32m+[m[32m            )}[m
+[32m+[m
+[32m+[m
+[32m+[m[32m            {uploadJob.status === 'ERROR' && ([m
+[32m+[m
+[32m+[m[32m              <div className="taskCardUploadError">[m
+[32m+[m
+[32m+[m[32m                <span className="taskCardUploadMeta">[m
+[32m+[m[32m                  {[m
+[32m+[m[32m                    uploadJob.error ||[m
+[32m+[m[32m                    'Не удалось отправить'[m
+[32m+[m[32m                  }[m
+[32m+[m[32m                </span>[m
+[32m+[m
+[32m+[m[32m                <button[m
+[32m+[m[32m                  type="button"[m
+[32m+[m[32m                  className="secondary compactButton"[m
+[32m+[m
+[32m+[m[32m                  onClick={(event) => {[m
+[32m+[m[32m                    event.stopPropagation();[m
+[32m+[m[32m                    uploadJob.retry?.();[m
+[32m+[m[32m                  }}[m
+[32m+[m[32m                >[m
+[32m+[m[32m                  Повторить[m
+[32m+[m[32m                </button>[m
+[32m+[m
+[32m+[m[32m              </div>[m
+[32m+[m
+[32m+[m[32m            )}[m
+[32m+[m
+[32m+[m[32m          </div>[m
+[32m+[m
+[32m+[m[32m        )}[m
+[32m+[m
+[32m+[m[32m      </div>[m
+ [m
+     );[m
+   }[m
+[36m@@ -6176,10 +6312,6 @@[m [mfunction TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo[m
+ [m
+     <section className="content">[m
+ [m
+[31m-      <BackgroundUploadList[m
+[31m-        jobs={backgroundUploads}[m
+[31m-      />[m
+[31m-[m
+       <div className="sectionHead">[m
+ [m
+         <div>[m
+[36m@@ -6319,6 +6451,11 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+     setInvoiceFiles,[m
+   ] = useState<File[]>([]);[m
+ [m
+[32m+[m[32m  const [[m
+[32m+[m[32m    invoiceDraftReady,[m
+[32m+[m[32m    setInvoiceDraftReady,[m
+[32m+[m[32m  ] = useState(false);[m
+[32m+[m
+   const [saving, setSaving] =[m
+     useState(false);[m
+ [m
+[36m@@ -6352,6 +6489,128 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+     task.status,[m
+   ]);[m
+ [m
+[32m+[m[32m  useEffect(() => {[m
+[32m+[m
+[32m+[m[32m    if ([m
+[32m+[m[32m      ![[m
+[32m+[m[32m        'ISSUE_CLIENT_INVOICE',[m
+[32m+[m[32m        'CORRECT_CLIENT_INVOICE',[m
+[32m+[m[32m      ].includes(task.type)[m
+[32m+[m[32m    ) {[m
+[32m+[m[32m      setInvoiceDraftReady(true);[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    let cancelled = false;[m
+[32m+[m
+[32m+[m[32m    setInvoiceDraftReady(false);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    const fields =[m
+[32m+[m[32m      readInvoiceTaskDraftFields([m
+[32m+[m[32m        task.id,[m
+[32m+[m[32m      );[m
+[32m+[m
+[32m+[m[32m    setNumber(fields.number);[m
+[32m+[m[32m    setAmount(fields.amount);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    void loadInvoiceTaskDraftFiles([m
+[32m+[m[32m      task.id,[m
+[32m+[m[32m    )[m
+[32m+[m[32m      .then((files) => {[m
+[32m+[m
+[32m+[m[32m        if (cancelled) {[m
+[32m+[m[32m          return;[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        setInvoiceFiles(files);[m
+[32m+[m[32m        setInvoiceDraftReady(true);[m
+[32m+[m[32m      })[m
+[32m+[m[32m      .catch(() => {[m
+[32m+[m
+[32m+[m[32m        if (!cancelled) {[m
+[32m+[m[32m          setInvoiceDraftReady(true);[m
+[32m+[m[32m        }[m
+[32m+[m[32m      });[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    return () => {[m
+[32m+[m[32m      cancelled = true;[m
+[32m+[m[32m    };[m
+[32m+[m
+[32m+[m[32m  }, [task.id, task.type]);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m  useEffect(() => {[m
+[32m+[m
+[32m+[m[32m    if ([m
+[32m+[m[32m      !invoiceDraftReady ||[m
+[32m+[m[32m      ![[m
+[32m+[m[32m        'ISSUE_CLIENT_INVOICE',[m
+[32m+[m[32m        'CORRECT_CLIENT_INVOICE',[m
+[32m+[m[32m      ].includes(task.type)[m
+[32m+[m[32m    ) {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      saveInvoiceTaskDraftFields([m
+[32m+[m[32m        task.id,[m
+[32m+[m[32m        {[m
+[32m+[m[32m          number,[m
+[32m+[m[32m          amount,[m
+[32m+[m[32m        },[m
+[32m+[m[32m      );[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      console.warn([m
+[32m+[m[32m        'Не удалось сохранить поля черновика счёта',[m
+[32m+[m[32m        e,[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m  }, [[m
+[32m+[m[32m    invoiceDraftReady,[m
+[32m+[m[32m    task.id,[m
+[32m+[m[32m    task.type,[m
+[32m+[m[32m    number,[m
+[32m+[m[32m    amount,[m
+[32m+[m[32m  ]);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m  useEffect(() => {[m
+[32m+[m
+[32m+[m[32m    if ([m
+[32m+[m[32m      !invoiceDraftReady ||[m
+[32m+[m[32m      ![[m
+[32m+[m[32m        'ISSUE_CLIENT_INVOICE',[m
+[32m+[m[32m        'CORRECT_CLIENT_INVOICE',[m
+[32m+[m[32m      ].includes(task.type)[m
+[32m+[m[32m    ) {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    void saveInvoiceTaskDraftFiles([m
+[32m+[m[32m      task.id,[m
+[32m+[m[32m      invoiceFiles,[m
+[32m+[m[32m    ).catch((e) => {[m
+[32m+[m[32m      console.warn([m
+[32m+[m[32m        'Не удалось сохранить файлы черновика счёта',[m
+[32m+[m[32m        e,[m
+[32m+[m[32m      );[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m  }, [[m
+[32m+[m[32m    invoiceDraftReady,[m
+[32m+[m[32m    task.id,[m
+[32m+[m[32m    task.type,[m
+[32m+[m[32m    invoiceFiles,[m
+[32m+[m[32m  ]);[m
+[32m+[m
+[32m+[m
+ [m
+   function addInvoiceFiles([m
+     files:[m
+[36m@@ -6493,6 +6752,11 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+       setReturnModalOpen(false);[m
+       setReturnReason('');[m
+       setReturnComment('');[m
+[32m+[m
+[32m+[m[32m      await clearInvoiceTaskDraft([m
+[32m+[m[32m        task.id,[m
+[32m+[m[32m      ).catch(() => undefined);[m
+[32m+[m
+       onBack();[m
+ [m
+     } catch (e) {[m
+[36m@@ -6533,9 +6797,6 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+       parseMoneyInput(amount);[m
+ [m
+ [m
+[31m-    setInvoiceFiles([]);[m
+[31m-[m
+[31m-[m
+     startBackgroundUploadJob({[m
+ [m
+       taskId:[m
+[36m@@ -6616,6 +6877,11 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+           );[m
+ [m
+ [m
+[32m+[m[32m          await clearInvoiceTaskDraft([m
+[32m+[m[32m            task.id,[m
+[32m+[m[32m          ).catch(() => undefined);[m
+[32m+[m
+[32m+[m
+           setProgress(99);[m
+         },[m
+     });[m
+[36m@@ -7592,6 +7858,10 @@[m [mfunction TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB[m
+ [m
+           <div className="microcopy">[m
+ [m
+[32m+[m[32m            Черновик номера, суммы и файлов[m
+[32m+[m[32m            сохраняется на этом устройстве[m
+[32m+[m[32m            автоматически.[m
+[32m+[m
+             Дата счёта ставится[m
+             автоматически —[m
+             сегодняшняя.[m

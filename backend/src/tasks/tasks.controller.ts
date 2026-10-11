@@ -1,5 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
-import { TaskStatus } from '@prisma/client';
+import {
+  Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+  import { TaskStatus,
+  Prisma,
+} from '@prisma/client';
 import { TasksService } from './tasks.service';
 
 @Controller('tasks')
@@ -17,6 +20,8 @@ export class TasksController {
       dealId: string;
       actorId: string;
       urgent?: boolean;
+      // PART_V064_N1_V5B_POA_FLAG_CONTROLLER
+      requestEtrn?: boolean;
       requestKey: string;
       supplierName: string;
       organization: 'ST' | 'MSM' | 'IP';
@@ -30,6 +35,29 @@ export class TasksController {
     return this.tasks.createPowerOfAttorney(body);
   }
 
+  // PART_V064_N1_V5B_ETRN_CONTROLLER
+  @Post('etrn')
+  createEtrn(
+    @Body()
+    body: {
+      dealId: string;
+      actorId: string;
+      urgent?: boolean;
+      poaTaskId?: string;
+      supplierName?: string;
+      details?:
+        Record<
+          string,
+          unknown
+        >;
+      comment?: string;
+    },
+  ) {
+    return this.tasks
+      .createEtrn(body);
+  }
+
+
   @Post(':id/complete-power-of-attorney')
   completePowerOfAttorney(
     @Param('id') id: string,
@@ -38,6 +66,9 @@ export class TasksController {
     return this.tasks.completePowerOfAttorney(
       id,
       body.actorId,
+      (body as any).poaNumber,
+      (body as any).accountantComment
+      /* PART_V062_POA_COMPLETE_CONTROLLER */
     );
   }
 
@@ -68,5 +99,66 @@ export class TasksController {
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() body: { status: TaskStatus; assigneeId?: string }) {
     return this.tasks.updateStatus(id, body.status, body.assigneeId);
+  }
+
+
+  @Post(':id/return-to-manager')
+  returnToManager(
+    @Param('id') id: string,
+
+    @Body() body: {
+      actorId: string;
+      reasonCode: string;
+      comment?: string;
+    },
+  ) {
+
+    return this.tasks
+      .returnToManager(
+        id,
+        body,
+      );
+  }
+
+
+  @Post(':id/resubmit-to-accounting')
+  resubmitToAccounting(
+    @Param('id') id: string,
+
+    @Body() body: {
+      actorId: string;
+      description?: string;
+      urgent?: boolean;
+      details?: Prisma.InputJsonValue;
+    },
+  ) {
+
+    return this.tasks
+      .resubmitToAccounting(
+        id,
+        body,
+      );
+  }
+
+
+  @Post(':id/resubmit-supplier-payment')
+  resubmitSupplierPayment(
+    @Param('id') id: string,
+
+    @Body() body: {
+      actorId: string;
+      supplierName?: string;
+      incomingInvoiceNumber?: string;
+      amount?: number;
+      comment?: string;
+      urgent?: boolean;
+    },
+  ) {
+
+    return this.tasks
+      .resubmitSupplierPayment(
+        id,
+        body,
+      );
   }
 }

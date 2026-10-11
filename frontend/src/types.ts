@@ -115,6 +115,7 @@ export type Deal = {
   clientPhone?: string;
   managerComment?: string;
   accountingComment?: string;
+  requestMode?: string;
   requestText?: string;
   marginMode?: string;
   marginValue?: string | number;

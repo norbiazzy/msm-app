@@ -1,0 +1,29 @@
+v062.1 — hotfix двойной запятой в tasks.service.ts
+
+Исправляет только:
+backend/src/tasks/tasks.service.ts
+
+Причина:
+после v062 v4 сигнатура могла стать:
+actorId: string,,
+
+Запуск:
+
+cd D:\job\it\msm-app
+
+node .\apply-v062-1-fix-complete-poa-signature.cjs --check
+
+Если OK:
+
+node .\apply-v062-1-fix-complete-poa-signature.cjs
+
+cd .\backend
+npm run build
+
+После успешного backend build:
+
+cd ..\frontend
+npm run build
+
+cd ..
+node .\audit-v062-power-of-attorney-rebuild.cjs

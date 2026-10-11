@@ -1,0 +1,38 @@
+v0.6.0 Part 1N-A v2 — возвращённая задача у менеджера
+
+Старый Part 1N-A НЕ использовать.
+
+Что делает:
+- listTasks получает события возврата TASK_RETURNED_TO_MANAGER
+  и старые INVOICE_REQUEST_RETURNED;
+- Prisma migration НЕ нужна;
+- AuditEvent получает frontend-поле entityId;
+- у задачи NEED_DATA появляется заметный блок «Нужно исправить»;
+- показывается причина возврата;
+- показывается комментарий бухгалтера;
+- менеджерская группа называется «Нужно исправить»;
+- нажатие на карточку открывает именно #tasks/<taskId>.
+
+Исправлено в v2:
+- корректно разбирает TasksView с destructuring-параметрами;
+- не путает { user, onChanged } с телом функции;
+- повторный запуск не создаёт дубли.
+
+Распаковать ZIP в:
+D:\job\it\msm-app
+
+Проверка:
+node .\apply-v060-part1n-a-v2-manager-return-card.cjs --check
+
+Если всё OK:
+node .\apply-v060-part1n-a-v2-manager-return-card.cjs
+
+Затем:
+git diff --check
+cd .\backend
+npm run build
+cd ..\frontend
+npm run build
+
+Следующий этап Part 1N-B:
+открыть возвращённую задачу -> исправить -> повторно отправить бухгалтеру.

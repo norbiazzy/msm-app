@@ -1,5 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { SupplierPurchaseStatus, TaskStatus, TaskType } from '@prisma/client';
+import {
+  BadRequestException, Injectable } from '@nestjs/common';
+  import { SupplierPurchaseStatus, TaskStatus, TaskType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -33,6 +36,28 @@ export class TasksService {
           deal: {
 
             include: {
+
+              // PART_1N_RETURN_AUDIT_EVENTS
+              auditEvents: {
+
+                where: {
+
+                  action: {
+                    in: [
+                      'TASK_RETURNED_TO_MANAGER',
+                      'INVOICE_REQUEST_RETURNED',
+                    ],
+                  },
+                },
+
+                orderBy: {
+                  createdAt:
+                    'desc',
+                },
+
+                take: 20,
+              },
+
 
               invoices: {
                 where: {
@@ -79,6 +104,17 @@ export class TasksService {
           },
 
 
+          // PART_V064_M_TASK_CREATED_BY
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              role: true,
+            },
+          },
+
+
           assignee: {
 
             select: {
@@ -104,6 +140,12 @@ export class TasksService {
 
     const reasons:
       Record<string, string> = {
+      NEED_CLARIFICATION:
+        'Требуется уточнение',
+      INCORRECT_DATA:
+        'Данные заполнены неверно',
+      MISSING_DATA:
+        'Не хватает данных',
       NO_INCOMING_INVOICE:
         'Нет входящего счёта',
       NO_TERMS:
@@ -169,15 +211,33 @@ export class TasksService {
         }
 
 
+                // PART_1N_G1_INVOICE_MANAGER_ASSIGN
+        const invoiceTaskDeal =
+          await tx.deal
+            .findUniqueOrThrow({
+              where: {
+                id:
+                  task.dealId,
+              },
+
+              select: {
+                managerId:
+                  true,
+              },
+            });
+
         const updated =
-          await tx.task.update({
+          await
+
+tx.task.update({
             where: { id },
             data: {
               status:
                 TaskStatus.NEED_DATA,
               // После возврата задача снова принадлежит менеджеру,
               // а не остаётся назначенной на бухгалтера.
-              assigneeId: null,
+              assigneeId:
+                invoiceTaskDeal.managerId,
               completedAt: null,
             },
           });
@@ -223,6 +283,8 @@ export class TasksService {
       dealId: string;
       actorId: string;
       urgent?: boolean;
+      // PART_V064_N1_V5B_POA_FLAG_SERVICE
+      requestEtrn?: boolean;
       requestKey: string;
       supplierName: string;
       organization: 'ST' | 'MSM' | 'IP';
@@ -293,6 +355,10 @@ export class TasksService {
           payload: {
             kind:
               'POWER_OF_ATTORNEY',
+            requestEtrn:
+              Boolean(
+                body.requestEtrn
+              ),
             requestKey:
               body.requestKey,
             supplierName,
@@ -345,12 +411,245 @@ export class TasksService {
   }
 
 
-  async completePowerOfAttorney(
-    id: string,
-    actorId: string,
+  // PART_V064_N1_V5B_ETRN_SERVICE
+  // PART_V064_N2_ETRN_BACKEND
+  async createEtrn(
+    body: {
+      dealId: string;
+      actorId: string;
+      urgent?: boolean;
+      poaTaskId?: string;
+      supplierName?: string;
+      details?: Record<string, unknown>;
+      comment?: string;
+    },
   ) {
+    if (!body.poaTaskId) {
+      throw new BadRequestException('Не выбрана готовая доверенность');
+    }
 
-    return this.prisma.$transaction(
+    const requestDetails = body.details || {};
+
+    const deal = await this.prisma.deal.findUniqueOrThrow({
+      where: { id: body.dealId },
+      include: {
+        invoices: {
+          where: { isCurrent: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { file: true },
+        },
+      },
+    });
+
+    const poaTask = await this.prisma.task.findFirstOrThrow({
+      where: {
+        id: body.poaTaskId,
+        dealId: body.dealId,
+        type: TaskType.POWER_OF_ATTORNEY,
+      },
+      select: {
+        id: true,
+        status: true,
+        details: true,
+      },
+    });
+
+    if (poaTask.status !== TaskStatus.DONE) {
+      throw new BadRequestException('Доверенность ещё не готова');
+    }
+
+    const poaDetails =
+      poaTask.details &&
+      typeof poaTask.details === 'object' &&
+      !Array.isArray(poaTask.details)
+        ? poaTask.details as Record<string, unknown>
+        : {};
+
+    const poaNumber = String(poaDetails.poaNumber || '').trim();
+
+    if (!poaNumber) {
+      throw new BadRequestException('У готовой доверенности не указан номер');
+    }
+
+    const poaFile = await this.prisma.storedFile.findFirst({
+      where: {
+        dealId: body.dealId,
+        category: 'POWER_OF_ATTORNEY_RESULT_' + body.poaTaskId,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!poaFile) {
+      throw new BadRequestException('Не найден файл готовой доверенности');
+    }
+
+    const currentInvoice = deal.invoices[0];
+
+    if (!currentInvoice) {
+      throw new BadRequestException('В сделке нет актуального счёта');
+    }
+
+    if (!currentInvoice.fileId) {
+      throw new BadRequestException('У актуального счёта нет файла');
+    }
+
+    const deliveryAddresses = Array.isArray(deal.deliveryAddresses)
+      ? deal.deliveryAddresses.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    const value = (key: string, fallback = '') =>
+      String(requestDetails[key] || fallback || '').trim();
+
+    const details = {
+      poaNumber,
+      invoiceNumber: currentInvoice.number,
+      invoiceSellerType: currentInvoice.sellerType,
+      loadingAddress: value('loadingAddress'),
+      unloadingAddress: value('unloadingAddress', deliveryAddresses[0] || ''),
+      objectContactName: value('objectContactName', deal.contactName || ''),
+      objectContactPhone: value('objectContactPhone', deal.clientPhone || ''),
+      carrierCompany: value('carrierCompany'),
+      carrierContactName: value('carrierContactName'),
+      carrierPhone: value('carrierPhone'),
+    };
+
+    const required = [
+      ['Адрес погрузки', details.loadingAddress],
+      ['Адрес выгрузки', details.unloadingAddress],
+      ['Имя контакта на объекте', details.objectContactName],
+      ['Телефон контакта на объекте', details.objectContactPhone],
+      ['Перевозчик / ООО', details.carrierCompany],
+      ['Контакт перевозчика', details.carrierContactName],
+      ['Телефон перевозчика', details.carrierPhone],
+    ] as const;
+
+    const missing = required.find(([, fieldValue]) => !fieldValue);
+
+    if (missing) {
+      throw new BadRequestException('Заполните поле: ' + missing[0]);
+    }
+
+    const existing = await this.prisma.task.findMany({
+      where: {
+        dealId: body.dealId,
+        type: TaskType.ETRN,
+        status: { not: TaskStatus.CANCELLED },
+      },
+    });
+
+    const duplicate = existing.find((item) => {
+      const payload =
+        item.payload &&
+        typeof item.payload === 'object' &&
+        !Array.isArray(item.payload)
+          ? item.payload as Record<string, unknown>
+          : {};
+      return String(payload.poaTaskId || '') === body.poaTaskId;
+    });
+
+    if (duplicate) {
+      return { ...duplicate, deal };
+    }
+
+    const supplierName = body.supplierName?.trim();
+
+    const task = await this.prisma.task.create({
+      data: {
+        dealId: body.dealId,
+        type: TaskType.ETRN,
+        status: TaskStatus.NEW,
+        urgent: Boolean(body.urgent),
+        title: supplierName ? 'Создать ЭТРН: ' + supplierName : 'Создать ЭТРН',
+        description: body.comment?.trim() || undefined,
+        createdById: body.actorId,
+        details: details as any,
+        payload: {
+          kind: 'ETRN',
+          poaTaskId: body.poaTaskId,
+          poaNumber,
+          poaFileId: poaFile.id,
+          poaFileName: poaFile.originalName,
+          invoiceId: currentInvoice.id,
+          invoiceNumber: currentInvoice.number,
+          invoiceSellerType: currentInvoice.sellerType,
+          invoiceFileId: currentInvoice.fileId,
+          invoiceFileName: currentInvoice.file?.originalName || null,
+          supplierName: supplierName || null,
+        } as any,
+      },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        dealId: body.dealId,
+        actorId: body.actorId,
+        action: 'ETRN_REQUESTED',
+        entityType: 'Task',
+        entityId: task.id,
+        newValue: {
+          poaTaskId: body.poaTaskId,
+          poaNumber,
+          poaFileId: poaFile.id,
+          invoiceId: currentInvoice.id,
+          invoiceNumber: currentInvoice.number,
+          invoiceFileId: currentInvoice.fileId,
+        },
+        reason: body.comment?.trim() || undefined,
+      },
+    });
+
+    return { ...task, deal };
+  }
+
+  async completePowerOfAttorney(id: string,
+    actorId: string,
+    poaNumber?: string,
+    accountantComment?: string) {
+
+
+    /* PART_V062_POA_COMPLETE_SERVICE */
+    const currentPoaTaskForResult =
+      await this.prisma.task.findUnique({
+        where: {
+          id: id,
+        },
+        select: {
+          details: true,
+        },
+      });
+
+    const currentPoaDetails =
+      currentPoaTaskForResult?.details &&
+      typeof currentPoaTaskForResult.details ===
+        'object' &&
+      !Array.isArray(
+        currentPoaTaskForResult.details
+      )
+        ? (
+            currentPoaTaskForResult.details as
+              Record<string, unknown>
+          )
+        : {};
+
+    await this.prisma.task.update({
+      where: {
+        id: id,
+      },
+      data: {
+        details: {
+          ...currentPoaDetails,
+          poaNumber:
+            poaNumber?.trim() || null,
+          accountantComment:
+            accountantComment?.trim() ||
+            null,
+        } as any,
+      },
+    });
+
+
+return this.prisma.$transaction(
       async (tx) => {
 
         const task =
@@ -645,5 +944,680 @@ export class TasksService {
               : null,
         },
       });
+  }
+
+
+  async returnToManager(
+    id: string,
+    body: {
+      actorId: string;
+      reasonCode: string;
+      comment?: string;
+    },
+  ) {
+
+    const reasons:
+      Record<string, string> = {
+
+      MISSING_DATA:
+        'Не хватает данных',
+
+      INCORRECT_DATA:
+        'Данные заполнены неверно',
+
+      NEED_CLARIFICATION:
+        'Требуется уточнение',
+
+      NO_INCOMING_INVOICE:
+        'Нет входящего счёта',
+
+      NO_TERMS:
+        'Нет условий',
+
+      NO_DETAILS:
+        'Нет реквизитов / непонятно, на кого делать',
+
+      OTHER:
+        'Другое',
+    };
+
+
+    const reasonLabel =
+      reasons[
+        body.reasonCode
+      ];
+
+
+    if (!reasonLabel) {
+
+      throw new BadRequestException(
+        'Выберите причину возврата',
+      );
+    }
+
+
+    const comment =
+      body.comment?.trim() ||
+      '';
+
+
+    if (
+      body.reasonCode ===
+        'OTHER' &&
+      !comment
+    ) {
+
+      throw new BadRequestException(
+        'Для причины «Другое» добавьте комментарий',
+      );
+    }
+
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          const task =
+            await tx.task
+              .findUniqueOrThrow({
+
+                where: {
+                  id,
+                },
+              });
+
+
+          if (
+            task.status !==
+              TaskStatus.NEW &&
+            task.status !==
+              TaskStatus.IN_PROGRESS
+          ) {
+
+            throw new BadRequestException(
+              'Вернуть менеджеру можно только активную задачу',
+            );
+          }
+
+
+          const deal =
+            await tx.deal
+              .findUniqueOrThrow({
+
+                where: {
+                  id:
+                    task.dealId,
+                },
+
+                select: {
+                  managerId:
+                    true,
+                },
+              });
+
+
+          const updated =
+            await tx.task
+              .update({
+
+                where: {
+                  id,
+                },
+
+                data: {
+
+                  status:
+                    TaskStatus.NEED_DATA,
+
+                  assigneeId:
+                    deal.managerId,
+
+                  completedAt:
+                    null,
+                },
+              });
+
+
+          await tx.auditEvent
+            .create({
+
+              data: {
+
+                dealId:
+                  task.dealId,
+
+                actorId:
+                  body.actorId,
+
+                action:
+                  'TASK_RETURNED_TO_MANAGER',
+
+                entityType:
+                  'Task',
+
+                entityId:
+                  task.id,
+
+                oldValue: {
+
+                  status:
+                    task.status,
+
+                  assigneeId:
+                    task.assigneeId,
+                },
+
+                newValue: {
+
+                  status:
+                    TaskStatus.NEED_DATA,
+
+                  assigneeId:
+                    deal.managerId,
+
+                  taskType:
+                    task.type,
+
+                  reasonCode:
+                    body.reasonCode,
+
+                  reasonLabel,
+                },
+
+                reason:
+                  comment ||
+                  undefined,
+              },
+            });
+
+
+          return updated;
+        },
+      );
+  }
+
+
+  async resubmitToAccounting(
+    id: string,
+    body: {
+      actorId: string;
+      description?: string;
+      urgent?: boolean;
+      details?: Prisma.InputJsonValue;
+    },
+  ) {
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          const task =
+            await tx.task
+              .findUniqueOrThrow({
+
+                where: {
+                  id,
+                },
+
+                include: {
+
+                  deal: {
+
+                    select: {
+                      managerId:
+                        true,
+                    },
+                  },
+                },
+              });
+
+
+          if (
+            task.status !==
+              TaskStatus.NEED_DATA
+          ) {
+
+            throw new BadRequestException(
+              'Повторно отправить можно только возвращённую задачу',
+            );
+          }
+
+
+          const nextDescription =
+            body.description !==
+              undefined
+
+              ? (
+                  body.description
+                    .trim() ||
+                  null
+                )
+
+              : task.description;
+
+
+          const nextUrgent =
+            body.urgent !==
+              undefined
+
+              ? Boolean(
+                  body.urgent
+                )
+
+              : task.urgent;
+
+
+          const updated =
+            await tx.task
+              .update({
+
+                where: {
+                  id,
+                },
+
+                data: {
+
+                  status:
+                    TaskStatus.NEW,
+
+                  assigneeId:
+                    null,
+
+                  completedAt:
+                    null,
+
+                  description:
+                    nextDescription,
+
+                  urgent:
+                    nextUrgent,
+
+                  details:
+                    body.details,
+                },
+              });
+
+
+          await tx.auditEvent
+            .create({
+
+              data: {
+
+                dealId:
+                  task.dealId,
+
+                actorId:
+                  body.actorId,
+
+                action:
+                  'TASK_RESUBMITTED_TO_ACCOUNTING',
+
+                entityType:
+                  'Task',
+
+                entityId:
+                  task.id,
+
+                oldValue: {
+
+                  status:
+                    task.status,
+
+                  assigneeId:
+                    task.assigneeId,
+
+                  description:
+                    task.description,
+
+                  urgent:
+                    task.urgent,
+                },
+
+                newValue: {
+
+                  status:
+                    TaskStatus.NEW,
+
+                  assigneeId:
+                    null,
+
+                  description:
+                    nextDescription,
+
+                  urgent:
+                    nextUrgent,
+
+                  taskType:
+                    task.type,
+                },
+              },
+            });
+
+
+          return updated;
+        },
+      );
+  }
+
+
+  async resubmitSupplierPayment(
+    id: string,
+
+    body: {
+      actorId: string;
+      supplierName?: string;
+      incomingInvoiceNumber?: string;
+      amount?: number;
+      comment?: string;
+      urgent?: boolean;
+    },
+  ) {
+
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+
+          const task =
+            await tx.task
+              .findUniqueOrThrow({
+
+                where: {
+                  id,
+                },
+
+                include: {
+                  supplierPurchase:
+                    true,
+                },
+              });
+
+
+          if (
+            task.type !==
+              TaskType.PAY_SUPPLIER
+          ) {
+
+            throw new BadRequestException(
+              'Эта задача не является оплатой поставщику',
+            );
+          }
+
+
+          if (
+            task.status !==
+              TaskStatus.NEED_DATA
+          ) {
+
+            throw new BadRequestException(
+              'Повторно отправить можно только возвращённую задачу',
+            );
+          }
+
+
+          if (
+            !task.supplierPurchaseId ||
+            !task.supplierPurchase
+          ) {
+
+            throw new BadRequestException(
+              'У задачи не найдена закупка поставщика',
+            );
+          }
+
+
+          const purchase =
+            task.supplierPurchase;
+
+
+          const supplierName =
+            body.supplierName !==
+              undefined
+
+              ? (
+                  body.supplierName
+                    .trim() ||
+                  purchase
+                    .supplierName
+                )
+
+              : purchase
+                  .supplierName;
+
+
+          const invoiceNumber =
+            body.incomingInvoiceNumber !==
+              undefined
+
+              ? (
+                  body
+                    .incomingInvoiceNumber
+                    .trim() ||
+                  null
+                )
+
+              : purchase
+                  .incomingInvoiceNumber;
+
+
+          const amount =
+            body.amount !==
+              undefined
+
+              ? Number(
+                  body.amount
+                )
+
+              : (
+                  purchase
+                    .requestedAmount !==
+                    null
+
+                    ? Number(
+                        purchase
+                          .requestedAmount
+                      )
+
+                    : purchase
+                        .incomingInvoiceAmount !==
+                        null
+
+                      ? Number(
+                          purchase
+                            .incomingInvoiceAmount
+                        )
+
+                      : null
+                );
+
+
+          if (
+            amount !== null &&
+            (
+              !Number.isFinite(
+                amount
+              ) ||
+              amount < 0
+            )
+          ) {
+
+            throw new BadRequestException(
+              'Проверьте сумму оплаты',
+            );
+          }
+
+
+          const comment =
+            body.comment !==
+              undefined
+
+              ? (
+                  body.comment
+                    .trim() ||
+                  null
+                )
+
+              : purchase
+                  .comment;
+
+
+          const urgent =
+            body.urgent !==
+              undefined
+
+              ? Boolean(
+                  body.urgent
+                )
+
+              : task.urgent;
+
+
+          const updatedPurchase =
+            await tx
+              .supplierPurchase
+              .update({
+
+                where: {
+                  id:
+                    task
+                      .supplierPurchaseId,
+                },
+
+                data: {
+
+                  supplierName,
+
+                  incomingInvoiceNumber:
+                    invoiceNumber,
+
+                  incomingInvoiceAmount:
+                    amount,
+
+                  requestedAmount:
+                    amount,
+
+                  comment,
+
+                  status:
+                    SupplierPurchaseStatus
+                      .PAYMENT_REQUESTED,
+                },
+              });
+
+
+          const updatedTask =
+            await tx.task
+              .update({
+
+                where: {
+                  id,
+                },
+
+                data: {
+
+                  status:
+                    TaskStatus.NEW,
+
+                  assigneeId:
+                    null,
+
+                  completedAt:
+                    null,
+
+                  urgent,
+
+                  title:
+                    'Оплатить поставщику: ' +
+                    supplierName,
+
+                  description:
+                    comment,
+                },
+              });
+
+
+          await tx.auditEvent
+            .create({
+
+              data: {
+
+                dealId:
+                  task.dealId,
+
+                actorId:
+                  body.actorId,
+
+                action:
+                  'SUPPLIER_PAYMENT_TASK_RESUBMITTED',
+
+                entityType:
+                  'Task',
+
+                entityId:
+                  task.id,
+
+                oldValue: {
+
+                  status:
+                    task.status,
+
+                  supplierName:
+                    purchase
+                      .supplierName,
+
+                  incomingInvoiceNumber:
+                    purchase
+                      .incomingInvoiceNumber,
+
+                  amount:
+                    purchase
+                      .requestedAmount
+                      ?.toString() ??
+                    purchase
+                      .incomingInvoiceAmount
+                      ?.toString() ??
+                    null,
+
+                  comment:
+                    purchase
+                      .comment,
+
+                  urgent:
+                    task.urgent,
+                },
+
+                newValue: {
+
+                  status:
+                    TaskStatus.NEW,
+
+                  supplierName:
+                    updatedPurchase
+                      .supplierName,
+
+                  incomingInvoiceNumber:
+                    updatedPurchase
+                      .incomingInvoiceNumber,
+
+                  amount:
+                    updatedPurchase
+                      .requestedAmount
+                      ?.toString() ??
+                    null,
+
+                  comment:
+                    updatedPurchase
+                      .comment,
+
+                  urgent:
+                    updatedTask
+                      .urgent,
+                },
+              },
+            });
+
+
+          return updatedTask;
+        },
+      );
   }
 }

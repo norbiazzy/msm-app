@@ -1,0 +1,36 @@
+v0.6.0 Part 1N-B3 — файлы при повторной отправке оплаты поставщику
+
+Требует:
+- Part 1N-B2
+- существующий backgroundUploads / task-card progress
+
+Что меняется:
+- в возвращённой PAY_SUPPLIER задаче менеджер может добавить:
+  * новый входящий счёт;
+  * дополнительные документы;
+- если файлов нет — задача повторно отправляется сразу;
+- если файлы есть:
+  1) запускается background upload с taskId;
+  2) менеджер сразу возвращается к списку задач;
+  3) прогресс виден на карточке этой задачи;
+  4) после загрузки файлов выполняется resubmitSupplierPaymentTask;
+  5) та же задача становится NEW;
+- основной файл хранится как SUPPLIER_INVOICE_<purchaseId>;
+- дополнительные как SUPPLIER_DOCUMENT_<purchaseId>;
+- SupplierPaymentTask бухгалтера показывает обе категории;
+- старые файлы не удаляются;
+- backend и Prisma не меняются.
+
+Распаковать ZIP в:
+D:\job\it\msm-app
+
+Проверка:
+node .\apply-v060-part1n-b3-supplier-return-files.cjs --check
+
+Если OK:
+node .\apply-v060-part1n-b3-supplier-return-files.cjs
+
+Затем:
+git diff --check
+cd .\frontend
+npm run build

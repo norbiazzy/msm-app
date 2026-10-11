@@ -1,0 +1,422 @@
+function DealCard({
+  deal,
+  onOpen,
+  uploadJob,
+}: {
+  deal: Deal;
+  onOpen: () => void;
+  uploadJob?: BackgroundUploadJob;
+}) {
+  const invoice =
+    deal.invoices[0];
+
+  const urgent =
+    deal.tasks.some(
+      (task) =>
+        task.urgent
+    );
+
+  const activeTasks =
+    deal.tasks.filter(
+      (task) =>
+        ![
+          'DONE',
+          'CANCELLED',
+        ].includes(
+          task.status
+        )
+    );
+
+  const needsManagerAction =
+    invoiceRequestNeedsManager(
+      deal
+    );
+
+  const returnedInvoiceTask =
+    activeTasks.find(
+      (task) =>
+        task.type ===
+          'ISSUE_CLIENT_INVOICE' &&
+        task.status ===
+          'NEED_DATA'
+    );
+
+  const latestReturn =
+    deal.auditEvents?.find(
+      (event) =>
+        event.action ===
+        'INVOICE_REQUEST_RETURNED'
+    );
+
+  const returnReason =
+    String(
+      latestReturn
+        ?.newValue
+        ?.reasonLabel ||
+      'Нужно уточнить данные для счёта'
+    );
+
+
+  function stopCardOpen(
+    event: {
+      stopPropagation:
+        () => void;
+    }
+  ) {
+    event.stopPropagation();
+  }
+
+
+  return (
+
+    <div
+      className={
+        'dealCard clickable' +
+        (
+          needsManagerAction
+            ? ' dealCardNeedsAction'
+            : ''
+        )
+      }
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+
+        if (
+          event.key ===
+            'Enter' ||
+          event.key ===
+            ' '
+        ) {
+
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+
+      <div className="dealTop">
+
+        <div className="dealIdentity">
+
+          <a
+            className="dealInternalNumberLink"
+            href={
+              '#deal/' +
+              encodeURIComponent(
+                deal.id
+              )
+            }
+            onClick={
+              stopCardOpen
+            }
+          >
+            ЗК-
+            {deal.internalNumber}
+          </a>
+
+
+          {invoice && (
+
+            <span className="dealInvoiceNumber">
+              {
+                sellerLabels[
+                  deal.sellerType
+                ]
+              }
+              -
+              {invoice.number}
+            </span>
+
+          )}
+
+
+          <span className="dealClientName">
+            {deal.clientName}
+          </span>
+
+        </div>
+
+
+        {urgent && (
+
+          <b className="urgent">
+            СРОЧНО
+          </b>
+
+        )}
+
+      </div>
+
+
+      <div className="dealMeta">
+
+        <span>
+          Отгрузка:{' '}
+          {
+            deal.plannedShipmentAt
+              ? new Date(
+                  deal.plannedShipmentAt
+                )
+                  .toLocaleDateString(
+                    'ru-RU'
+                  )
+              : 'не указана'
+          }
+        </span>
+
+
+        {needsManagerAction ? (
+
+          <b className="dealCardActionStatus">
+            Нужны данные
+          </b>
+
+        ) : (
+
+          <span>
+            {
+              invoice
+                ? statusLabel(
+                    invoice.status
+                  )
+                : 'Ожидаем счёт'
+            }
+          </span>
+
+        )}
+
+      </div>
+
+
+      <div className="paymentMini">
+        {
+          paymentStatusLabel(
+            deal.paymentStatus
+          )
+        }
+      </div>
+
+
+      {activeTasks.length > 0 && (
+
+        <div
+          className="dealTaskLinks"
+          onClick={
+            stopCardOpen
+          }
+        >
+
+          <span className="dealTaskLinksLabel">
+            {
+              activeTasks.length === 1
+                ? 'Задача'
+                : 'Задачи'
+            }
+          </span>
+
+
+          <div className="dealTaskLinksList">
+
+            {activeTasks.map(
+              (task) => (
+
+                <a
+                  key={task.id}
+                  className={
+                    'dealTaskLink' +
+                    (
+                      task.status ===
+                        'NEED_DATA'
+                        ? ' dealTaskLinkNeedData'
+                        : ''
+                    )
+                  }
+                  href={
+                    '#tasks/' +
+                    encodeURIComponent(
+                      task.id
+                    )
+                  }
+                  onClick={
+                    stopCardOpen
+                  }
+                >
+                  <strong>
+                    {task.title}
+                  </strong>
+
+                  <span>
+                    {
+                      task.status ===
+                        'NEED_DATA'
+                        ? 'Нужно исправить'
+                        : taskStatus(
+                            task.status
+                          )
+                    }
+                  </span>
+                </a>
+
+              )
+            )}
+
+          </div>
+
+        </div>
+
+      )}
+
+
+      {uploadJob && (
+
+        <div
+          className={
+            'dealUploadState dealUpload-' +
+            uploadJob.status
+              .toLowerCase()
+          }
+        >
+
+          <div className="dealUploadStateTop">
+
+            <strong>
+              {
+                uploadJob.status ===
+                  'SUCCESS'
+                  ? '✓ ' +
+                    (
+                      uploadJob
+                        .successTitle ||
+                      uploadJob.title
+                    )
+                  : uploadJob.status ===
+                      'ERROR'
+                    ? 'Не удалось отправить файлы'
+                    : uploadJob.title
+              }
+            </strong>
+
+            <b>
+              {uploadJob.progress}%
+            </b>
+
+          </div>
+
+
+          <div className="dealUploadMiniBar">
+
+            <span
+              style={{
+                width:
+                  uploadJob.progress +
+                  '%',
+              }}
+            />
+
+          </div>
+
+
+          {uploadJob.status ===
+            'RUNNING' && (
+
+            <span>
+              {
+                uploadJob.currentFile
+                  ? 'Загружаем: ' +
+                    uploadJob.currentFile
+                  : 'Подготавливаем отправку…'
+              }
+            </span>
+
+          )}
+
+
+          {uploadJob.status ===
+            'ERROR' &&
+            uploadJob.error && (
+
+            <span>
+              {uploadJob.error}
+            </span>
+
+          )}
+
+        </div>
+
+      )}
+
+
+      {needsManagerAction ? (
+
+        <div className="dealCardActionBox">
+
+          <div className="dealCardActionHead">
+
+            <strong>
+              Бухгалтерия вернула запрос
+            </strong>
+
+            <span>
+              {returnReason}
+            </span>
+
+          </div>
+
+
+          {latestReturn?.reason && (
+
+            <p>
+              {latestReturn.reason}
+            </p>
+
+          )}
+
+
+          {returnedInvoiceTask ? (
+
+            <a
+              className="dealCardActionCta dealCardActionLink"
+              href={
+                '#tasks/' +
+                encodeURIComponent(
+                  returnedInvoiceTask.id
+                )
+              }
+              onClick={
+                stopCardOpen
+              }
+            >
+              Открыть задачу и исправить →
+            </a>
+
+          ) : (
+
+            <span className="dealCardActionCta">
+              Исправить и повторно отправить →
+            </span>
+
+          )}
+
+        </div>
+
+      ) : (
+
+        <>
+
+          {deal.managerComment && (
+
+            <div className="note">
+              📝 {deal.managerComment}
+            </div>
+
+          )}
+
+        </>
+
+      )}
+
+    </div>
+  );
+}

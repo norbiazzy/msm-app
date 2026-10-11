@@ -1,0 +1,24 @@
+v062.2 — frontend TypeScript hotfix
+
+Исправляет только:
+- frontend/src/api.ts
+- frontend/src/PowerOfAttorneyBlock.tsx
+
+Исправления:
+1. export async export async -> export async
+2. возвращает SellerType в import type
+3. task.details в карточке DealTask читает через безопасный cast
+4. убирает trailing whitespace только в этих двух файлах
+
+Запуск:
+
+cd D:\job\it\msm-app
+
+node .\apply-v062-2-fix-frontend-ts.cjs --check
+
+Если OK:
+
+node .\apply-v062-2-fix-frontend-ts.cjs
+
+cd .\frontend
+npm run build

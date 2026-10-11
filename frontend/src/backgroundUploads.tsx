@@ -17,6 +17,9 @@ export type BackgroundUploadJob = {
 
   dealId?: string;
 
+  // PART_V064_O19_V3_UNIFIED_UPLOAD_UX
+  scope?: 'TASK' | 'DEAL';
+
   successTitle?: string;
 
   title: string;
@@ -26,6 +29,8 @@ export type BackgroundUploadJob = {
   status:
     | 'RUNNING'
     | 'SUCCESS'
+    | 'WAITING_NETWORK'
+    | 'WAITING_SERVER'
     | 'ERROR';
 
   progress: number;
@@ -37,6 +42,10 @@ export type BackgroundUploadJob = {
   totalFiles: number;
 
   error?: string;
+
+  retry?: () => void;
+
+  retryOnReconnect?: boolean;
 };
 
 
@@ -92,6 +101,79 @@ function updateJob(
 
 
   emit();
+}
+
+
+function retryOfflineJobs() {
+
+  window.setTimeout(
+    () => {
+
+      const pending =
+        jobs.filter(
+          (job) =>
+            job.status === 'WAITING_NETWORK' &&
+            job.retryOnReconnect
+        );
+
+
+      for (
+        const job
+        of pending
+      ) {
+
+        job.retry?.();
+      }
+    },
+
+    400,
+  );
+}
+
+
+if (
+  typeof window !==
+  'undefined'
+) {
+
+
+
+function retryWaitingServerJobs() {
+
+  window.setTimeout(
+    () => {
+
+      const pending =
+        jobs.filter(
+          (job) =>
+            job.status ===
+              'WAITING_SERVER' &&
+            job.retry
+        );
+
+
+      for (
+        const job
+        of pending
+      ) {
+
+        job.retry?.();
+      }
+    },
+
+    250,
+  );
+}
+
+window.addEventListener(
+    'online',
+    retryOfflineJobs
+  );
+
+  window.addEventListener(
+    'msm:server-available',
+    retryWaitingServerJobs
+  );
 }
 
 
@@ -162,6 +244,9 @@ export function startBackgroundUploadJob(
 
     subtitle?: string;
 
+    // PART_V064_O19_V3_UNIFIED_UPLOAD_UX
+    scope?: 'TASK' | 'DEAL';
+
     files: File[];
 
     run: (
@@ -196,8 +281,85 @@ export function startBackgroundUploadJob(
       .slice(2);
 
 
+  // PART_V064_O19_V3_UNIFIED_UPLOAD_UX
+  const uploadRoute =
+    window.location.hash
+      .replace(/^#/, '');
+
+  const inferredUploadScope:
+    'TASK' | 'DEAL' =
+      options.scope ||
+      (
+        uploadRoute.startsWith(
+          'tasks'
+        )
+          ? 'TASK'
+          : 'DEAL'
+      );
+
+  const inferredTaskId =
+    options.taskId ||
+    (
+      inferredUploadScope === 'TASK' &&
+      uploadRoute.startsWith(
+        'tasks/'
+      )
+        ? decodeURIComponent(
+            uploadRoute.slice(
+              'tasks/'.length
+            )
+          )
+        : undefined
+    );
+
+  const inferredDealId =
+    options.dealId ||
+    (
+      inferredUploadScope === 'DEAL' &&
+      uploadRoute.startsWith(
+        'deal/'
+      )
+        ? decodeURIComponent(
+            uploadRoute.slice(
+              'deal/'.length
+            )
+          )
+        : undefined
+    );
+
+
+  // PART_V064_O23_TASK_UPLOAD_PROGRESS
+  const taskUploadRoute =
+    window.location.hash
+      .replace(/^#/, '');
+
+  const resolvedUploadScope:
+    'TASK' | 'DEAL' =
+      options.scope ||
+      (
+        taskUploadRoute === 'tasks' ||
+        taskUploadRoute.startsWith(
+          'tasks/'
+        )
+          ? 'TASK'
+          : 'DEAL'
+      );
+
+
   const totalFiles =
     options.files.length;
+
+
+  const uploadedFiles =
+    new Map<
+      string,
+      {
+        id: string;
+      }
+    >();
+
+
+  let running = false;
 
 
   jobs = [
@@ -205,10 +367,13 @@ export function startBackgroundUploadJob(
       id,
 
       taskId:
-        options.taskId,
+        inferredTaskId,
 
       dealId:
-        options.dealId,
+        inferredDealId,
+
+      scope:
+        inferredUploadScope,
 
       successTitle:
         options.successTitle,
@@ -231,6 +396,10 @@ export function startBackgroundUploadJob(
         0,
 
       totalFiles,
+
+      retry: () => {
+        void execute();
+      },
     },
 
     ...jobs,
@@ -239,9 +408,54 @@ export function startBackgroundUploadJob(
 
   emit();
 
+  // PART_V064_O19_V3_UNIFIED_UPLOAD_UX
+  if (
+    inferredUploadScope === 'TASK' &&
+    uploadRoute.startsWith(
+      'tasks/'
+    )
+  ) {
+    window.location.hash =
+      '#tasks';
+  }
 
-  void (
-    async () => {
+
+
+  async function execute() {
+
+    if (running) {
+      return;
+    }
+
+
+    running = true;
+
+
+    updateJob(
+      id,
+      {
+        status:
+          'RUNNING',
+
+        progress:
+          totalFiles
+            ? 0
+            : 15,
+
+        currentFile:
+          undefined,
+
+        completedFiles:
+          0,
+
+        error:
+          undefined,
+
+        retryOnReconnect:
+          false,
+      }
+    );
+
 
       try {
 
@@ -274,6 +488,57 @@ export function startBackgroundUploadJob(
               index,
               total,
             ) => {
+
+              const cacheKey =
+                [
+                  dealId,
+                  category,
+                  String(index),
+                  file.name,
+                  String(file.size),
+                  String(
+                    file.lastModified
+                  ),
+                ].join('|');
+
+
+              const cached =
+                uploadedFiles.get(
+                  cacheKey
+                );
+
+
+              if (cached) {
+
+                updateJob(
+                  id,
+                  {
+                    currentFile:
+                      file.name,
+
+                    completedFiles:
+                      index + 1,
+
+                    progress:
+                      Math.round(
+                        (
+                          (
+                            index + 1
+                          ) /
+                          Math.max(
+                            total,
+                            1
+                          )
+                        ) *
+                        90
+                      ),
+                  }
+                );
+
+
+                return cached;
+              }
+
 
               updateJob(
                 id,
@@ -324,6 +589,12 @@ export function startBackgroundUploadJob(
                     );
                   }
                 );
+
+
+              uploadedFiles.set(
+                cacheKey,
+                uploaded
+              );
 
 
               updateJob(
@@ -383,24 +654,72 @@ export function startBackgroundUploadJob(
 
       } catch (error) {
 
+        const waitingForNetwork =
+          typeof navigator !==
+            'undefined' &&
+          !navigator.onLine;
+
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+
+        const waitingForServer =
+          !waitingForNetwork &&
+          (
+            /failed to fetch/i.test(
+              errorMessage
+            ) ||
+            /networkerror/i.test(
+              errorMessage
+            ) ||
+            /network request failed/i.test(
+              errorMessage
+            ) ||
+            /load failed/i.test(
+              errorMessage
+            ) ||
+            /ошибка соединения при загрузке файла/i.test(
+              errorMessage
+            )
+          );
+
+
         updateJob(
           id,
           {
             status:
-              'ERROR',
+              waitingForNetwork
+                ? 'WAITING_NETWORK'
+                : waitingForServer
+                  ? 'WAITING_SERVER'
+                  : 'ERROR',
 
             error:
-              error instanceof Error
-                ? error.message
-                : String(error),
+              waitingForNetwork
+                ? 'Нет сети · отправка продолжится автоматически после восстановления'
+                : waitingForServer
+                  ? 'Сервер недоступен · отправка продолжится автоматически'
+                  : errorMessage,
 
             currentFile:
               undefined,
+
+            retryOnReconnect:
+              waitingForNetwork ||
+              waitingForServer,
           }
         );
+      } finally {
+
+        running = false;
       }
     }
-  )();
+
+
+  void execute();
 
 
   return id;

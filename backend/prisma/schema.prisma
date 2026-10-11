@@ -182,6 +182,7 @@ model Task {
   @@index([status, urgent])
   @@index([assigneeId, status])
   @@index([supplierPurchaseId, status])
+  details            Json?
 }
 
 model StoredFile {

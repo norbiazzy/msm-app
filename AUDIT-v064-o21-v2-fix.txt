@@ -1,0 +1,24 @@
+Audit hotfix для v064-O2.1 v2
+
+Почему старый audit дал ложный FAIL:
+он проверял точную строку с LF (\n), а App.tsx на Windows
+может храниться с CRLF (\r\n).
+
+Сам патч уже установлен:
+- marker OK
+- pending upload jobs OK
+- временная карточка OK
+- progress реальной карточки OK
+- CSS OK
+
+Этот audit:
+- нормализует CRLF -> LF;
+- проверяет порядок navigate('home') раньше await reload()
+  по позициям в onCreated, а не по точной строке.
+
+Никакие файлы приложения не меняет.
+
+Запуск:
+
+cd D:\job\it\msm-app
+node .\audit-v064-o21-v2-fix.cjs

@@ -432,6 +432,51 @@ export class DealsService {
         });
 
 
+    // PART_1N_J1_INVOICE_DETAILS_SNAPSHOT
+    await this.prisma.task.update({
+      where: {
+        id:
+          task.id,
+      },
+
+      data: {
+        details: {
+          requestMode:
+            deal.requestMode,
+
+          sellerType:
+            deal.sellerType,
+
+          clientName:
+            deal.clientName,
+
+          contactName:
+            deal.contactName,
+
+          clientPhone:
+            deal.clientPhone,
+
+          deliveryAddresses:
+            deal.deliveryAddresses,
+
+          requestText:
+            deal.requestText,
+
+          marginMode:
+            deal.marginMode,
+
+          marginValue:
+            deal.marginValue !== null
+              ? deal.marginValue.toString()
+              : null,
+
+          accountingComment:
+            deal.accountingComment,
+        },
+      },
+    });
+
+
     await this.prisma.auditEvent.create({
       data: {
         dealId: id,
@@ -697,6 +742,8 @@ export class DealsService {
     id: string,
 
     body: {
+      requestMode?: string;
+      requestText?: string;
       sellerType?: SellerType;
       clientName?: string;
       contactName?: string;
@@ -813,6 +860,20 @@ export class DealsService {
         : currentAddresses;
 
 
+    const nextRequestMode =
+      body.requestMode !== undefined
+        ? body.requestMode.trim() ||
+          current.requestMode
+        : current.requestMode;
+
+
+    const nextRequestText =
+      body.requestText !== undefined
+        ? body.requestText.trim() ||
+          null
+        : current.requestText;
+
+
     const nextSellerType =
       body.sellerType !== undefined
         ? body.sellerType
@@ -854,6 +915,12 @@ export class DealsService {
               },
 
               data: {
+
+                requestMode:
+                  nextRequestMode,
+
+                requestText:
+                  nextRequestText,
                 sellerType:
                   nextSellerType,
 

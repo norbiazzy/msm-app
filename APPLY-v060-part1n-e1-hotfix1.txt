@@ -1,0 +1,52 @@
+v0.6.0 Part 1N-E1 hotfix 1
+
+Исправляет ТОЧНО ошибки из текущей сборки:
+
+BACKEND
+Ошибка:
+Type ... null is not assignable to NullableJsonNullValueInput | InputJsonValue
+
+Исправление:
+- body.details типизируется как Prisma.InputJsonValue;
+- при body.details === undefined в Prisma update передаётся undefined;
+- Prisma не перезаписывает Task.details;
+- nullable task.details больше не подставляется в update.
+
+FRONTEND
+Ошибка:
+ManagerResubmitPanel missing dealId, taskType
+
+Исправление:
+- проверяются ВСЕ ManagerResubmitPanel в App.tsx;
+- каждому task-panel добавляются:
+  dealId={task.deal.id}
+  taskType={task.type}
+
+Также исправляются текущие git diff --check замечания:
+- лишняя пустая строка EOF в api.ts;
+- trailing whitespace в backgroundUploads.tsx.
+
+ВАЖНО:
+Миграция 20260927221000_task_details уже успешно применена.
+Повторно prisma migrate deploy для этого hotfix НЕ нужен.
+
+Установка:
+1. Распаковать в D:\job\it\msm-app
+
+2. Проверка:
+node .\apply-v060-part1n-e1-hotfix1-build-fixes.cjs --check
+
+3. Применить:
+node .\apply-v060-part1n-e1-hotfix1-build-fixes.cjs
+
+4. Проверить:
+git diff --check
+
+5. Backend:
+cd .\backend
+npx prisma generate
+npm run build
+
+6. Frontend:
+cd ..\frontend
+npm run build

@@ -3,6 +3,37 @@ import type { ClientPayment, ClientPaymentMethod, CurrentUser, Deal, PaymentStat
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
+const CURRENT_USER_CACHE_KEY =
+  'msm.current-user.v1';
+
+function readCachedCurrentUser() {
+  try {
+    const raw =
+      window.localStorage.getItem(
+        CURRENT_USER_CACHE_KEY,
+      );
+
+    return raw
+      ? (JSON.parse(raw) as CurrentUser)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedCurrentUser(
+  user: CurrentUser,
+) {
+  try {
+    window.localStorage.setItem(
+      CURRENT_USER_CACHE_KEY,
+      JSON.stringify(user),
+    );
+  } catch {
+    // Offline fallback is optional.
+  }
+}
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${url}`, {
     ...init,
@@ -15,10 +46,34 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 export async function login(): Promise<CurrentUser> {
   const initData = window.Telegram?.WebApp?.initData || 'dev';
   const devRole = (new URLSearchParams(location.search).get('devRole') || 'MANAGER') as UserRole;
-  return json('/auth/telegram', {
-    method: 'POST',
-    body: JSON.stringify({ initData, devRole }),
-  });
+
+  try {
+    const user =
+      await json<CurrentUser>(
+        '/auth/telegram',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            initData,
+            devRole,
+          }),
+        },
+      );
+
+    saveCachedCurrentUser(user);
+    return user;
+  } catch (error) {
+    if (!navigator.onLine) {
+      const cachedUser =
+        readCachedCurrentUser();
+
+      if (cachedUser) {
+        return cachedUser;
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function listDeals(managerId?: string): Promise<Deal[]> {
@@ -41,10 +96,18 @@ export type Task = {
   urgent: boolean;
   title: string;
   description?: string;
+  details?: Record<string, unknown>;
   payload?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
   deal: Deal;
+  // PART_V064_M_TASK_CREATED_BY_TYPE
+  createdBy?: {
+    id: string;
+    firstName: string;
+    lastName?: string;
+    role: string;
+  };
   supplierPurchase?: SupplierPurchase;
 };
 
@@ -546,6 +609,8 @@ export async function updateDealInfo(
   dealId: string,
 
   payload: {
+    requestMode?: string;
+    requestText?: string;
     sellerType?: 'ST' | 'MSM' | 'IP';
     clientName?: string;
     contactName?: string;
@@ -629,6 +694,8 @@ export async function createPowerOfAttorneyTask(
     dealId: string;
     actorId: string;
     urgent?: boolean;
+    // PART_V064_N1_V5B_POA_FLAG_API
+    requestEtrn?: boolean;
     requestKey: string;
     supplierName: string;
     organization: 'ST' | 'MSM' | 'IP';
@@ -648,15 +715,50 @@ export async function createPowerOfAttorneyTask(
   );
 }
 
+// PART_V064_N1_V5B_ETRN_API
+export async function createEtrnTask(
+  payload: {
+    dealId: string;
+    actorId: string;
+    urgent?: boolean;
+    poaTaskId?: string;
+    supplierName?: string;
+    details?:
+      Record<
+        string,
+        unknown
+      >;
+    comment?: string;
+  },
+) {
+  return json<Task>(
+    '/tasks/etrn',
+    {
+      method: 'POST',
+      body:
+        JSON.stringify(
+          payload
+        ),
+    },
+  );
+}
+
+
 export async function completePowerOfAttorneyTask(
   taskId: string,
-  actorId: string,
+
+  /* PART_V062_POA_COMPLETE_META */
+  payload: {
+    actorId: string;
+    poaNumber: string;
+    accountantComment?: string;
+  },
 ) {
   return json(
     `/tasks/${taskId}/complete-power-of-attorney`,
     {
       method: 'POST',
-      body: JSON.stringify({ actorId }),
+      body: JSON.stringify(payload),
     },
   );
 }
@@ -677,6 +779,81 @@ export async function updateShipmentDate(
       body: JSON.stringify(
         payload
       ),
+    },
+  );
+}
+
+export async function returnTaskToManager(
+  taskId: string,
+  payload: {
+    actorId: string;
+    reasonCode: string;
+    comment?: string;
+  },
+) {
+
+  return json(
+    `/tasks/${taskId}/return-to-manager`,
+    {
+      method:
+        'POST',
+
+      body:
+        JSON.stringify(
+          payload
+        ),
+    },
+  );
+}
+
+export async function resubmitTaskToAccounting(
+  taskId: string,
+
+  payload: {
+    actorId: string;
+    description?: string;
+    urgent?: boolean;
+    details?: Record<string, unknown>;
+  },
+) {
+
+  return json(
+    `/tasks/${taskId}/resubmit-to-accounting`,
+    {
+      method:
+        'POST',
+
+      body:
+        JSON.stringify(
+          payload
+        ),
+    },
+  );
+}
+
+export async function resubmitSupplierPaymentTask(
+  taskId: string,
+
+  payload: {
+    actorId: string;
+    supplierName?: string;
+    incomingInvoiceNumber?: string;
+    amount?: number;
+    comment?: string;
+    urgent?: boolean;
+  },
+) {
+
+  return json(
+    `/tasks/${taskId}/resubmit-supplier-payment`,
+    {
+      method:
+        'POST',
+
+      body:
+        JSON.stringify(
+          payload
+        ),
     },
   );
 }

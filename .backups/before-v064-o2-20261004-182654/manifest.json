@@ -1,0 +1,14 @@
+{
+  "createdAt": "2026-10-04T15:26:54.558Z",
+  "purpose": "Backup before v064-O2 deal page cleanup",
+  "files": [
+    {
+      "path": "frontend/src/App.tsx",
+      "sha256": "8f3b26c2ee2c8ece30c53621951c7d6c87974780979710f7fa5d5773dd3f50e8"
+    },
+    {
+      "path": "frontend/src/styles.css",
+      "sha256": "da5bce9aabfdcf72503b30b373549dfcf3ce36522bc5421fcef24bd6f606c8b0"
+    }
+  ]
+}

@@ -1,0 +1,356 @@
+import {
+  useState,
+} from 'react';
+
+import {
+  returnTaskToManager,
+} from './api';
+
+
+type ReasonCode =
+  | 'MISSING_DATA'
+  | 'INCORRECT_DATA'
+  | 'NEED_CLARIFICATION'
+  | 'NO_INCOMING_INVOICE'
+  | 'NO_TERMS'
+  | 'NO_DETAILS'
+  | 'OTHER';
+
+
+const reasons:
+  Array<{
+    value: ReasonCode;
+    label: string;
+  }> = [
+
+  {
+    value:
+      'MISSING_DATA',
+    label:
+      'Не хватает данных',
+  },
+
+  {
+    value:
+      'INCORRECT_DATA',
+    label:
+      'Данные заполнены неверно',
+  },
+
+  {
+    value:
+      'NEED_CLARIFICATION',
+    label:
+      'Требуется уточнение',
+  },
+
+  {
+    value:
+      'NO_INCOMING_INVOICE',
+    label:
+      'Нет входящего счёта',
+  },
+
+  {
+    value:
+      'NO_TERMS',
+    label:
+      'Нет условий',
+  },
+
+  {
+    value:
+      'NO_DETAILS',
+    label:
+      'Нет реквизитов / непонятно, на кого делать',
+  },
+
+  {
+    value:
+      'OTHER',
+    label:
+      'Другое',
+  },
+];
+
+
+export function ReturnToManagerPanel({
+  taskId,
+  actorId,
+  disabled = false,
+  onReturned,
+}: {
+  taskId: string;
+  actorId: string;
+  disabled?: boolean;
+  onReturned:
+    () =>
+      void |
+      Promise<void>;
+}) {
+
+  const [
+    open,
+    setOpen,
+  ] = useState(false);
+
+
+  const [
+    reasonCode,
+    setReasonCode,
+  ] = useState<
+    ReasonCode
+  >(
+    'MISSING_DATA'
+  );
+
+
+  const [
+    comment,
+    setComment,
+  ] = useState('');
+
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+
+  async function submit() {
+
+    const normalizedComment =
+      comment.trim();
+
+
+    if (
+      reasonCode ===
+        'OTHER' &&
+      !normalizedComment
+    ) {
+
+      setError(
+        'Для причины «Другое» добавьте комментарий.'
+      );
+
+      return;
+    }
+
+
+    setSaving(true);
+    setError('');
+
+
+    try {
+
+      await returnTaskToManager(
+        taskId,
+        {
+          actorId,
+
+          reasonCode,
+
+          comment:
+            normalizedComment ||
+            undefined,
+        },
+      );
+
+
+      setOpen(false);
+
+
+      await onReturned();
+
+
+    } catch (e) {
+
+      setError(
+        e instanceof Error
+          ? e.message
+          : String(e)
+      );
+
+
+    } finally {
+
+      setSaving(false);
+    }
+  }
+
+
+  return (
+    <>
+
+      <button
+        type="button"
+        className="secondary wide"
+        disabled={
+          disabled ||
+          saving
+        }
+        onClick={() => {
+          setError('');
+          setOpen(true);
+        }}
+      >
+        Вернуть менеджеру
+      </button>
+
+
+      {open && (
+
+        <div
+          className="appModalBackdrop"
+          onClick={() => {
+
+            if (!saving) {
+              setOpen(false);
+            }
+          }}
+        >
+
+          <div
+            className="appModal"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+
+            <strong>
+              Вернуть менеджеру
+            </strong>
+
+
+            <p>
+              Задача вернётся менеджеру
+              со всеми текущими данными
+              и вложениями.
+            </p>
+
+
+            <label className="field">
+
+              <span>
+                Причина возврата
+              </span>
+
+              <select
+                value={
+                  reasonCode
+                }
+                disabled={saving}
+                onChange={(event) => {
+
+                  setReasonCode(
+                    event.target
+                      .value as
+                      ReasonCode
+                  );
+
+                  setError('');
+                }}
+              >
+
+                {reasons.map(
+                  (reason) => (
+
+                  <option
+                    key={
+                      reason.value
+                    }
+                    value={
+                      reason.value
+                    }
+                  >
+                    {reason.label}
+                  </option>
+
+                ))}
+
+              </select>
+
+            </label>
+
+
+            <label className="field">
+
+              <span>
+                Комментарий
+                {
+                  reasonCode !==
+                    'OTHER' &&
+                  ' · необязательно'
+                }
+              </span>
+
+              <textarea
+                rows={3}
+                value={comment}
+                disabled={saving}
+                onChange={(event) =>
+                  setComment(
+                    event.target.value
+                  )
+                }
+                placeholder="Что нужно исправить или уточнить"
+              />
+
+            </label>
+
+
+            {error && (
+
+              <div className="error">
+                {error}
+              </div>
+
+            )}
+
+
+            <div className="appModalActions">
+
+              <button
+                type="button"
+                className="secondary"
+                disabled={saving}
+                onClick={() =>
+                  setOpen(false)
+                }
+              >
+                Отмена
+              </button>
+
+
+              <button
+                type="button"
+                className="dangerButton"
+                disabled={saving}
+                onClick={() =>
+                  void submit()
+                }
+              >
+                {
+                  saving
+                    ? 'Возвращаем…'
+                    : 'Вернуть'
+                }
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
+
+    </>
+  );
+}

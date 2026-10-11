@@ -1,0 +1,784 @@
+
+import {
+  useEffect,
+  useState,
+} from 'react';
+
+import {
+  uploadDealFileWithProgress,
+} from './api';
+
+
+export type BackgroundUploadJob = {
+
+  id: string;
+
+  taskId?: string;
+
+  dealId?: string;
+
+  successTitle?: string;
+
+  title: string;
+
+  subtitle?: string;
+
+  status:
+    | 'RUNNING'
+    | 'SUCCESS'
+    | 'WAITING_NETWORK'
+    | 'WAITING_SERVER'
+    | 'ERROR';
+
+  progress: number;
+
+  currentFile?: string;
+
+  completedFiles: number;
+
+  totalFiles: number;
+
+  error?: string;
+
+  retry?: () => void;
+
+  retryOnReconnect?: boolean;
+};
+
+
+let jobs:
+  BackgroundUploadJob[] = [];
+
+
+const listeners =
+  new Set<
+    (
+      jobs:
+        BackgroundUploadJob[]
+    ) => void
+  >();
+
+
+function emit() {
+
+  const snapshot =
+    [...jobs];
+
+
+  for (
+    const listener
+    of listeners
+  ) {
+
+    listener(
+      snapshot
+    );
+  }
+}
+
+
+function updateJob(
+  id: string,
+  patch:
+    Partial<
+      BackgroundUploadJob
+    >,
+) {
+
+  jobs =
+    jobs.map(
+      (job) =>
+        job.id === id
+          ? {
+              ...job,
+              ...patch,
+            }
+          : job
+    );
+
+
+  emit();
+}
+
+
+function retryOfflineJobs() {
+
+  window.setTimeout(
+    () => {
+
+      const pending =
+        jobs.filter(
+          (job) =>
+            job.status === 'WAITING_NETWORK' &&
+            job.retryOnReconnect
+        );
+
+
+      for (
+        const job
+        of pending
+      ) {
+
+        job.retry?.();
+      }
+    },
+
+    400,
+  );
+}
+
+
+if (
+  typeof window !==
+  'undefined'
+) {
+
+
+
+function retryWaitingServerJobs() {
+
+  window.setTimeout(
+    () => {
+
+      const pending =
+        jobs.filter(
+          (job) =>
+            job.status ===
+              'WAITING_SERVER' &&
+            job.retry
+        );
+
+
+      for (
+        const job
+        of pending
+      ) {
+
+        job.retry?.();
+      }
+    },
+
+    250,
+  );
+}
+
+window.addEventListener(
+    'online',
+    retryOfflineJobs
+  );
+
+  window.addEventListener(
+    'msm:server-available',
+    retryWaitingServerJobs
+  );
+}
+
+
+export function dismissBackgroundUpload(
+  id: string,
+) {
+
+  jobs =
+    jobs.filter(
+      (job) =>
+        job.id !== id
+    );
+
+
+  emit();
+}
+
+
+export function useBackgroundUploads() {
+
+  const [
+    value,
+    setValue,
+  ] = useState<
+    BackgroundUploadJob[]
+  >([...jobs]);
+
+
+  useEffect(
+    () => {
+
+      listeners.add(
+        setValue
+      );
+
+
+      setValue(
+        [...jobs]
+      );
+
+
+      return () => {
+
+        listeners.delete(
+          setValue
+        );
+      };
+    },
+
+    [],
+  );
+
+
+  return value;
+}
+
+
+export function startBackgroundUploadJob(
+  options: {
+
+    taskId?: string;
+
+    dealId?: string;
+
+    successTitle?: string;
+
+    title: string;
+
+    subtitle?: string;
+
+    files: File[];
+
+    run: (
+      helpers: {
+
+        upload: (
+          dealId: string,
+          file: File,
+          category: string,
+          index: number,
+          total: number,
+        ) =>
+          Promise<{
+            id: string;
+          }>;
+
+        setProgress: (
+          percent: number
+        ) => void;
+      },
+    ) =>
+      Promise<void>;
+  },
+) {
+
+  const id =
+    'upload-' +
+    Date.now() +
+    '-' +
+    Math.random()
+      .toString(36)
+      .slice(2);
+
+
+  const totalFiles =
+    options.files.length;
+
+
+  const uploadedFiles =
+    new Map<
+      string,
+      {
+        id: string;
+      }
+    >();
+
+
+  let running = false;
+
+
+  jobs = [
+    {
+      id,
+
+      taskId:
+        options.taskId,
+
+      dealId:
+        options.dealId,
+
+      successTitle:
+        options.successTitle,
+
+      title:
+        options.title,
+
+      subtitle:
+        options.subtitle,
+
+      status:
+        'RUNNING',
+
+      progress:
+        totalFiles
+          ? 0
+          : 15,
+
+      completedFiles:
+        0,
+
+      totalFiles,
+
+      retry: () => {
+        void execute();
+      },
+    },
+
+    ...jobs,
+  ];
+
+
+  emit();
+
+
+  async function execute() {
+
+    if (running) {
+      return;
+    }
+
+
+    running = true;
+
+
+    updateJob(
+      id,
+      {
+        status:
+          'RUNNING',
+
+        progress:
+          totalFiles
+            ? 0
+            : 15,
+
+        currentFile:
+          undefined,
+
+        completedFiles:
+          0,
+
+        error:
+          undefined,
+
+        retryOnReconnect:
+          false,
+      }
+    );
+
+
+      try {
+
+        await options.run({
+
+          setProgress:
+            (percent) => {
+
+              updateJob(
+                id,
+                {
+                  progress:
+                    Math.max(
+                      0,
+                      Math.min(
+                        99,
+                        percent
+                      )
+                    ),
+                }
+              );
+            },
+
+
+          upload:
+            async (
+              dealId,
+              file,
+              category,
+              index,
+              total,
+            ) => {
+
+              const cacheKey =
+                [
+                  dealId,
+                  category,
+                  String(index),
+                  file.name,
+                  String(file.size),
+                  String(
+                    file.lastModified
+                  ),
+                ].join('|');
+
+
+              const cached =
+                uploadedFiles.get(
+                  cacheKey
+                );
+
+
+              if (cached) {
+
+                updateJob(
+                  id,
+                  {
+                    currentFile:
+                      file.name,
+
+                    completedFiles:
+                      index + 1,
+
+                    progress:
+                      Math.round(
+                        (
+                          (
+                            index + 1
+                          ) /
+                          Math.max(
+                            total,
+                            1
+                          )
+                        ) *
+                        90
+                      ),
+                  }
+                );
+
+
+                return cached;
+              }
+
+
+              updateJob(
+                id,
+                {
+                  currentFile:
+                    file.name,
+                }
+              );
+
+
+              const uploaded =
+                await uploadDealFileWithProgress(
+                  dealId,
+                  file,
+                  category,
+
+                  (
+                    filePercent,
+                  ) => {
+
+                    const denominator =
+                      Math.max(
+                        total,
+                        1
+                      );
+
+
+                    const overall =
+                      (
+                        (
+                          index +
+                          filePercent /
+                            100
+                        ) /
+                        denominator
+                      ) *
+                      90;
+
+
+                    updateJob(
+                      id,
+                      {
+                        progress:
+                          Math.round(
+                            overall
+                          ),
+                      }
+                    );
+                  }
+                );
+
+
+              uploadedFiles.set(
+                cacheKey,
+                uploaded
+              );
+
+
+              updateJob(
+                id,
+                {
+                  completedFiles:
+                    index + 1,
+
+                  progress:
+                    Math.round(
+                      (
+                        (
+                          index + 1
+                        ) /
+                        Math.max(
+                          total,
+                          1
+                        )
+                      ) *
+                      90
+                    ),
+                }
+              );
+
+
+              return uploaded;
+            },
+        });
+
+
+        updateJob(
+          id,
+          {
+            status:
+              'SUCCESS',
+
+            progress:
+              100,
+
+            currentFile:
+              undefined,
+          }
+        );
+
+
+        window.setTimeout(
+          () => {
+
+            dismissBackgroundUpload(
+              id
+            );
+          },
+
+          8000,
+        );
+
+
+      } catch (error) {
+
+        const waitingForNetwork =
+          typeof navigator !==
+            'undefined' &&
+          !navigator.onLine;
+
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+
+        const waitingForServer =
+          !waitingForNetwork &&
+          (
+            /failed to fetch/i.test(
+              errorMessage
+            ) ||
+            /networkerror/i.test(
+              errorMessage
+            ) ||
+            /network request failed/i.test(
+              errorMessage
+            ) ||
+            /load failed/i.test(
+              errorMessage
+            ) ||
+            /ошибка соединения при загрузке файла/i.test(
+              errorMessage
+            )
+          );
+
+
+        updateJob(
+          id,
+          {
+            status:
+              waitingForNetwork
+                ? 'WAITING_NETWORK'
+                : waitingForServer
+                  ? 'WAITING_SERVER'
+                  : 'ERROR',
+
+            error:
+              waitingForNetwork
+                ? 'Нет сети · отправка продолжится автоматически после восстановления'
+                : waitingForServer
+                  ? 'Сервер недоступен · отправка продолжится автоматически'
+                  : errorMessage,
+
+            currentFile:
+              undefined,
+
+            retryOnReconnect:
+              waitingForNetwork ||
+              waitingForServer,
+          }
+        );
+      } finally {
+
+        running = false;
+      }
+    }
+
+
+  void execute();
+
+
+  return id;
+}
+
+
+export function BackgroundUploadList({
+  jobs,
+}: {
+  jobs:
+    BackgroundUploadJob[];
+}) {
+
+  if (
+    jobs.length === 0
+  ) {
+    return null;
+  }
+
+
+  return (
+
+    <div className="backgroundUploadList">
+
+      {jobs.map(
+        (job) => (
+
+        <div
+          key={job.id}
+
+          className={
+            'backgroundUploadCard ' +
+            'backgroundUpload-' +
+            job.status
+              .toLowerCase()
+          }
+        >
+
+          <div className="backgroundUploadTop">
+
+            <div>
+
+              <strong>
+                {
+                  job.status ===
+                  'SUCCESS'
+
+                    ? '✓ ' +
+                      (job.successTitle ||
+                        job.title)
+
+                    : job.status ===
+                        'ERROR'
+
+                      ? 'Ошибка загрузки'
+
+                      : job.title
+                }
+              </strong>
+
+
+              {job.subtitle && (
+
+                <span>
+                  {job.subtitle}
+                </span>
+
+              )}
+
+            </div>
+
+
+            <b>
+              {job.progress}%
+            </b>
+
+          </div>
+
+
+          <div className="backgroundUploadBar">
+
+            <div
+              style={{
+                width:
+                  job.progress +
+                  '%',
+              }}
+            />
+
+          </div>
+
+
+          {job.status ===
+            'RUNNING' && (
+
+            <div className="backgroundUploadMeta">
+
+              {job.totalFiles > 0
+                ? (
+                    job.completedFiles +
+                    ' из ' +
+                    job.totalFiles +
+                    ' файлов'
+                  )
+                : 'Сохраняем данные…'}
+
+              {job.currentFile &&
+                ' · ' +
+                job.currentFile}
+
+            </div>
+
+          )}
+
+
+          {job.status ===
+            'ERROR' && (
+
+            <>
+
+              <div className="backgroundUploadError">
+                {job.error}
+              </div>
+
+              <button
+                type="button"
+                className="secondary compactButton"
+
+                onClick={() =>
+                  dismissBackgroundUpload(
+                    job.id
+                  )
+                }
+              >
+                Скрыть
+              </button>
+
+            </>
+
+          )}
+
+        </div>
+
+      ))}
+
+    </div>
+  );
+}

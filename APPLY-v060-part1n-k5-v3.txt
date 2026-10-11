@@ -1,0 +1,25 @@
+Part 1N-K5 v3
+
+По локальному аудиту:
+- карточка NEED_DATA уже показывает returnComment;
+- поэтому карточка НЕ меняется;
+- комментарий бухгалтера добавляется только внутрь открытой TaskDetail.
+
+Backend не меняется.
+Prisma migration не нужна.
+
+Запуск:
+
+cd D:\job\it\msm-app
+node .\apply-v060-part1n-k5-v3-return-comment-detail.cjs --check
+
+Если OK:
+
+node .\apply-v060-part1n-k5-v3-return-comment-detail.cjs
+git diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v060-part1n-k5-v3-return-comment-detail.cjs

@@ -1,0 +1,717 @@
+diff --git a/backend/src/deals/deals.service.ts b/backend/src/deals/deals.service.ts
+index 1633c57..24287a6 100644
+--- a/backend/src/deals/deals.service.ts
++++ b/backend/src/deals/deals.service.ts
+@@ -526,13 +526,21 @@ export class DealsService {
+             : undefined;
+ 
+ 
+-        if (
+-          reasonCode === 'NO_TERMS' &&
+-          body.marginValue === undefined
+-        ) {
+-          throw new BadRequestException(
+-            'Укажите условия перед повторной отправкой',
+-          );
++        if (reasonCode === 'NO_TERMS') {
++          const previousComment =
++            deal.accountingComment?.trim() || '';
++
++          const nextComment =
++            body.accountingComment?.trim() || '';
++
++          if (
++            !nextComment ||
++            nextComment === previousComment
++          ) {
++            throw new BadRequestException(
++              'Добавьте условия в комментарий для бухгалтерии перед повторной отправкой',
++            );
++          }
+         }
+ 
+ 
+@@ -582,9 +590,13 @@ export class DealsService {
+             accountingComment:
+               nextAccountingComment,
+             marginMode:
+-              body.marginMode || null,
++              body.marginMode !== undefined
++                ? body.marginMode || null
++                : deal.marginMode,
+             marginValue:
+-              body.marginValue ?? null,
++              body.marginValue !== undefined
++                ? body.marginValue
++                : deal.marginValue,
+           },
+         });
+ 
+diff --git a/backend/src/invoices/invoices.service.ts b/backend/src/invoices/invoices.service.ts
+index 2f03d58..c79243b 100644
+--- a/backend/src/invoices/invoices.service.ts
++++ b/backend/src/invoices/invoices.service.ts
+@@ -13,6 +13,14 @@ export class InvoicesService {
+     fileId?: string;
+     actorId: string;
+   }) {
++    const invoiceNumber = body.number?.trim();
++
++    if (!invoiceNumber) {
++      throw new BadRequestException(
++        'Укажите номер готового счёта',
++      );
++    }
++
+     if (!body.fileId) {
+       throw new BadRequestException(
+         'Прикрепите файл готового счёта',
+@@ -32,7 +40,7 @@ export class InvoicesService {
+         data: {
+           dealId,
+           sellerType: deal.sellerType as SellerType,
+-          number: body.number,
++          number: invoiceNumber,
+           invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : undefined,
+           amount: body.amount,
+           fileId: body.fileId,
+diff --git a/backend/src/tasks/tasks.service.ts b/backend/src/tasks/tasks.service.ts
+index 09f03c6..14b21a1 100644
+--- a/backend/src/tasks/tasks.service.ts
++++ b/backend/src/tasks/tasks.service.ts
+@@ -79,6 +79,17 @@ export class TasksService {
+           },
+ 
+ 
++          createdBy: {
++
++            select: {
++              id: true,
++              firstName: true,
++              lastName: true,
++              role: true,
++            },
++          },
++
++
+           assignee: {
+ 
+             select: {
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 15dda41..16d407d 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -609,6 +609,10 @@ function DealCard({
+       deal
+     );
+ 
++  const needsInvoiceReview =
++    invoice?.status ===
++      'WAITING_MANAGER_REVIEW';
++
+   const latestReturn =
+     deal.auditEvents?.find(
+       (event) =>
+@@ -631,7 +635,9 @@ function DealCard({
+         (
+           needsManagerAction
+             ? ' dealCardNeedsAction'
+-            : ''
++            : needsInvoiceReview
++              ? ' dealCardNeedsReview'
++              : ''
+         )
+       }
+       onClick={onOpen}
+@@ -881,16 +887,6 @@ function DealDetail({
+     setRequestSellerType,
+   ] = useState<SellerType>('MSM');
+ 
+-  const [
+-    requestMarginMode,
+-    setRequestMarginMode,
+-  ] = useState('TOTAL_PLUS');
+-
+-  const [
+-    requestMarginValue,
+-    setRequestMarginValue,
+-  ] = useState('');
+-
+   const [
+     requestAccountingComment,
+     setRequestAccountingComment,
+@@ -1094,18 +1090,6 @@ function DealDetail({
+         'MSM'
+       );
+ 
+-      setRequestMarginMode(
+-        deal?.marginMode ||
+-        'TOTAL_PLUS'
+-      );
+-
+-      setRequestMarginValue(
+-        deal?.marginValue === undefined ||
+-        deal?.marginValue === null
+-          ? ''
+-          : String(deal.marginValue)
+-      );
+-
+       setRequestAccountingComment(
+         deal?.accountingComment || ''
+       );
+@@ -1118,8 +1102,6 @@ function DealDetail({
+       deal?.deliveryAddresses,
+       deal?.clientName,
+       deal?.sellerType,
+-      deal?.marginMode,
+-      deal?.marginValue,
+       deal?.accountingComment,
+     ],
+   );
+@@ -1764,20 +1746,38 @@ function DealDetail({
+     }
+ 
+ 
+-    const parsedMargin =
+-      parseMoneyInput(
+-        requestMarginValue
+-      );
++    const returnedReasonCode =
++      latestInvoiceReturn
++        ?.newValue
++        ?.reasonCode;
++
++    const returnReasonCode =
++      typeof returnedReasonCode === 'string'
++        ? returnedReasonCode
++        : '';
+ 
+ 
+     if (
+-      requestMarginValue.trim() &&
+-      parsedMargin === undefined
++      invoiceRequestTask?.status === 'NEED_DATA' &&
++      returnReasonCode === 'NO_TERMS'
+     ) {
+-      setError(
+-        'Проверьте значение условий'
+-      );
+-      return;
++      const previousComment =
++        activeDeal.accountingComment
++          ?.trim() || '';
++
++      const nextComment =
++        requestAccountingComment
++          .trim();
++
++      if (
++        !nextComment ||
++        nextComment === previousComment
++      ) {
++        setError(
++          'Добавьте условия в комментарий для бухгалтерии'
++        );
++        return;
++      }
+     }
+ 
+ 
+@@ -1799,10 +1799,6 @@ function DealDetail({
+         requestAccountingComment
+           .trim() ||
+         undefined,
+-      marginMode:
+-        requestMarginMode,
+-      marginValue:
+-        parsedMargin,
+     };
+ 
+ 
+@@ -3450,15 +3446,32 @@ function DealDetail({
+ 
+       ) : (
+ 
+-        <div className="infoBox">
++        <div
++          className={
++            invoiceRequestTask?.status === 'NEED_DATA'
++              ? 'infoBox invoiceRequestReturnedSummary'
++              : 'infoBox'
++          }
++        >
+ 
+           <strong>
+-            Счёт ещё не готов
++            {
++              invoiceRequestTask?.status === 'NEED_DATA'
++                ? 'Бухгалтерия вернула запрос'
++                : 'Счёт ещё не готов'
++            }
+           </strong>
+ 
+           <p>
+-            Бухгалтерия пока не
+-            загрузила клиентский счёт.
++            {
++              invoiceRequestTask?.status === 'NEED_DATA'
++                ? String(
++                    latestInvoiceReturn?.newValue?.reasonLabel ||
++                    latestInvoiceReturn?.reason ||
++                    'Нужно уточнить данные и повторно отправить запрос.'
++                  )
++                : 'Бухгалтерия пока не загрузила клиентский счёт.'
++            }
+           </p>
+ 
+         </div>
+@@ -3759,46 +3772,6 @@ function DealDetail({
+                 </Field>
+ 
+ 
+-                <div className="inline">
+-                  <Field title="Условия">
+-                    <select
+-                      value={requestMarginMode}
+-                      onChange={(e) =>
+-                        setRequestMarginMode(
+-                          e.target.value
+-                        )
+-                      }
+-                    >
+-                      <option value="PERCENT">
+-                        ± %
+-                      </option>
+-                      <option value="TOTAL_PLUS">
+-                        + к сумме
+-                      </option>
+-                      <option value="UNIT_PLUS">
+-                        + за единицу
+-                      </option>
+-                      <option value="FINAL">
+-                        Итоговая цена
+-                      </option>
+-                    </select>
+-                  </Field>
+-
+-                  <Field title="Значение">
+-                    <input
+-                      inputMode="decimal"
+-                      value={requestMarginValue}
+-                      onChange={(e) =>
+-                        setRequestMarginValue(
+-                          e.target.value
+-                        )
+-                      }
+-                      placeholder="-7 или +4"
+-                    />
+-                  </Field>
+-                </div>
+-
+-
+                 <Field title="Комментарий бухгалтерии">
+                   <textarea
+                     rows={3}
+@@ -3808,6 +3781,7 @@ function DealDetail({
+                         e.target.value
+                       )
+                     }
++                    placeholder="Условия, цена, доставка и любые пояснения для бухгалтерии"
+                   />
+                 </Field>
+ 
+@@ -3867,7 +3841,7 @@ function DealDetail({
+                 </Field>
+ 
+ 
+-                <Field title="Дополнительные документы / реквизиты">
++                <Field title="Реквизиты / дополнительные документы">
+                   <MultiFilePicker
+                     files={requestExtraFiles}
+                     onChange={setRequestExtraFiles}
+@@ -4928,12 +4902,6 @@ function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; onCance
+   const [requestText, setRequestText] =
+     useState('');
+ 
+-  const [marginMode, setMarginMode] =
+-    useState('TOTAL_PLUS');
+-
+-  const [marginValue, setMarginValue] =
+-    useState('');
+-
+   const [
+     accountingComment,
+     setAccountingComment,
+@@ -5085,13 +5053,6 @@ async function submit(
+             requestText.trim() ||
+             undefined,
+ 
+-          marginMode,
+-
+-          marginValue:
+-            parseMoneyInput(
+-              marginValue
+-            ),
+-
+           accountingComment:
+             accountingComment
+               .trim() ||
+@@ -5355,7 +5316,7 @@ async function submit(
+       </Field>
+ 
+ 
+-      <Field title="Дополнительные вложения">
++      <Field title="Реквизиты / дополнительные документы">
+ 
+         <div>
+ 
+@@ -5457,7 +5418,7 @@ async function submit(
+ 
+           <div className="microcopy">
+ 
+-            Здесь можно добавить спецификации, фото и другие документы.
++            Здесь можно добавить реквизиты заказчика, спецификации и другие документы.
+             Сам входящий счёт прикрепляется отдельным полем выше.
+ 
+           </div>
+@@ -5488,58 +5449,6 @@ async function submit(
+       </Field>
+ 
+ 
+-      <Field title="Наценка / цена">
+-
+-        <div className="inline">
+-
+-          <select
+-            value={marginMode}
+-
+-            onChange={(e) =>
+-              setMarginMode(
+-                e.target.value
+-              )
+-            }
+-          >
+-
+-            <option value="TOTAL_PLUS">
+-              ± к сумме
+-            </option>
+-
+-            <option value="UNIT_PLUS">
+-              ± за единицу
+-            </option>
+-
+-            <option value="PERCENT">
+-              ± %
+-            </option>
+-
+-            <option value="FINAL">
+-              Итоговая цена
+-            </option>
+-
+-          </select>
+-
+-
+-          <input
+-            inputMode="decimal"
+-
+-            value={marginValue}
+-
+-            onChange={(e) =>
+-              setMarginValue(
+-                e.target.value
+-              )
+-            }
+-
+-            placeholder="Например: -7 или 4"
+-          />
+-
+-        </div>
+-
+-      </Field>
+-
+-
+       <Field title="Комментарий бухгалтерии">
+ 
+         <textarea
+@@ -5555,7 +5464,7 @@ async function submit(
+             )
+           }
+ 
+-          placeholder="Доставку выделить отдельной строкой…"
++          placeholder="Условия, цена, доставка и любые пояснения для бухгалтерии…"
+         />
+ 
+       </Field>
+@@ -6023,6 +5932,26 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+           </span>
+ 
+ 
++          {task.createdBy && (
++
++            <span className="taskCreated">
++
++              От:{' '}
++
++              {
++                [
++                  task.createdBy.firstName,
++                  task.createdBy.lastName,
++                ]
++                  .filter(Boolean)
++                  .join(' ')
++              }
++
++            </span>
++
++          )}
++
++
+           {task.createdAt && (
+ 
+             <span className="taskCreated">
+@@ -6336,6 +6265,36 @@ function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: () => vo
+   );
+ }
+ 
++function documentNumberFromFileName(
++  fileName: string,
++) {
++  const baseName =
++    fileName
++      .replace(/\.[^.]+$/, '')
++      .replace(/_/g, ' ')
++      .trim();
++
++  const byMarker =
++    baseName.match(
++      /(?:№|#)\s*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9./-]{0,30})/u
++    );
++
++  const byInvoiceWord =
++    baseName.match(
++      /(?:сч[её]т(?:а)?|invoice)\s*(?:n(?:o)?\.?)?\s*[-–—:]?\s*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9./-]{0,30})/iu
++    );
++
++  const candidate =
++    (byMarker?.[1] || byInvoiceWord?.[1] || '')
++      .replace(/[.,;:]+$/, '')
++      .trim();
++
++  return /\d/u.test(candidate)
++    ? candidate
++    : '';
++}
++
++
+ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onBack: () => void }) {
+ 
+   const [status, setStatus] =
+@@ -6398,6 +6357,22 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       Array.from(files);
+ 
+ 
++    if (!number.trim()) {
++      const detectedNumber =
++        selected
++          .map((file) =>
++            documentNumberFromFileName(
++              file.name
++            )
++          )
++          .find(Boolean);
++
++      if (detectedNumber) {
++        setNumber(detectedNumber);
++      }
++    }
++
++
+     setInvoiceFiles(
+       (current) => {
+ 
+@@ -6550,16 +6525,24 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+       [...invoiceFiles];
+ 
+ 
+-    if (filesToUpload.length === 0) {
++    const numberToSave =
++      number.trim();
++
++
++    if (!numberToSave) {
+       setError(
+-        'Прикрепите файл готового счёта.'
++        'Укажите номер готового счёта.'
+       );
+       return;
+     }
+ 
+ 
+-    const numberToSave =
+-      number.trim();
++    if (filesToUpload.length === 0) {
++      setError(
++        'Прикрепите файл готового счёта.'
++      );
++      return;
++    }
+ 
+ 
+     const amountToSave =
+@@ -6780,6 +6763,44 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+         </p>
+ 
+ 
++        <div className="taskOriginMeta">
++          <span>
++            Отправил:{' '}
++            <b>
++              {
++                task.createdBy
++                  ? [
++                      task.createdBy.firstName,
++                      task.createdBy.lastName,
++                    ]
++                      .filter(Boolean)
++                      .join(' ')
++                  : '—'
++              }
++            </b>
++          </span>
++
++          {task.createdAt && (
++            <span>
++              {
++                new Date(
++                  task.createdAt
++                ).toLocaleString(
++                  'ru-RU',
++                  {
++                    day: '2-digit',
++                    month: '2-digit',
++                    year: '2-digit',
++                    hour: '2-digit',
++                    minute: '2-digit',
++                  }
++                )
++              }
++            </span>
++          )}
++        </div>
++
++
+         <div className="statusPill">
+           {
+             taskStatus(
+@@ -6822,18 +6843,6 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+             </b>
+           </div>
+ 
+-          <div>
+-            <span>Условия</span>
+-            <b>
+-              {
+-                pricingConditionLabel(
+-                  task.deal.marginMode,
+-                  task.deal.marginValue,
+-                )
+-              }
+-            </b>
+-          </div>
+-
+         </div>
+ 
+       )}
+@@ -7478,7 +7487,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+ 
+         <>
+ 
+-          <Field title="Номер готового счёта">
++          <Field title="Номер готового счёта *">
+ 
+             <input
+               value={number}
+@@ -7641,9 +7650,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
+             автоматически —
+             сегодняшняя.
+ 
+-            Номер счёта пока
+-            необязателен только
+-            для тестирования.
++            Номер счёта обязателен.
++            Если номер удалось распознать
++            из названия файла, он
++            подставится автоматически —
++            проверьте его перед отправкой.
+ 
+           </div>
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 9ad9415..7561966 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -44,6 +44,12 @@ export type Task = {
+   payload?: Record<string, unknown>;
+   createdAt?: string;
+   updatedAt?: string;
++  createdBy?: {
++    id: string;
++    firstName: string;
++    lastName?: string;
++    role: string;
++  };
+   deal: Deal;
+   supplierPurchase?: SupplierPurchase;
+ };
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 9c98533..9a62e83 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -4181,3 +4181,47 @@ html[data-theme='dark'] .powerHead > b {
+     grid-template-columns: 1fr;
+   }
+ }
++
++/* MSM v0.6.0 part 1: invoice workflow stabilization */
++
++.dealCardNeedsReview {
++  border-color: #facc15;
++  background: #fffdf2;
++  box-shadow: 0 5px 22px rgba(161,98,7,.08);
++}
++
++.dealCardNeedsReview:hover {
++  border-color: #eab308;
++}
++
++.invoiceRequestReturnedSummary {
++  border-color: #fed7aa;
++  background: #fff7ed;
++}
++
++.taskOriginMeta {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px 12px;
++  margin-top: 8px;
++  color: #78716c;
++  font-size: 11px;
++}
++
++.taskOriginMeta b {
++  color: inherit;
++}
++
++html[data-theme='dark'] .dealCardNeedsReview {
++  border-color: #854d0e;
++  background: #211d16;
++}
++
++html[data-theme='dark'] .invoiceRequestReturnedSummary {
++  border-color: #7c2d12;
++  background: #241a14;
++}
++
++html[data-theme='dark'] .taskOriginMeta {
++  color: #a8a29e;
++}

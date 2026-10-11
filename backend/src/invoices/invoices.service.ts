@@ -26,6 +26,57 @@ export class InvoicesService {
         orderBy: { version: 'desc' },
       });
 
+      const activeInvoiceTask =
+        await tx.task.findFirst({
+          where: {
+            dealId,
+            type: {
+              in: [
+                TaskType.ISSUE_CLIENT_INVOICE,
+                TaskType.CORRECT_CLIENT_INVOICE,
+              ],
+            },
+            status: {
+              notIn: [
+                TaskStatus.DONE,
+                TaskStatus.CANCELLED,
+              ],
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+      if (
+        !activeInvoiceTask &&
+        latest?.isCurrent
+      ) {
+        const latestAmount =
+          latest.amount === null
+            ? undefined
+            : Number(latest.amount);
+
+        const sameAmount =
+          latestAmount === body.amount ||
+          (
+            latestAmount === undefined &&
+            body.amount === undefined
+          );
+
+        const sameFile =
+          (latest.fileId ?? undefined) ===
+          body.fileId;
+
+        if (
+          latest.number === body.number &&
+          sameAmount &&
+          sameFile
+        ) {
+          return latest;
+        }
+      }
+
       await tx.clientInvoice.updateMany({ where: { dealId, isCurrent: true }, data: { isCurrent: false } });
 
       const invoice = await tx.clientInvoice.create({

@@ -1,0 +1,36 @@
+v064-O1.2 v2
+
+Исправленная версия после CHECK, который нашёл два файла-кандидата.
+
+Теперь патч НЕ ищет по всему frontend.
+Он работает только с:
+frontend/src/BlockOfficeHome.tsx
+
+То есть App.tsx вообще не трогается.
+
+Результат в колонке «Счёт»:
+МСМ-1560
+СТ-1560
+ИП-1560
+
+Организация:
+- сначала invoice.sellerType;
+- если его нет — deal.sellerType.
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o12-v2-invoice-org-label.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o12-v2-invoice-org-label.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o12-v2-invoice-org-label.cjs

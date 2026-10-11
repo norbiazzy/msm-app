@@ -1,0 +1,32 @@
+v064-JK — утверждённый список задач + поиск
+
+Порядок:
+1. v064-J
+2. build
+3. v064-K
+4. build
+5. audits
+
+Команды:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-j-approved-task-list.cjs --check
+node .\apply-v064-j-approved-task-list.cjs
+
+cd .\frontend
+npm run build
+cd ..
+
+node .\audit-v064-j-approved-task-list.cjs
+
+node .\apply-v064-k-task-search.cjs --check
+node .\apply-v064-k-task-search.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+cd ..
+
+node .\audit-v064-k-task-search.cjs

@@ -1,0 +1,32 @@
+v064-O1.3 — убрать лишний блок под таблицей на desktop
+
+Причина:
+desktop CSS-правило включало одновременно .bottomNav и .boMobileNav.
+Мобильная навигация из-за этого отображалась как обычный блок под таблицей.
+
+Исправление:
+- на ширине >= 721px .boMobileNav = display:none !important
+- .bottomNav = position:fixed !important
+- мобильные правила не меняются
+- JSX и логика не меняются
+
+Меняется только:
+frontend/src/styles.css
+
+Установка:
+
+cd D:\job\it\msm-app
+
+node .\apply-v064-o13-hide-desktop-mobile-nav.cjs --check
+
+Если CHECK OK:
+
+node .\apply-v064-o13-hide-desktop-mobile-nav.cjs
+
+git --no-pager diff --check
+
+cd .\frontend
+npm run build
+
+cd ..
+node .\audit-v064-o13-hide-desktop-mobile-nav.cjs

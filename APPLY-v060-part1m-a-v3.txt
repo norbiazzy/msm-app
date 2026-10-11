@@ -1,0 +1,33 @@
+v0.6.0 Part 1M-A v3 — возврат задачи «Оплатить поставщику»
+
+Старые Part 1M-A / v2 НЕ использовать.
+
+Исправлено:
+- больше нет зависимости от function money();
+- блок import определяется от начала файла по реальным import-операторам;
+- поддерживаются многострочные imports и side-effect import;
+- status === NEW находится независимо от переносов строк;
+- проверено на двух разных структурах PurchasesBlock.tsx;
+- повторный запуск не создаёт дубли.
+
+Что добавляет:
+- ReturnToManagerPanel;
+- кнопку «Вернуть менеджеру» в SupplierPaymentTask;
+- доступность для NEW и IN_PROGRESS;
+- причина + комментарий;
+- возврат той же задачи через returnTaskToManager();
+- текущие данные закупки и оплаты не очищаются.
+
+Распаковать в:
+D:\job\it\msm-app
+
+Проверка:
+node .\apply-v060-part1m-a-v3-supplier-return.cjs --check
+
+Если всё OK:
+node .\apply-v060-part1m-a-v3-supplier-return.cjs
+
+Затем:
+git diff --check
+cd .\frontend
+npm run build
