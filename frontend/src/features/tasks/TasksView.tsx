@@ -1463,34 +1463,6 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     );
 
 
-  const customerInvoiceFiles =
-    allDealFiles
-      .filter(
-        (file) =>
-          file.category ===
-            'CUSTOMER_INVOICE_PRIMARY' ||
-          file.category
-            ?.startsWith(
-              'CORRECTION_PRIMARY_'
-            )
-      )
-      .sort(
-        (a, b) =>
-          new Date(
-            a.createdAt || 0
-          ).getTime() -
-          new Date(
-            b.createdAt || 0
-          ).getTime()
-      );
-
-
-  const currentCustomerIncoming =
-    customerInvoiceFiles[
-      customerInvoiceFiles.length - 1
-    ];
-
-
   const correctionPrimaryFiles =
     allDealFiles.filter(
       (file) =>
@@ -1536,7 +1508,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
   return (
 
     <section
-      className="content form taskWorkspace"
+      className={'content form taskWorkspace' + (task.type === 'ISSUE_CLIENT_INVOICE' ? ' taskWorkspace--invoiceIssue' : '')}
       data-task-status={status}
     >
 
@@ -1560,20 +1532,12 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
         )}
 
 
-      {/* PART_1N_I1_INVOICE_DATA_CARD */}
 
-      {task.type ===
-        'ISSUE_CLIENT_INVOICE' && (
-
-        <InvoiceRequestDataCard
-          task={task}
-        />
-
-      )}
 
 
       {/* PART_1N_H1_TASK_DETAIL_DEAL_LINK */}
 
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && (
       <a
         className="taskDetailDealLink"
         href={
@@ -1596,6 +1560,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
           Открыть сделку →
         </b>
       </a>
+      )}
 
 
       {/* PART_V064_N2_ETRN_SOURCE_DOCS_UI */}
@@ -1705,8 +1670,19 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
       <TaskContextStrip task={task} />
 
+      {/* PART_1N_I1_INVOICE_DATA_CARD */}
 
-      {canAttachInvoice && (
+      {task.type ===
+        'ISSUE_CLIENT_INVOICE' && (
+
+        <InvoiceRequestDataCard
+          task={task}
+        />
+
+      )}
+
+
+      {canAttachInvoice && task.type !== 'ISSUE_CLIENT_INVOICE' && (
 
         <div className="invoiceTaskBrief">
 
@@ -1733,7 +1709,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {task.deal.requestText && (
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.deal.requestText && (
 
         <div className="infoBox">
 
@@ -1750,7 +1726,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {task.description && (
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.description && (
 
         <div className="infoBox">
 
@@ -1761,58 +1737,6 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
           <p>
             {task.description}
           </p>
-
-        </div>
-
-      )}
-
-
-      {task.type ===
-        'ISSUE_CLIENT_INVOICE' &&
-        currentCustomerIncoming && (
-
-        <div className="infoBox customerInvoiceTaskBox">
-
-          <strong>
-            Входящий счёт заказчика
-          </strong>
-
-          <p>
-            Используйте этот файл как исходный документ для выставления счёта.
-          </p>
-
-          <div className="versionList">
-
-            <div className="versionRow correctionPrimaryRow">
-
-              <div>
-                <b>
-                  {
-                    currentCustomerIncoming
-                      .originalName
-                  }
-                </b>
-
-                <span>
-                  Основной входящий счёт
-                </span>
-              </div>
-
-              <a
-                href={
-                  dealFileUrl(
-                    currentCustomerIncoming.id
-                  )
-                }
-                target="_blank"
-                rel="noreferrer"
-              >
-                Открыть
-              </a>
-
-            </div>
-
-          </div>
 
         </div>
 
@@ -2125,6 +2049,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
       {task.type !==
         'CORRECT_CLIENT_INVOICE' &&
+        task.type !== 'ISSUE_CLIENT_INVOICE' &&
         issueExtraFiles.length >
           0 && (
 

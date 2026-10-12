@@ -214,49 +214,60 @@ function marginModeLabel(
 function invoiceRequestFiles(
   task: Task,
 ) {
-  const files =
-    task.deal.files || [];
+  const files = task.deal.files || [];
+  const newestFirst = (
+    a: (typeof files)[number],
+    b: (typeof files)[number],
+  ) =>
+    new Date(b.createdAt || 0).getTime() -
+    new Date(a.createdAt || 0).getTime();
 
+  const primaryHistory = files
+    .filter((file) => file.category === 'CUSTOMER_INVOICE_PRIMARY')
+    .sort(newestFirst);
 
-  const primaryHistory =
-    files
-      .filter(
-        (file) =>
-          file.category ===
-          'CUSTOMER_INVOICE_PRIMARY'
-      )
-      .sort(
-        (a, b) =>
-          new Date(
-            a.createdAt || 0
-          ).getTime() -
-          new Date(
-            b.createdAt || 0
-          ).getTime()
-      );
+  const currentPrimary = primaryHistory[0];
+  const revisedAttachments = files
+    .filter((file) => file.category === 'TASK_ATTACHMENT_' + task.id)
+    .sort(newestFirst);
+  const previousPrimary = primaryHistory.slice(1);
+  const initialAttachments = files
+    .filter((file) => file.category === 'MANAGER_ATTACHMENT')
+    .sort(newestFirst);
+  const otherIncoming = files
+    .filter((file) => file.category === 'INCOMING_SUPPLIER_INVOICE')
+    .sort(newestFirst);
 
+  const candidates = [
+    ...(currentPrimary
+      ? [{ file: currentPrimary, description: 'Актуальный входящий счёт' }]
+      : []),
+    ...revisedAttachments.map((file) => ({
+      file,
+      description: 'Приложено при исправлении',
+    })),
+    ...previousPrimary.map((file) => ({
+      file,
+      description: 'Предыдущая версия входящего счёта',
+    })),
+    ...initialAttachments.map((file) => ({
+      file,
+      description: 'Ранее приложенный документ',
+    })),
+    ...otherIncoming.map((file) => ({
+      file,
+      description: 'Входящий счёт поставщика',
+    })),
+  ];
 
-  const primary =
-    primaryHistory[
-      primaryHistory.length - 1
-    ];
+  const seenIds = new Set<string>();
+  const documents = candidates.filter(({ file }) => {
+    if (seenIds.has(file.id)) return false;
+    seenIds.add(file.id);
+    return true;
+  });
 
-
-  const attachments =
-    files.filter(
-      (file) =>
-        file.category ===
-          'MANAGER_ATTACHMENT' ||
-        file.category ===
-          'TASK_ATTACHMENT_' +
-            task.id
-    );
-
-
-  return {
-    primary,
-    attachments,
-  };
+  return { documents };
 }
 
 
@@ -304,19 +315,26 @@ export function InvoiceRequestDataCard({
     );
 
 
-  const {
-    primary,
-    attachments,
-  } = useMemo(
-    () =>
-      invoiceRequestFiles(
-        task
-      ),
-    [
-      task.id,
-      task.deal.files,
-    ]
+  const { documents } = useMemo(
+    () => invoiceRequestFiles(task),
+    [task.id, task.deal.files],
   );
+
+  // A re-submission keeps initial documents in the history, but they
+  // remain current on a task that has not yet been corrected.
+  const hasCorrections = documents.some(
+    ({ description }) =>
+      description === 'Приложено при исправлении' ||
+      description === 'Предыдущая версия входящего счёта',
+  );
+  const currentDocuments = documents.filter(({ description }) =>
+    description === 'Актуальный входящий счёт' ||
+    description === 'Приложено при исправлении' ||
+    description === 'Входящий счёт поставщика' ||
+    (!hasCorrections && description === 'Ранее приложенный документ'),
+  );
+  const currentIds = new Set(currentDocuments.map(({ file }) => file.id));
+  const historyDocuments = documents.filter(({ file }) => !currentIds.has(file.id));
 
 
   return (
@@ -329,12 +347,11 @@ export function InvoiceRequestDataCard({
 
         <div>
           <strong>
-            Запрос менеджера
+            Данные для выставления счёта
           </strong>
 
           <span>
-            Эти же поля вернутся
-            менеджеру при возврате
+            Данные менеджера и приложенные документы
           </span>
         </div>
 
@@ -403,91 +420,73 @@ export function InvoiceRequestDataCard({
         </>
       )}
 
-      <div className="invoiceTaskDocs">
-
-        <span className="invoiceTaskDocsTitle">
-          {documentsOnly ? 'Ранее отправленные документы' : 'Документы менеджера'}
-        </span>
-
-
-        {!primary &&
-          attachments.length === 0 && (
-
-          <div className="invoiceTaskDocsEmpty">
-            Документы не прикреплены
+      <section className="invoiceTaskDocs" aria-label="Документы менеджера">
+        <div className="invoiceTaskDocsHeader">
+          <div>
+            <h3>Документы менеджера</h3>
+            <p>Актуальные документы и история исправлений</p>
           </div>
+          <span className="invoiceTaskDocsCount">Файлов: {documents.length}</span>
+        </div>
 
+        {documents.length === 0 && (
+          <div className="invoiceTaskDocsEmpty">Документы не прикреплены</div>
         )}
 
-
-        {primary && (
-
-          <a
-            className="invoiceTaskDoc"
-            href={
-              dealFileUrl(
-                primary.id
-              )
-            }
-            target="_blank"
-            rel="noreferrer"
-          >
-            <div>
-              <strong>
-                {
-                  primary
-                    .originalName
-                }
-              </strong>
-
-              <span>
-                Входящий счёт
-              </span>
+        {currentDocuments.length > 0 && (
+          <div className="invoiceTaskDocsSection">
+            <div className="invoiceTaskDocsSectionTitle">
+              <strong>Актуальные</strong>
+              <span>{currentDocuments.length}</span>
             </div>
-
-            <b>
-              Открыть
-            </b>
-          </a>
-
+            <div className="invoiceTaskDocsGrid">
+              {currentDocuments.map(({ file, description }) => (
+                <a
+                  key={file.id}
+                  className="invoiceTaskDoc invoiceTaskDoc--current"
+                  href={dealFileUrl(file.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="invoiceTaskDocIcon" aria-hidden="true">▤</span>
+                  <div>
+                    <strong>{file.originalName}</strong>
+                    <span>{description}</span>
+                  </div>
+                  <b>Открыть ↗</b>
+                </a>
+              ))}
+            </div>
+          </div>
         )}
 
-
-        {attachments.map(
-          (file) => (
-
-            <a
-              key={file.id}
-              className="invoiceTaskDoc"
-              href={
-                dealFileUrl(
-                  file.id
-                )
-              }
-              target="_blank"
-              rel="noreferrer"
-            >
-              <div>
-                <strong>
-                  {
-                    file.originalName
-                  }
-                </strong>
-
-                <span>
-                  Дополнительный документ
-                </span>
-              </div>
-
-              <b>
-                Открыть
-              </b>
-            </a>
-
-          )
+        {historyDocuments.length > 0 && (
+          <details className="invoiceTaskHistory" open>
+            <summary>
+              <span>История документов</span>
+              <span>{historyDocuments.length} ранее приложено</span>
+            </summary>
+            <div className="invoiceTaskDocsGrid">
+              {historyDocuments.map(({ file, description }) => (
+                <a
+                  key={file.id}
+                  className="invoiceTaskDoc invoiceTaskDoc--history"
+                  href={dealFileUrl(file.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="invoiceTaskDocIcon" aria-hidden="true">▤</span>
+                  <div>
+                    <strong>{file.originalName}</strong>
+                    <span>{description}</span>
+                  </div>
+                  <b>Открыть ↗</b>
+                </a>
+              ))}
+            </div>
+          </details>
         )}
-
-      </div>
+      </section>
 
     </div>
   );

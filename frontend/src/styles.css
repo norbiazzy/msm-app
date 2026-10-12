@@ -11390,3 +11390,290 @@ html[data-theme='dark'] .shell::before {
   overflow: visible !important;
 }
 /* END_PART_V064_O25_DEAL_LIST_PROGRESS_FORCE_VISIBLE */
+
+/* MSM_TASK_DETAIL_REDESIGN_V21
+   Scoped to the accountant's ISSUE_CLIENT_INVOICE workspace; keep other
+   task types and all workflow actions unchanged. */
+.boView-tasks .taskWorkspace--invoiceIssue {
+  --msm-doc-accent: var(--bo-blue, #4b7d95);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .detailHero {
+  margin-bottom: 10px;
+  border-radius: 14px;
+  padding: 16px 20px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .taskContextStrip {
+  margin-bottom: 12px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskData {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid var(--bo-line);
+  border-radius: 16px;
+  background: var(--bo-panel);
+  color: var(--bo-text);
+  padding: 18px;
+  margin-bottom: 12px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataHead,
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataGrid,
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocs {
+  grid-column: 1 / -1;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataHead strong {
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--bo-text);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataHead span {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--bo-muted);
+  opacity: 1;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataGrid {
+  margin-top: 0;
+  gap: 10px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataGrid > div,
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskTextBlock {
+  background: var(--bo-panel-2);
+  border: 1px solid var(--bo-line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskTextBlock {
+  min-width: 0;
+  margin-top: 0;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskTextBlock p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocs {
+  display: block;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--bo-line);
+  border-radius: 0;
+  padding: 16px 0 0;
+  margin: 4px 0 0;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsHeader h3 {
+  margin: 0 0 3px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--bo-text);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsHeader p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--bo-muted);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsCount {
+  flex: none;
+  border: 1px solid var(--bo-line);
+  border-radius: 20px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--bo-muted);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-size: 12px;
+  color: var(--bo-text);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsSectionTitle span {
+  border-radius: 12px;
+  padding: 2px 7px;
+  background: var(--bo-panel-2);
+  color: var(--bo-muted);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 9px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc {
+  display: grid !important;
+  grid-template-columns: 30px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 0;
+  min-height: 66px !important;
+  padding: 10px 12px !important;
+  margin-top: 0 !important;
+  background: var(--bo-panel-2);
+  border: 1px solid var(--bo-line);
+  border-radius: 11px;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc:hover {
+  border-color: var(--msm-doc-accent);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc--current {
+  border-left: 3px solid var(--msm-doc-accent);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc--history {
+  opacity: 0.84;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocIcon {
+  display: grid !important;
+  place-items: center;
+  width: 30px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--bo-panel);
+  color: var(--msm-doc-accent) !important;
+  font-size: 19px !important;
+  opacity: 1 !important;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc > div > strong {
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  font-weight: 760 !important;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc > div > span {
+  font-size: 11px !important;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc > b {
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory {
+  margin-top: 16px;
+  border-top: 1px solid var(--bo-line);
+  padding-top: 12px;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--bo-muted);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory summary::before {
+  content: '▾';
+  margin-right: 4px;
+  color: var(--msm-doc-accent);
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory:not([open]) summary::before {
+  content: '▸';
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory summary > span:first-child {
+  margin-right: auto;
+}
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskHistory summary > span:last-child {
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskData,
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataGrid,
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskData {
+    padding: 12px;
+    gap: 9px;
+  }
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataHead,
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDataGrid,
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocs {
+    grid-column: 1;
+  }
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDocsHeader {
+    flex-wrap: wrap;
+  }
+  .boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskDoc {
+    grid-template-columns: 26px minmax(0, 1fr) auto !important;
+    padding: 9px !important;
+  }
+}
+/* END_MSM_TASK_DETAIL_REDESIGN_V21 */
+/* MSM_STEP22_STICKY_DEAL_SIDEBAR */
+/* Desktop deal only. The global overflow-x:hidden on html/body/#root
+   creates non-scrolling overflow ancestors that can break position:sticky.
+   clip still prevents horizontal spill without capturing vertical scrolling. */
+@media (min-width: 821px) {
+  html:has(.boView-deal.boShell),
+  body:has(.boView-deal.boShell),
+  #root:has(.boView-deal.boShell) {
+    overflow-x: clip !important;
+    overflow-y: visible !important;
+  }
+
+  .boView-deal .dealWorkspaceCLayout {
+    align-items: start;
+  }
+
+  .boView-deal .dealWorkspaceCSidebar {
+    position: sticky;
+    top: 88px;
+    align-self: start;
+    max-height: calc(100dvh - 108px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    z-index: 2;
+  }
+}
+/* END_MSM_STEP22_STICKY_DEAL_SIDEBAR */
+/* MSM_STEP23_ACTIVE_DEAL_NAV */
+/* MSM_STEP24_ORDERED_NAV_NO_FLASH */
+/* Desktop: subtle active location marker; background never flips on click. */
+@media (min-width: 821px) {
+  .boView-deal .dealWorkspaceCActions > button[data-deal-section] {
+    position: relative;
+    border: 1px solid var(--bo-line) !important;
+    background: var(--bo-panel) !important;
+    color: var(--bo-text) !important;
+    font-weight: 750;
+    padding-left: 15px;
+    transition: color 160ms ease, box-shadow 160ms ease;
+  }
+  .boView-deal .dealWorkspaceCActions > button[data-deal-section][aria-current='location'] {
+    border-color: var(--bo-line) !important;
+    background: var(--bo-panel) !important;
+    color: var(--bo-accent-strong) !important;
+    box-shadow: inset 4px 0 0 var(--bo-accent) !important;
+  }
+  .boView-deal .dealWorkspaceCActions > button[data-deal-section]:focus-visible {
+    outline: 2px solid var(--bo-accent) !important;
+    outline-offset: 2px;
+  }
+  .boView-deal .dealWorkspaceCActions > button:not([data-deal-section]) {
+    margin-top: 9px;
+    border-top: 1px solid var(--bo-line);
+  }
+}
+/* Anchor targets must not disappear behind the fixed header. */
+.dealWorkspaceCPage #dealCOverview,
+.dealWorkspaceCPage #dealCClient,
+.dealWorkspaceCPage #dealCInvoice,
+.dealWorkspaceCPage #dealCPayments,
+.dealWorkspaceCPage #dealCIncoming,
+.dealWorkspaceCPage #dealCDocuments {
+  scroll-margin-top: 105px;
+}
+/* END_MSM_STEP24_ORDERED_NAV_NO_FLASH */
+/* END_MSM_STEP23_ACTIVE_DEAL_NAV */
