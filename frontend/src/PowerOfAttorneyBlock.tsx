@@ -1,5 +1,11 @@
 import { PoaEtrnPanel } from './PoaEtrnPanel';
 import { TaskContextStrip } from './TaskContextStrip';
+import { TaskDataSection } from './TaskDataSection';
+import { TaskWorkSection } from './TaskWorkSection';
+/* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
+/* MSM_STEP29_UNIFIED_TASK_LAYOUT */
+import { TaskDocuments } from './TaskDocuments';
+/* MSM_STEP27_POA_ETRN_SHARED_DOCUMENTS */
 import {
   useMemo,
   useState,
@@ -831,6 +837,28 @@ export function PowerOfAttorneyTask({
             task.id
       );
 
+  // New files after a return are current; originals remain available in history.
+  const revisedSourceFiles = sourceFiles.filter(
+    (file) => file.category === 'TASK_ATTACHMENT_' + task.id,
+  );
+  const originalSourceFiles = sourceFiles.filter(
+    (file) => file.category !== 'TASK_ATTACHMENT_' + task.id,
+  );
+  const poaCurrentDocs = [
+    ...(currentCustomerInvoiceFile
+      ? [{ file: currentCustomerInvoiceFile, description: 'Актуальный счёт заказчику' }]
+      : []),
+    ...(incomingInvoiceFile
+      ? [{ file: incomingInvoiceFile, description: 'Входящий счёт поставщика' }]
+      : []),
+    ...(revisedSourceFiles.length ? revisedSourceFiles : originalSourceFiles).map(
+      (file) => ({ file, description: revisedSourceFiles.length ? 'Приложено при исправлении' : 'Документ к доверенности' }),
+    ),
+  ];
+  const poaHistoryDocs = revisedSourceFiles.length
+    ? originalSourceFiles.map((file) => ({ file, description: 'Исходное вложение' }))
+    : [];
+
 
   async function take() {
     setSaving(true);
@@ -937,7 +965,7 @@ export function PowerOfAttorneyTask({
   ) {
     return (
       <section
-      className="content form taskWorkspace"
+      className="content form taskWorkspace taskWorkspace--unified"
       data-task-status={status}
     >
         <button
@@ -969,6 +997,25 @@ export function PowerOfAttorneyTask({
       {/* PART_V064_L_POA_TASK_CONTEXT */}
       <TaskContextStrip task={task} />
 
+      <TaskDataSection
+        title="Данные для доверенности"
+        subtitle="Кому выдаём, откуда получаем и какие документы используем"
+        items={[
+          { label: 'Поставщик / завод', value: supplierName || '—' },
+          { label: 'На кого доверенность', value: recipientName || '—' },
+          { label: 'Что получаем', value: goodsDescription || '—', wide: true },
+          ...(currentCustomerInvoiceNumber
+            ? [{ label: 'Счёт заказчику', value: currentCustomerInvoiceNumber }]
+            : []),
+          ...(incomingInvoiceNumber
+            ? [{ label: 'Входящий счёт', value: incomingInvoiceNumber }]
+            : []),
+          ...(task.description
+            ? [{ label: 'Комментарий для бухгалтерии', value: task.description, wide: true }]
+            : []),
+        ]}
+      />
+
         {(returnReason ||
           returnComment) && (
           <div className="taskReturnNotice">
@@ -992,37 +1039,13 @@ export function PowerOfAttorneyTask({
           </div>
         )}
 
-        {sourceFiles.length > 0 && (
-          <div className="infoBox">
-            <strong>
-              Прикреплённые документы
-            </strong>
-
-            <div className="versionList">
-              {sourceFiles.map(
-                (file) => (
-                  <div
-                    key={file.id}
-                    className="versionRow"
-                  >
-                    <b>
-                      {file.originalName}
-                    </b>
-
-                    <a
-                      href={dealFileUrl(
-                        file.id
-                      )}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Открыть
-                    </a>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
+        {(poaCurrentDocs.length > 0 || poaHistoryDocs.length > 0) && (
+          <TaskDocuments
+            title="Документы доверенности"
+            subtitle="Актуальные файлы и вложения до исправления"
+            current={poaCurrentDocs}
+            history={poaHistoryDocs}
+          />
         )}
 
         <ManagerResubmitPanel
@@ -1047,7 +1070,7 @@ export function PowerOfAttorneyTask({
 
 
   return (
-    <section className="content form">
+    <section className="content form taskWorkspace taskWorkspace--unified" data-task-status={status}>
 
       <button
         className="backLink"
@@ -1083,146 +1106,67 @@ export function PowerOfAttorneyTask({
       </div>
 
 
-      <div className="powerTaskGrid">
-        <div>
-          <span>Поставщик / завод</span>
-          <b>{supplierName || '—'}</b>
-        </div>
+      <TaskContextStrip task={task} />
 
-        <div>
-          <span>На кого доверенность</span>
-          <b>{recipientName || '—'}</b>
-        </div>
-      </div>
+      <TaskDataSection
+        title="Данные для доверенности"
+        subtitle="Кому выдаём, откуда получаем и какие документы используем"
+        items={[
+          { label: 'Поставщик / завод', value: supplierName || '—' },
+          { label: 'На кого доверенность', value: recipientName || '—' },
+          { label: 'Что получаем', value: goodsDescription || '—', wide: true },
+          ...(currentCustomerInvoiceNumber
+            ? [{ label: 'Счёт заказчику', value: currentCustomerInvoiceNumber }]
+            : []),
+          ...(incomingInvoiceNumber
+            ? [{ label: 'Входящий счёт', value: incomingInvoiceNumber }]
+            : []),
+          ...(task.description
+            ? [{ label: 'Комментарий для бухгалтерии', value: task.description, wide: true }]
+            : []),
+        ]}
+      />
 
-
-      <div className="infoBox">
-        <strong>Что получаем</strong>
-        <p>
-          {goodsDescription || '—'}
-        </p>
-      </div>
-
-
-      {task.description && (
-        <div className="infoBox">
-          <strong>
-            Комментарий для бухгалтерии
-          </strong>
-          <p>{task.description}</p>
-        </div>
+      {(poaCurrentDocs.length > 0 || poaHistoryDocs.length > 0) && (
+        <TaskDocuments
+          title="Документы доверенности"
+          subtitle="Счета и приложенные документы"
+          current={poaCurrentDocs}
+          history={poaHistoryDocs}
+        />
       )}
 
-
-      {(currentCustomerInvoiceFile ||
-        currentCustomerInvoiceNumber) && (
-        <div className="infoBox">
-          <strong>
-            Актуальный основной счёт
-          </strong>
-
-          {currentCustomerInvoiceFile ? (
-            <a
-              href={dealFileUrl(
-                currentCustomerInvoiceFile.id
-              )}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {currentCustomerInvoiceFile
-                .originalName}
-            </a>
-          ) : (
-            <p>
-              {currentCustomerInvoiceNumber}
-            </p>
+      {status === 'NEW' && (
+        <div className="taskUnifiedStartActions">
+          {user.role === 'ACCOUNTANT' && (
+            <ReturnToManagerPanel
+              taskId={task.id}
+              actorId={user.id}
+              disabled={saving}
+              onReturned={onBack}
+            />
           )}
+          <button type="button" className="primary wide" disabled={saving} onClick={take}>
+            {saving ? 'Сохраняем…' : 'В работу'}
+          </button>
         </div>
       )}
-
-
-      {(incomingInvoiceFile ||
-        incomingInvoiceNumber) && (
-        <div className="infoBox">
-          <strong>Входящий счёт</strong>
-
-          {incomingInvoiceNumber && (
-            <p>{incomingInvoiceNumber}</p>
-          )}
-
-          {incomingInvoiceFile && (
-            <a
-              href={dealFileUrl(
-                incomingInvoiceFile.id
-              )}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {incomingInvoiceFile
-                .originalName}
-            </a>
-          )}
-        </div>
-      )}
-
-
-      {sourceFiles.length > 0 && (
-        <div className="infoBox">
-          <strong>Документы к запросу</strong>
-          <div className="versionList">
-            {sourceFiles.map(
-              (file) => (
-              <div
-                key={file.id}
-                className="versionRow"
-              >
-                <div>
-                  <b>{file.originalName}</b>
-                </div>
-                <a
-                  href={dealFileUrl(
-                    file.id
-                  )}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-
-      {user.role === 'ACCOUNTANT' &&
-        (
-          status === 'NEW' ||
-          status === 'IN_PROGRESS'
-        ) && (
+      {user.role === 'ACCOUNTANT' && status === 'IN_PROGRESS' && (
+        <div className="taskUnifiedSingleAction">
           <ReturnToManagerPanel
             taskId={task.id}
             actorId={user.id}
             disabled={saving}
             onReturned={onBack}
           />
-        )}
-
-
-      {status === 'NEW' && (
-        <button
-          type="button"
-          className="primary wide"
-          disabled={saving}
-          onClick={take}
-        >
-          {saving ? 'Сохраняем…' : 'В работу'}
-        </button>
+        </div>
       )}
 
-
       {status === 'IN_PROGRESS' && (
-        <>
+        <TaskWorkSection
+          title="Оформление доверенности"
+          description="Укажите номер, прикрепите готовую доверенность и при необходимости оставьте комментарий."
+        >
           <label className="field">
             <span>
               Номер доверенности
@@ -1275,7 +1219,7 @@ export function PowerOfAttorneyTask({
           >
             Доверенность готова
           </button>
-        </>
+        </TaskWorkSection>
       )}
 
 

@@ -11677,3 +11677,326 @@ html[data-theme='dark'] .shell::before {
 }
 /* END_MSM_STEP24_ORDERED_NAV_NO_FLASH */
 /* END_MSM_STEP23_ACTIVE_DEAL_NAV */
+
+/* MSM_STEP25_SHARED_TASK_DOCUMENTS_STYLES */
+/* Invoice request is a two-column grid: documents must span both columns. */
+.boView-tasks .taskWorkspace--invoiceIssue .invoiceTaskData > .taskDocsShared {
+  grid-column: 1 / -1;
+}
+.boView-tasks .taskDocsShared {
+  width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 15px;
+  border: 1px solid var(--bo-line);
+  border-radius: 12px;
+  background: var(--bo-panel);
+  color: var(--bo-text);
+}
+.boView-tasks .taskDocsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.boView-tasks .taskDocsHeader h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--bo-text);
+}
+.boView-tasks .taskDocsHeader p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--bo-muted);
+}
+.boView-tasks .taskDocsCount {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid var(--bo-line);
+  border-radius: 999px;
+  color: var(--bo-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.boView-tasks .taskDocsEmpty {
+  padding: 12px;
+  border: 1px dashed var(--bo-line);
+  border-radius: 9px;
+  color: var(--bo-muted);
+  text-align: center;
+}
+.boView-tasks .taskDocsSectionHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-size: 12px;
+}
+.boView-tasks .taskDocsSectionHeading span {
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: var(--bo-panel-2);
+  color: var(--bo-muted);
+}
+.boView-tasks .taskDocsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.boView-tasks .taskDocsRow {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid var(--bo-line);
+  border-radius: 9px;
+  background: var(--bo-panel-2);
+  color: var(--bo-text);
+  text-decoration: none;
+  transition: border-color .15s ease;
+}
+.boView-tasks .taskDocsRow:hover,
+.boView-tasks .taskDocsRow:focus-visible { border-color: var(--bo-accent); }
+.boView-tasks .taskDocsRow:focus-visible { outline: 2px solid var(--bo-accent); outline-offset: 1px; }
+.boView-tasks .taskDocsRow--current { border-left: 3px solid var(--bo-accent); }
+.boView-tasks .taskDocsRow--history { opacity: .86; }
+.boView-tasks .taskDocsFileIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 34px;
+  border-radius: 7px;
+  background: var(--bo-panel);
+  color: var(--bo-accent);
+  font-size: 19px;
+}
+.boView-tasks .taskDocsFileInfo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.boView-tasks .taskDocsFileInfo strong {
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  color: var(--bo-text);
+}
+.boView-tasks .taskDocsFileInfo > span { font-size: 11px; color: var(--bo-muted); }
+.boView-tasks .taskDocsOpen { font-size: 11px; font-weight: 800; color: var(--bo-accent); white-space: nowrap; }
+.boView-tasks .taskDocsHistory { margin-top: 16px; border-top: 1px solid var(--bo-line); padding-top: 12px; }
+.boView-tasks .taskDocsHistory summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  color: var(--bo-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.boView-tasks .taskDocsHistory summary::before { content: '▸'; color: var(--bo-accent); }
+.boView-tasks .taskDocsHistory[open] summary::before { content: '▾'; }
+.boView-tasks .taskDocsHistory summary > span:last-child { margin-left: auto; font-weight: 550; }
+@media (max-width: 720px) {
+  .boView-tasks .taskDocsGrid { grid-template-columns: minmax(0, 1fr); }
+  .boView-tasks .taskDocsHeader { flex-wrap: wrap; }
+  .boView-tasks .taskDocsRow { grid-template-columns: 28px minmax(0, 1fr) auto; }
+}
+/* END_MSM_STEP25_SHARED_TASK_DOCUMENTS_STYLES */
+
+/* MSM_STEP29_UNIFIED_TASK_LAYOUT */
+/* A shared visual language for invoice, supplier-payment and POA tasks. */
+.boView-tasks section.taskWorkspace--unified {
+  gap: 0;
+}
+.boView-tasks .taskWorkspace--unified .taskUnifiedData {
+  width: 100%;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--bo-line);
+  border-radius: 16px;
+  background: var(--bo-panel);
+  color: var(--bo-text);
+  margin: 0 0 12px;
+}
+.boView-tasks .taskUnifiedDataHead {
+  margin: 0 0 17px;
+}
+.boView-tasks .taskUnifiedDataHead h3 {
+  margin: 0 0 4px;
+  color: var(--bo-text);
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+.boView-tasks .taskUnifiedDataHead p {
+  margin: 0;
+  color: var(--bo-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.boView-tasks .taskUnifiedDataGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.boView-tasks .taskUnifiedDataField {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 14px;
+  border: 1px solid var(--bo-line);
+  border-radius: 10px;
+  background: var(--bo-panel-2);
+}
+.boView-tasks .taskUnifiedDataField--wide {
+  grid-column: 1 / -1;
+}
+.boView-tasks .taskUnifiedDataField > span {
+  color: var(--bo-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 750;
+}
+.boView-tasks .taskUnifiedDataField > strong {
+  min-width: 0;
+  color: var(--bo-text);
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.boView-tasks .taskUnifiedStartActions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--bo-line);
+  border-left: 4px solid var(--bo-blue, var(--bo-accent));
+  border-radius: 12px;
+  background: var(--bo-panel);
+}
+.boView-tasks .taskUnifiedStartActions--single {
+  grid-template-columns: 1fr;
+}
+.boView-tasks .taskUnifiedStartActions > button {
+  min-width: 0;
+  width: 100%;
+  min-height: 54px;
+  margin: 0;
+  border-radius: 9px;
+  text-align: center;
+}
+.boView-tasks .taskUnifiedSingleAction {
+  margin: 12px 0;
+}
+.boView-tasks .taskUnifiedSingleAction > button {
+  width: 100%;
+}
+@media (max-width: 720px) {
+  .boView-tasks .taskUnifiedDataGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .boView-tasks .taskUnifiedDataField--wide {
+    grid-column: 1;
+  }
+  .boView-tasks .taskWorkspace--unified .taskUnifiedData {
+    padding: 12px;
+  }
+  .boView-tasks .taskUnifiedStartActions {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px;
+  }
+}
+/* END_MSM_STEP29_UNIFIED_TASK_LAYOUT */
+
+/* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
+/* Shared work area; read-only task details and document cards above are unchanged. */
+.boView-tasks .taskAccountantWork {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  gap: 0;
+  margin: 12px 0;
+  padding: 0;
+  border: 1px solid var(--bo-line);
+  border-radius: 16px;
+  background: var(--bo-panel);
+  color: var(--bo-text);
+  overflow: clip;
+}
+.boView-tasks .taskAccountantWorkHead {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--bo-line);
+}
+.boView-tasks .taskAccountantWorkEyebrow {
+  color: var(--bo-accent);
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 800;
+  letter-spacing: .025em;
+}
+.boView-tasks .taskAccountantWorkHead h3 {
+  margin: 0;
+  color: var(--bo-text);
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 800;
+}
+.boView-tasks .taskAccountantWorkHead p {
+  margin: 0;
+  color: var(--bo-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.boView-tasks .taskAccountantWorkBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+}
+.boView-tasks .taskAccountantWorkBody > .field,
+.boView-tasks .taskAccountantWorkBody > label.field {
+  min-width: 0;
+  margin: 0;
+}
+.boView-tasks .taskAccountantWorkBody > .primary.wide,
+.boView-tasks .taskAccountantWorkBody > button.primary {
+  width: 100%;
+  min-height: 54px;
+  margin: 3px 0 0;
+  border-radius: 9px;
+}
+.boView-tasks .taskAccountantWorkBody > .microcopy {
+  margin: 0;
+}
+.boView-tasks .taskAccountantWorkHint {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--bo-line);
+  border-radius: 10px;
+  background: var(--bo-panel-2);
+  color: var(--bo-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+@media (max-width: 720px) {
+  .boView-tasks .taskAccountantWorkHead,
+  .boView-tasks .taskAccountantWorkBody {
+    padding: 12px;
+  }
+  .boView-tasks .taskAccountantWorkHead h3 {
+    font-size: 16px;
+  }
+}
+/* END_MSM_STEP31_ACCOUNTANT_WORK_FORMS */

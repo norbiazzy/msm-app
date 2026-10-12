@@ -1,4 +1,10 @@
 import { TaskContextStrip } from './TaskContextStrip';
+import { TaskDataSection } from './TaskDataSection';
+import { TaskWorkSection } from './TaskWorkSection';
+/* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
+/* MSM_STEP29_UNIFIED_TASK_LAYOUT */
+import { TaskDocuments } from './TaskDocuments';
+/* MSM_STEP28_SUPPLIER_PAYMENT_DOCUMENTS */
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
@@ -2444,22 +2450,52 @@ export function SupplierPaymentTask({
     ];
 
 
-  const incomingFiles =
-    currentPurchaseIncoming
+  // Only files belonging to this supplier purchase or to its payments.
+  // SupplierPaymentManagerEdit writes corrected extras into SUPPLIER_DOCUMENT_.
+  const purchaseFilesForTask = task.deal.files || [];
+  const extraPurchaseDocuments = purchaseFilesForTask.filter(
+    (file) =>
+      file.category === 'SUPPLIER_ATTACHMENT_' + purchase.id ||
+      file.category === 'SUPPLIER_DOCUMENT_' + purchase.id,
+  );
+  const paymentOrderFiles = purchaseFilesForTask.filter(
+    (file) => file.category === 'SUPPLIER_PAYMENT_' + purchase.id,
+  );
+  const paymentIdSet = new Set((purchase.payments || []).map((payment) => payment.id));
+  const stampedPaymentOrderFiles = purchaseFilesForTask.filter((file) => {
+    const prefix = 'SUPPLIER_PAYMENT_STAMP_';
+    return file.category?.startsWith(prefix) &&
+      paymentIdSet.has(file.category.slice(prefix.length));
+  });
+  const originalDealAttachments = !currentPurchaseIncoming
+    ? purchaseFilesForTask.filter((file) => file.category === 'MANAGER_ATTACHMENT')
+    : [];
 
-      ? [
-          currentPurchaseIncoming,
-          ...purchaseAdditionalFiles,
-        ]
-
-      : (
-          task.deal.files || []
-        ).filter(
-          (file) =>
-            file.category ===
-            'MANAGER_ATTACHMENT'
-        );
-
+  const supplierCurrentDocuments = [
+    ...(currentPurchaseIncoming
+      ? [{ file: currentPurchaseIncoming, description: 'Актуальный входящий счёт поставщика' }]
+      : originalDealAttachments.map((file) => ({
+          file, description: 'Вложение к исходной заявке',
+        }))),
+    ...purchaseAdditionalFiles.map((file) => ({
+      file, description: 'Дополнительный документ поставщика',
+    })),
+    ...extraPurchaseDocuments.map((file) => ({
+      file, description: 'Дополнено по закупке или при исправлении',
+    })),
+    ...paymentOrderFiles.map((file) => ({
+      file, description: 'Платёжное поручение',
+    })),
+    ...stampedPaymentOrderFiles.map((file) => ({
+      file, description: 'Платёжное поручение с отметкой банка',
+    })),
+  ];
+  const supplierHistoryDocuments = purchaseIncomingFiles
+    .slice(0, -1)
+    .reverse()
+    .map((file) => ({
+      file, description: 'Предыдущий входящий счёт поставщика',
+    }));
 
   const paidAlready =
     payments.reduce(
@@ -2783,7 +2819,7 @@ export function SupplierPaymentTask({
   return (
 
     <section
-      className="content form taskWorkspace"
+      className="content form taskWorkspace taskWorkspace--unified"
       data-task-status={status}
     >
 
@@ -2867,219 +2903,66 @@ export function SupplierPaymentTask({
       <TaskContextStrip task={task} />
 
 
-      <div className="infoBox">
+      <TaskDataSection
+        title="Данные для оплаты поставщику"
+        subtitle="Поставщик, входящий счёт и сумма к оплате"
+        items={[
+          { label: 'Поставщик', value: purchase.supplierName },
+          { label: 'Входящий счёт', value: purchase.incomingInvoiceNumber || '—' },
+          { label: stampOnlyTask ? 'Оплачено' : 'Нужно оплатить', value: stampOnlyTask ? money(paidAlready) : money(amountToPay) },
+          { label: 'Уже оплачено', value: money(paidAlready) },
+          { label: 'Документы', value: waitingStamp ? 'Ждём печать' : financiallyPaid ? 'Готово' : 'Оплата' },
+          ...(task.description
+            ? [{ label: 'Комментарий менеджера', value: task.description, wide: true }]
+            : []),
+        ]}
+      />
 
-        <strong>
-          Данные закупки
-        </strong>
+      <TaskDocuments
+        title="Документы оплаты поставщику"
+        subtitle="Входящий счёт, платёжные поручения и документы с отметкой банка"
+        current={supplierCurrentDocuments}
+        history={supplierHistoryDocuments}
+        emptyLabel="По этой закупке файлы пока не приложены"
+      />
 
-
-        <div className="supplierTaskNumbers">
-
-          <div>
-
-            <span>
-              Входящий счёт
-            </span>
-
-            <b>
-              {
-                purchase
-                  .incomingInvoiceNumber ||
-                '—'
-              }
-            </b>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              {
-                stampOnlyTask
-                  ? 'Оплачено'
-                  : 'Нужно оплатить'
-              }
-            </span>
-
-            <b>
-              {
-                stampOnlyTask
-                  ? money(paidAlready)
-                  : money(amountToPay)
-              }
-            </b>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              Уже оплачено
-            </span>
-
-            <b>
-              {money(paidAlready)}
-            </b>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              Документы
-            </span>
-
-            <b>
-              {
-                waitingStamp
-                  ? 'Ждём печать'
-                  : financiallyPaid
-                    ? 'Готово'
-                    : 'Оплата'
-              }
-            </b>
-
-          </div>
-
+      {/* Unified actions: return first, take second. */}
+      {status === 'NEW' && (
+        <div className={financiallyPaid
+          ? 'taskUnifiedStartActions taskUnifiedStartActions--single'
+          : 'taskUnifiedStartActions'}>
+          {!financiallyPaid && (
+            <ReturnToManagerPanel
+              taskId={task.id}
+              actorId={user.id}
+              disabled={saving}
+              onReturned={onBack}
+            />
+          )}
+          <button type="button" className="primary wide" disabled={saving} onClick={take}>
+            {saving ? 'Сохраняем…' : 'В работу'}
+          </button>
         </div>
-
-      </div>
-
-
-      {task.description && (
-
-        <div className="infoBox">
-
-          <strong>
-            Комментарий менеджера
-          </strong>
-
-          <p>
-            {task.description}
-          </p>
-
+      )}
+      {status === 'IN_PROGRESS' && !financiallyPaid && (
+        <div className="taskUnifiedSingleAction">
+          <ReturnToManagerPanel
+            taskId={task.id}
+            actorId={user.id}
+            disabled={saving}
+            onReturned={onBack}
+          />
         </div>
-
       )}
-
-
-      {incomingFiles.length > 0 && (
-
-        <div className="infoBox">
-
-          <strong>
-            {
-              purchaseIncomingFiles.length > 0
-                ? 'Входящий счёт поставщика'
-                : 'Входящие документы сделки'
-            }
-          </strong>
-
-          <div className="versionList">
-
-            {incomingFiles.map(
-              (file) => (
-
-              <div
-                className="versionRow"
-                key={file.id}
-              >
-
-                <div>
-                  <b>
-                    {file.originalName}
-                  </b>
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      file.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
-      )}
-
-
-            {/* PART_1M_A_SUPPLIER_RETURN */}
-
-      {/* PART_1N_K4_V3_DISABLE_OLD_SUPPLIER_RETURN */}
-      {false && (
-        status === 'NEW' ||
-        status === 'IN_PROGRESS'
-      ) && (
-
-        <ReturnToManagerPanel
-          taskId={task.id}
-          actorId={user.id}
-          disabled={saving}
-          onReturned={onBack}
-        />
-
-      )}
-
-
-{status === 'NEW' && (
-
-        <button
-          className="primary wide"
-          disabled={saving}
-          onClick={take}
-        >
-
-          {
-            saving
-              ? 'Сохраняем…'
-              : 'В работу'
-          }
-
-        </button>
-
-      )}
-
-
-      
-
-      {/* PART_1N_K2_V3_SUPPLIER_RETURN */}
-
-      {(
-        status === 'NEW' ||
-        status === 'IN_PROGRESS'
-      ) &&
-        !financiallyPaid && (
-
-        <ReturnToManagerPanel
-          taskId={task.id}
-          actorId={user.id}
-          disabled={saving}
-          onReturned={onBack}
-        />
-
-      )}
-
 
 {status ===
         'IN_PROGRESS' &&
         !financiallyPaid && (
 
-        <>
+        <TaskWorkSection
+          title="Проведение оплаты поставщику"
+          description="Укажите сумму и способ оплаты, приложите платёжное поручение при необходимости."
+        >
 
           <label className="field">
 
@@ -3231,7 +3114,7 @@ export function SupplierPaymentTask({
             Отправить оплату
           </button>
 
-        </>
+        </TaskWorkSection>
 
       )}
 

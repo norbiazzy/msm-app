@@ -1,168 +1,39 @@
 /* PART_V064_N2_ETRN_SOURCE_DOCUMENTS */
-import {
-  dealFileUrl,
-  type Task,
-} from './api';
+import type { Task } from './api';
+import { TaskDocuments } from './TaskDocuments';
+/* MSM_STEP27_POA_ETRN_SHARED_DOCUMENTS */
+/* MSM_STEP30_ETRN_UNIFIED_LAYOUT */
 
-function sellerLabel(
-  value: unknown,
-) {
-  return ({
-    MSM: 'МСМ',
-    ST: 'СТ',
-    IP: 'ИП',
-  } as Record<string, string>)[
-    String(value || '')
-  ] || String(value || '');
-}
-
-export function EtrnSourceDocuments({
-  task,
-}: {
-  task: Task;
-}) {
-  if (
-    task.type !==
-    'ETRN'
-  ) {
-    return null;
-  }
-
-  const payload =
-    (
-      task.payload &&
-      typeof task.payload ===
-        'object'
-    )
-      ? task.payload as
-          Record<
-            string,
-            unknown
-          >
-      : {};
-
-  const details =
-    task.details || {};
-
-  const files =
-    task.deal.files || [];
-
-  const poaFile =
-    files.find(
-      (file) =>
-        file.id ===
-        String(
-          payload.poaFileId ||
-          ''
-        )
-    );
-
-  const invoiceFile =
-    files.find(
-      (file) =>
-        file.id ===
-        String(
-          payload.invoiceFileId ||
-          ''
-        )
-    );
-
-  const poaNumber =
-    String(
-      details.poaNumber ||
-      payload.poaNumber ||
-      ''
-    );
-
-  const invoiceNumber =
-    String(
-      details.invoiceNumber ||
-      payload.invoiceNumber ||
-      ''
-    );
-
-  const invoiceSellerType =
-    String(
-      details.invoiceSellerType ||
-      payload.invoiceSellerType ||
-      ''
-    );
+/** A single document list. Specific file IDs always come from this ETRN task. */
+export function EtrnSourceDocuments({ task }: { task: Task }) {
+  if (task.type !== 'ETRN') return null;
+  const files = task.deal.files || [];
+  const payload = task.payload || {};
+  const poaId = String(payload.poaFileId || '');
+  const invoiceId = String(payload.invoiceFileId || '');
+  const poaFile = files.find(file => poaId && file.id === poaId);
+  const invoiceFile = files.find(file => invoiceId && file.id === invoiceId);
+  const extraFiles = files.filter(file => file.category === 'TASK_ATTACHMENT_' + task.id);
 
   return (
     <div className="etrnTaskDocs">
-      <div className="taskStructuredTitle">
-        Документы для ЭТРН
-      </div>
-
-      <div className="etrnAutoDocRow">
-        <div>
-          <span>
-            Доверенность
-          </span>
-          <strong>
-            № {poaNumber || '—'}
-          </strong>
+      {(!poaFile || !invoiceFile) && (
+        <div className="infoBox" role="status">
+          <strong>Проверьте документы для ЭТрН</strong>
+          {!poaFile && <p>Доверенность: файл не найден</p>}
+          {!invoiceFile && <p>Актуальный счёт: файл не найден</p>}
         </div>
-
-        {poaFile ? (
-          <a
-            href={
-              dealFileUrl(
-                poaFile.id
-              )
-            }
-            target="_blank"
-            rel="noreferrer"
-          >
-            Открыть
-          </a>
-        ) : (
-          <b className="etrnDocMissing">
-            Файл не найден
-          </b>
-        )}
-      </div>
-
-      <div className="etrnAutoDocRow">
-        <div>
-          <span>
-            Актуальный счёт
-          </span>
-          <strong>
-            {
-              invoiceNumber
-                ? (
-                    sellerLabel(
-                      invoiceSellerType
-                    ) +
-                    ' - ' +
-                    invoiceNumber
-                  )
-                : '—'
-            }
-          </strong>
-        </div>
-
-        {invoiceFile ? (
-          <a
-            href={
-              dealFileUrl(
-                invoiceFile.id
-              )
-            }
-            target="_blank"
-            rel="noreferrer"
-          >
-            Открыть
-          </a>
-        ) : (
-          <b className="etrnDocMissing">
-            Файл не найден
-          </b>
-        )}
-      </div>
+      )}
+      <TaskDocuments
+        title="Документы ЭТрН"
+        subtitle="Доверенность, счёт и дополнительные вложения"
+        current={[
+          ...(poaFile ? [{ file: poaFile, description: 'Доверенность' }] : []),
+          ...(invoiceFile ? [{ file: invoiceFile, description: 'Актуальный счёт' }] : []),
+          ...extraFiles.map(file => ({ file, description: 'Приложено при исправлении' })),
+        ]}
+      />
     </div>
   );
 }
-
 /* END_PART_V064_N2_ETRN_SOURCE_DOCUMENTS */

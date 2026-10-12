@@ -4,7 +4,6 @@ import {
 } from 'react';
 
 import {
-  dealFileUrl,
   submitInvoiceRequest,
   updateDealInfo,
   type Task,
@@ -18,6 +17,7 @@ import {
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
+import { TaskDocuments } from './TaskDocuments';
 
 import type {
   CurrentUser,
@@ -420,74 +420,12 @@ export function InvoiceRequestDataCard({
         </>
       )}
 
-      <section className="invoiceTaskDocs" aria-label="Документы менеджера">
-        <div className="invoiceTaskDocsHeader">
-          <div>
-            <h3>Документы менеджера</h3>
-            <p>Актуальные документы и история исправлений</p>
-          </div>
-          <span className="invoiceTaskDocsCount">Файлов: {documents.length}</span>
-        </div>
-
-        {documents.length === 0 && (
-          <div className="invoiceTaskDocsEmpty">Документы не прикреплены</div>
-        )}
-
-        {currentDocuments.length > 0 && (
-          <div className="invoiceTaskDocsSection">
-            <div className="invoiceTaskDocsSectionTitle">
-              <strong>Актуальные</strong>
-              <span>{currentDocuments.length}</span>
-            </div>
-            <div className="invoiceTaskDocsGrid">
-              {currentDocuments.map(({ file, description }) => (
-                <a
-                  key={file.id}
-                  className="invoiceTaskDoc invoiceTaskDoc--current"
-                  href={dealFileUrl(file.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <span className="invoiceTaskDocIcon" aria-hidden="true">▤</span>
-                  <div>
-                    <strong>{file.originalName}</strong>
-                    <span>{description}</span>
-                  </div>
-                  <b>Открыть ↗</b>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {historyDocuments.length > 0 && (
-          <details className="invoiceTaskHistory" open>
-            <summary>
-              <span>История документов</span>
-              <span>{historyDocuments.length} ранее приложено</span>
-            </summary>
-            <div className="invoiceTaskDocsGrid">
-              {historyDocuments.map(({ file, description }) => (
-                <a
-                  key={file.id}
-                  className="invoiceTaskDoc invoiceTaskDoc--history"
-                  href={dealFileUrl(file.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <span className="invoiceTaskDocIcon" aria-hidden="true">▤</span>
-                  <div>
-                    <strong>{file.originalName}</strong>
-                    <span>{description}</span>
-                  </div>
-                  <b>Открыть ↗</b>
-                </a>
-              ))}
-            </div>
-          </details>
-        )}
-      </section>
-
+      <TaskDocuments
+        title="Документы менеджера"
+        subtitle="Актуальные документы и история исправлений"
+        current={currentDocuments}
+        history={historyDocuments}
+      />
     </div>
   );
 }

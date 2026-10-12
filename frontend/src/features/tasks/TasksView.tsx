@@ -5,6 +5,9 @@ import { useBackgroundUploads } from '../../backgroundUploads';
 import { clearInvoiceTaskDraft, loadInvoiceTaskDraftFiles, readInvoiceTaskDraftFields, saveInvoiceTaskDraftFields, saveInvoiceTaskDraftFiles } from '../../invoiceTaskDraft';
 import { startInvoiceSubmission } from '../../invoiceSubmissionQueue';
 import { EtrnSourceDocuments } from '../../EtrnSourceDocuments';
+import { TaskDataSection } from '../../TaskDataSection';
+import { TaskWorkSection } from '../../TaskWorkSection';
+/* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
 import { TaskContextStrip } from '../../TaskContextStrip';
 import { SupplierBalanceCorrectionTask, SupplierPaymentTask } from '../../PurchasesBlock';
 import { PowerOfAttorneyTask } from '../../PowerOfAttorneyBlock';
@@ -12,6 +15,7 @@ import { ReturnToManagerPanel } from '../../ReturnToManagerPanel';
 import { ManagerResubmitPanel } from '../../ManagerResubmitPanel';
 import { TaskStructuredFields } from '../../TaskStructuredFields';
 import { InvoiceRequestDataCard, InvoiceRequestManagerRepair } from '../../InvoiceRequestTaskPanel';
+import { TaskDocuments } from '../../TaskDocuments';
 import { formatMoneyInput, parseMoneyInput, sellerLabels, taskStatus, todayLocalDate } from '../../shared/formatters';
 import { Field } from '../../shared/Field';
 
@@ -1034,6 +1038,19 @@ export function TasksView({ user, onChanged }: { user: CurrentUser; onChanged: (
 
 function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onBack: () => void }) {
 
+  /* MSM_STEP26_PREFILL_CORRECTION_INVOICE_NUMBER */
+  // Only a correction uses the existing invoice number as a default.
+  // Draft edits have priority and the input stays fully editable.
+  const correctionSourceNumber =
+    task.type === 'CORRECT_CLIENT_INVOICE'
+      ? String(
+          (
+            task.deal.invoices?.find((invoice) => invoice.isCurrent) ??
+            task.deal.invoices?.[0]
+          )?.number || ''
+        )
+      : '';
+
   const [status, setStatus] =
     useState(task.status);
 
@@ -1109,7 +1126,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
         task.id,
       );
 
-    setNumber(fields.number);
+    setNumber(
+      fields.number.trim()
+        ? fields.number
+        : correctionSourceNumber
+    );
     setAmount(fields.amount);
 
 
@@ -1137,7 +1158,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       cancelled = true;
     };
 
-  }, [task.id, task.type]);
+  }, [task.id, task.type, correctionSourceNumber]);
 
 
   useEffect(() => {
@@ -1501,19 +1522,66 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     );
 
 
+  // Sort versions without changing their stored order or categories.
+  const orderedCorrectionPrimaryFiles = [...correctionPrimaryFiles].sort(
+    (a, b) => (Date.parse(b.createdAt || '') || 0) - (Date.parse(a.createdAt || '') || 0),
+  );
+  const latestCorrectionPrimary = orderedCorrectionPrimaryFiles[0];
+  const correctionCurrentDocuments = [
+    ...(latestCorrectionPrimary
+      ? [{ file: latestCorrectionPrimary, description: 'Основной входящий счёт' }]
+      : []),
+    ...correctionExtraFiles.map((file) => ({ file, description: 'Дополнительный документ' })),
+    ...(!latestCorrectionPrimary
+      ? legacyCorrectionFiles.map((file) => ({ file, description: 'Документ корректировки (старый формат)' }))
+      : []),
+  ];
+  const initialCorrectionDocs = managerIncomingFiles.map((file) => ({
+    file,
+    description: 'Исходное вложение сделки',
+  }));
+  const correctionHistoryDocuments = [
+    ...orderedCorrectionPrimaryFiles.slice(1).map((file) => ({
+      file,
+      description: 'Предыдущая версия основного счёта',
+    })),
+    ...(latestCorrectionPrimary
+      ? legacyCorrectionFiles.map((file) => ({
+          file,
+          description: 'Ранее приложенный документ корректировки',
+        }))
+      : []),
+    ...(correctionCurrentDocuments.length > 0 ? initialCorrectionDocs : []),
+  ];
+  if (correctionCurrentDocuments.length === 0) {
+    correctionCurrentDocuments.push(...initialCorrectionDocs);
+  }
+
+  // MSM_STEP30_ETRN_UNIFIED_LAYOUT: only for the ETRN display, never written back to the task.
+  const etrnDetails = task.details || {};
+  const etrnPayload = task.payload || {};
+  const etrnValue = (key: string) => String(etrnDetails[key] || etrnPayload[key] || '—');
+  const etrnInvoiceNumber = String(etrnDetails.invoiceNumber || etrnPayload.invoiceNumber || '');
+  const etrnInvoiceSellerType = String(etrnDetails.invoiceSellerType || etrnPayload.invoiceSellerType || '');
+  const etrnSellerLabel = ({MSM: 'МСМ', ST: 'СТ', IP: 'ИП'} as Record<string, string>)[etrnInvoiceSellerType] || etrnInvoiceSellerType;
+  const etrnInvoiceLabel = etrnInvoiceNumber
+    ? [etrnSellerLabel, etrnInvoiceNumber].filter(Boolean).join(' - ')
+    : '—';
+
   const currentTaskInvoice =
+    task.deal.invoices?.find((invoice) => invoice.isCurrent) ??
     task.deal.invoices?.[0];
 
 
   return (
 
     <section
-      className={'content form taskWorkspace' + (task.type === 'ISSUE_CLIENT_INVOICE' ? ' taskWorkspace--invoiceIssue' : '')}
+      className={'content form taskWorkspace' + (task.type === 'ISSUE_CLIENT_INVOICE' ? ' taskWorkspace--invoiceIssue' : '') + (task.type === 'ETRN' ? ' taskWorkspace--unified taskWorkspace--etrn' : '')}
       data-task-status={status}
     >
 
       {/* PART_1N_K5_V3_RETURN_COMMENT_DETAIL */}
-      {status === 'NEED_DATA' &&
+      {status === 'NEED_DATA' && task.type !== 'ETRN' &&
         String(
           (task as any).returnComment || ''
         ).trim() && (
@@ -1537,7 +1605,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
       {/* PART_1N_H1_TASK_DETAIL_DEAL_LINK */}
 
-      {task.type !== 'ISSUE_CLIENT_INVOICE' && (
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.type !== 'ETRN' && (
       <a
         className="taskDetailDealLink"
         href={
@@ -1563,38 +1631,20 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {/* PART_V064_N2_ETRN_SOURCE_DOCS_UI */}
-      {task.type === 'ETRN' && (
-        <EtrnSourceDocuments task={task} />
-      )}
+      {/* ETRN documents now follow its header and data. */}
 
 
       {/* PART_1N_E1_STRUCTURED_TASK_DETAILS */}
 
-      {[
-        'POWER_OF_ATTORNEY',
-        'ETRN',
-      ].includes(
-        task.type
-      ) &&
-        task.details &&
-        Object.keys(
-          task.details
-        ).length > 0 && (
-
-        <TaskStructuredFields
-          taskType={task.type}
-          value={task.details}
-          readOnly
-        />
-
-      )}
-
+      {task.type === 'POWER_OF_ATTORNEY' &&
+        task.details && Object.keys(task.details).length > 0 && (
+          <TaskStructuredFields taskType={task.type} value={task.details} readOnly />
+        )}
 
       {/* PART_1N_D1_V2_UNIVERSAL_MANAGER_RESUBMIT */}
       {/* PART_1N_B1_MANAGER_RESUBMIT */}
 
-      {status === 'NEED_DATA' &&
+      {status === 'NEED_DATA' && task.type !== 'ETRN' &&
         user.role !== 'ACCOUNTANT' &&
         (
           task.type !== 'ISSUE_CLIENT_INVOICE' &&
@@ -1670,6 +1720,84 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
       <TaskContextStrip task={task} />
 
+      {/* MSM_STEP30_ETRN_UNIFIED_LAYOUT: structured details and documents after the task header. */}
+      {task.type === 'ETRN' && (
+        <>
+          <TaskDataSection
+            title="Данные для ЭТрН"
+            subtitle="Маршрут, перевозчик и контактные лица"
+            items={[
+              {label: '№ доверенности', value: etrnValue('poaNumber')},
+              {label: 'Актуальный счёт', value: etrnInvoiceLabel},
+              {label: 'Адрес погрузки', value: etrnValue('loadingAddress'), wide: true},
+              {label: 'Адрес выгрузки', value: etrnValue('unloadingAddress'), wide: true},
+              {label: 'Контакт на объекте', value: etrnValue('objectContactName')},
+              {label: 'Телефон на объекте', value: etrnValue('objectContactPhone')},
+              {label: 'Перевозчик / ООО', value: etrnValue('carrierCompany')},
+              {label: 'Контакт перевозчика', value: etrnValue('carrierContactName')},
+              {label: 'Телефон перевозчика', value: etrnValue('carrierPhone')},
+              ...(task.description
+                ? [{label: 'Комментарий менеджера', value: task.description, wide: true}]
+                : []),
+            ]}
+          />
+          <EtrnSourceDocuments task={task} />
+          {status === 'NEED_DATA' && user.role !== 'ACCOUNTANT' && (
+            <>
+              {String((task as any).returnComment || '').trim() && (
+                <div className="taskReturnCommentDetail">
+                  <strong>Комментарий бухгалтера</strong>
+                  <p>{String((task as any).returnComment)}</p>
+                </div>
+              )}
+              <ManagerResubmitPanel
+                taskId={task.id}
+                dealId={task.deal.id}
+                taskType={task.type}
+                actorId={user.id}
+                initialDescription={task.description}
+                initialUrgent={task.urgent}
+                initialDetails={task.details}
+                onResubmitted={onBack}
+              />
+            </>
+          )}
+          {status === 'NEW' && user.role === 'ACCOUNTANT' && (
+            <div className="taskUnifiedStartActions">
+              <ReturnToManagerPanel
+                taskId={task.id}
+                actorId={user.id}
+                disabled={saving}
+                onReturned={onBack}
+              />
+              <button type="button" className="primary wide" disabled={saving} onClick={take}>
+                {saving ? 'Сохраняем…' : 'В работу'}
+              </button>
+            </div>
+          )}
+          {status === 'IN_PROGRESS' && user.role === 'ACCOUNTANT' && (
+            <>
+              <div className="taskUnifiedSingleAction">
+                <ReturnToManagerPanel
+                  taskId={task.id}
+                  actorId={user.id}
+                  disabled={saving}
+                  onReturned={onBack}
+                />
+              </div>
+              <TaskWorkSection
+                title="Подготовка ЭТрН"
+                description="Данные маршрута, перевозчика и документы приведены выше."
+              >
+                <p className="taskAccountantWorkHint">В этом экране пока нет действия завершения ЭТрН. Для проверки и выпуска ЭТрН через оператора ЭПД потребуется отдельная интеграция.</p>
+              </TaskWorkSection>
+            </>
+          )}
+        </>
+      )}
+
+      {/* END_MSM_STEP30_ETRN_UNIFIED_LAYOUT */}
+
       {/* PART_1N_I1_INVOICE_DATA_CARD */}
 
       {task.type ===
@@ -1709,7 +1837,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.deal.requestText && (
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.type !== 'ETRN' && task.deal.requestText && (
 
         <div className="infoBox">
 
@@ -1726,7 +1854,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.description && (
+      {task.type !== 'ISSUE_CLIENT_INVOICE' && task.type !== 'ETRN' && task.description && (
 
         <div className="infoBox">
 
@@ -1816,300 +1944,29 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {task.type ===
-        'CORRECT_CLIENT_INVOICE' &&
-        correctionPrimaryFiles.length >
-          0 && (
-
-        <div className="infoBox correctionPrimaryBox">
-
-          <strong>
-            Основа для корректировки
-          </strong>
-
-          <p>
-            Ориентироваться по этому входящему счёту.
-          </p>
-
-
-          <div className="versionList">
-
-            {correctionPrimaryFiles.map(
-              (file) => (
-
-              <div
-                className="versionRow correctionPrimaryRow"
-                key={file.id}
-              >
-
-                <div>
-
-                  <b>
-                    {file.originalName}
-                  </b>
-
-                  <span>
-                    Основной входящий счёт
-                  </span>
-
-                </div>
-
-
-                <a
-                  href={
-                    dealFileUrl(
-                      file.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
+      {task.type === 'CORRECT_CLIENT_INVOICE' && (
+        <TaskDocuments
+          title="Документы корректировки"
+          subtitle={correctionPrimaryFiles.length === 0 && legacyCorrectionFiles.length > 0
+            ? 'Старый формат: проверьте документы вместе с комментарием менеджера'
+            : 'Основной счёт, дополнительные материалы и предыдущие вложения'}
+          current={correctionCurrentDocuments}
+          history={correctionHistoryDocuments}
+        />
       )}
 
-
-      {task.type ===
-        'CORRECT_CLIENT_INVOICE' &&
-        correctionPrimaryFiles.length ===
-          0 &&
-        legacyCorrectionFiles.length >
-          0 && (
-
-        <div className="infoBox correctionPrimaryBox">
-
-          <strong>
-            Документы корректировки
-          </strong>
-
-          <p>
-            Задача создана до разделения основного и дополнительных файлов. Проверьте эти документы вместе с комментарием менеджера.
-          </p>
-
-
-          <div className="versionList">
-
-            {legacyCorrectionFiles.map(
-              (file) => (
-
-              <div
-                className="versionRow"
-                key={file.id}
-              >
-
-                <div>
-                  <b>
-                    {file.originalName}
-                  </b>
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      file.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
-      )}
-
-
-      {task.type ===
-        'CORRECT_CLIENT_INVOICE' &&
-        correctionExtraFiles.length >
-          0 && (
-
-        <div className="infoBox">
-
-          <strong>
-            Дополнительные материалы
-          </strong>
-
-
-          <div className="versionList">
-
-            {correctionExtraFiles.map(
-              (file) => (
-
-              <div
-                className="versionRow"
-                key={file.id}
-              >
-
-                <div>
-
-                  <b>
-                    {file.originalName}
-                  </b>
-
-                  <span>
-                    Дополнительный документ
-                  </span>
-
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      file.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
-      )}
-
-
-      {task.type ===
-        'CORRECT_CLIENT_INVOICE' &&
-        managerIncomingFiles.length >
-          0 && (
-
-        <div className="infoBox correctionOriginalFiles">
-
-          <strong>
-            Исходные вложения сделки
-          </strong>
-
-
-          <div className="versionList">
-
-            {managerIncomingFiles.map(
-              (file) => (
-
-              <div
-                className="versionRow"
-                key={file.id}
-              >
-
-                <div>
-                  <b>
-                    {file.originalName}
-                  </b>
-
-                  <span>
-                    Было приложено при создании сделки
-                  </span>
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      file.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
-      )}
-
-
-      {task.type !==
-        'CORRECT_CLIENT_INVOICE' &&
+      {task.type !== 'CORRECT_CLIENT_INVOICE' &&
         task.type !== 'ISSUE_CLIENT_INVOICE' &&
-        issueExtraFiles.length >
-          0 && (
-
-        <div className="infoBox">
-
-          <strong>
-            Дополнительные вложения
-          </strong>
-
-
-          <div className="versionList">
-
-            {issueExtraFiles.map(
-              (incomingFile) => (
-
-              <div
-                className="versionRow"
-                key={
-                  incomingFile.id
-                }
-              >
-
-                <div>
-
-                  <b>
-                    {
-                      incomingFile
-                        .originalName
-                    }
-                  </b>
-
-                  <span>
-                    Вложение к заявке
-                  </span>
-
-                </div>
-
-
-                <a
-                  href={
-                    dealFileUrl(
-                      incomingFile.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        </div>
-
-      )}
-
+        task.type !== 'ETRN' &&
+        issueExtraFiles.length > 0 && (
+          <TaskDocuments
+            title="Дополнительные вложения"
+            current={issueExtraFiles.map((file) => ({
+              file,
+              description: 'Вложение к заявке',
+            }))}
+          />
+        )}
 
             {/* PART_1N_D1_V2_UNIVERSAL_ACCOUNTANT_RETURN */}
       {/* PART_1M_B_POWER_OF_ATTORNEY_RETURN */}
@@ -2118,7 +1975,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
       {(
       task.type !== 'ISSUE_CLIENT_INVOICE' &&
-      task.type !== 'PAY_SUPPLIER'
+      task.type !== 'PAY_SUPPLIER' &&
+      task.type !== 'ETRN'
     ) &&
         (
           status === 'NEW' ||
@@ -2135,7 +1993,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-{status === 'NEW' && (
+{status === 'NEW' && task.type !== 'ETRN' && (
 
         task.type ===
           'ISSUE_CLIENT_INVOICE' ? (
@@ -2183,7 +2041,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
       )}
 
 
-      {status === 'IN_PROGRESS' && (
+      {status === 'IN_PROGRESS' && task.type !== 'ETRN' && (
 
         <div className="infoBox invoiceTaskInWorkBox">
 
@@ -2340,7 +2198,10 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
         status ===
           'IN_PROGRESS' && (
 
-        <>
+        <TaskWorkSection
+          title={task.type === 'CORRECT_CLIENT_INVOICE' ? 'Исправление готового счёта' : 'Подготовка готового счёта'}
+          description="Проверьте номер и сумму, приложите PDF готового счёта."
+        >
 
           <Field title="Номер готового счёта">
 
@@ -2515,7 +2376,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
           </div>
 
-        </>
+        </TaskWorkSection>
 
       )}
 
