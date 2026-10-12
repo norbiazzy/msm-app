@@ -284,8 +284,10 @@ function RequestField({
 
 export function InvoiceRequestDataCard({
   task,
+  documentsOnly = false,
 }: {
   task: Task;
+  documentsOnly?: boolean;
 }) {
 
   const data =
@@ -321,6 +323,8 @@ export function InvoiceRequestDataCard({
 
     <div className="invoiceTaskData">
 
+      {!documentsOnly && (
+        <>
       <div className="invoiceTaskDataHead">
 
         <div>
@@ -396,10 +400,13 @@ export function InvoiceRequestDataCard({
       </div>
 
 
+        </>
+      )}
+
       <div className="invoiceTaskDocs">
 
         <span className="invoiceTaskDocsTitle">
-          Документы менеджера
+          {documentsOnly ? 'Ранее отправленные документы' : 'Документы менеджера'}
         </span>
 
 
@@ -923,6 +930,7 @@ export function InvoiceRequestManagerRepair({
 
       <InvoiceRequestDataCard
         task={task}
+        documentsOnly
       />
 
 
@@ -987,6 +995,15 @@ export function InvoiceRequestManagerRepair({
 
 
         <label className="field">
+          <span>Формат запроса</span>
+          <select value={requestMode} disabled={saving}
+            onChange={(event) => setRequestMode(event.target.value)}>
+            <option value="TEXT">Текстом / позициями</option>
+            <option value="INCOMING_INVOICE">По входящему счёту</option>
+          </select>
+        </label>
+
+        <label className="field">
 
           <span>
             На кого выставлять
@@ -1012,6 +1029,24 @@ export function InvoiceRequestManagerRepair({
 
 
         <label className="field">
+          <span>Контактное лицо</span>
+          <input value={contactName} disabled={saving}
+            onChange={(event) => setContactName(event.target.value)} />
+        </label>
+
+        <label className="field">
+          <span>Телефон клиента</span>
+          <input type="tel" value={clientPhone} disabled={saving}
+            onChange={(event) => setClientPhone(event.target.value)} />
+        </label>
+
+        <label className="field">
+          <span>Адреса доставки (каждый с новой строки)</span>
+          <textarea rows={3} value={deliveryAddresses} disabled={saving}
+            onChange={(event) => setDeliveryAddresses(event.target.value)} />
+        </label>
+
+        <label className="field">
 
           <span>
             Что выставляем / текст запроса
@@ -1035,6 +1070,23 @@ export function InvoiceRequestManagerRepair({
 
 
         <label className="field">
+          <span>Условие расчёта</span>
+          <select value={marginMode} disabled={saving}
+            onChange={(event) => setMarginMode(event.target.value)}>
+            <option value="PERCENT">± %</option>
+            <option value="TOTAL_PLUS">+ к сумме</option>
+            <option value="UNIT_PLUS">+ за единицу</option>
+            <option value="FINAL">Итоговая цена</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Значение условия</span>
+          <input inputMode="decimal" value={marginValue} disabled={saving}
+            onChange={(event) => setMarginValue(event.target.value)} />
+        </label>
+
+        <label className="field">
 
           <span>
             Комментарий для бухгалтерии
@@ -1055,6 +1107,12 @@ export function InvoiceRequestManagerRepair({
 
         </label>
 
+
+        <label className="urgentToggle">
+          <input type="checkbox" checked={urgent} disabled={saving}
+            onChange={(event) => setUrgent(event.target.checked)} />
+          <span>Срочно</span>
+        </label>
 
         <div className="field">
 
