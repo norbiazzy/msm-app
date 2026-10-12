@@ -2,90 +2,21 @@ import {
   useState,
 } from 'react';
 
-import {
-  returnInvoiceRequest,
-  returnTaskToManager,
-} from './api';
-
-
-type ReasonCode =
-  | 'MISSING_DATA'
-  | 'INCORRECT_DATA'
-  | 'NEED_CLARIFICATION'
-  | 'NO_INCOMING_INVOICE'
-  | 'NO_TERMS'
-  | 'NO_DETAILS'
-  | 'OTHER';
-
-
-const reasons:
-  Array<{
-    value: ReasonCode;
-    label: string;
-  }> = [
-
-  {
-    value:
-      'MISSING_DATA',
-    label:
-      'Не хватает данных',
-  },
-
-  {
-    value:
-      'INCORRECT_DATA',
-    label:
-      'Данные заполнены неверно',
-  },
-
-  {
-    value:
-      'NEED_CLARIFICATION',
-    label:
-      'Требуется уточнение',
-  },
-
-  {
-    value:
-      'NO_INCOMING_INVOICE',
-    label:
-      'Нет входящего счёта',
-  },
-
-  {
-    value:
-      'NO_TERMS',
-    label:
-      'Нет условий',
-  },
-
-  {
-    value:
-      'NO_DETAILS',
-    label:
-      'Нет реквизитов / непонятно, на кого делать',
-  },
-
-  {
-    value:
-      'OTHER',
-    label:
-      'Другое',
-  },
-];
-
+import { TASK_RETURN_REASONS, returnTaskForCorrection, validateTaskReturnReason, type TaskReturnReasonCode } from './taskWorkflow';
 
 export function ReturnToManagerPanel({
   taskId,
   actorId,
   disabled = false,
   mode = 'generic',
+  taskType,
   onReturned,
 }: {
   taskId: string;
   actorId: string;
   disabled?: boolean;
   mode?: 'generic' | 'invoice';
+  taskType?: string;
   onReturned:
     () =>
       void |
@@ -102,7 +33,7 @@ export function ReturnToManagerPanel({
     reasonCode,
     setReasonCode,
   ] = useState<
-    ReasonCode
+    TaskReturnReasonCode
   >(
     'MISSING_DATA'
   );
@@ -132,16 +63,9 @@ export function ReturnToManagerPanel({
       comment.trim();
 
 
-    if (
-      reasonCode ===
-        'OTHER' &&
-      !normalizedComment
-    ) {
-
-      setError(
-        'Для причины «Другое» добавьте комментарий.'
-      );
-
+    const validationError = validateTaskReturnReason(reasonCode,normalizedComment);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -152,33 +76,13 @@ export function ReturnToManagerPanel({
 
     try {
 
-      const payload = {
+      await returnTaskForCorrection({
+        taskId,
+        taskType: taskType || (mode === 'invoice' ? 'ISSUE_CLIENT_INVOICE' : 'OTHER'),
         actorId,
         reasonCode,
-        comment:
-          normalizedComment ||
-          undefined,
-      };
-
-
-      if (
-        mode ===
-        'invoice'
-      ) {
-
-        await returnInvoiceRequest(
-          taskId,
-          payload,
-        );
-
-      } else {
-
-        await returnTaskToManager(
-          taskId,
-          payload,
-        );
-      }
-
+        comment: normalizedComment || undefined,
+      });
 
       setOpen(false);
 
@@ -274,14 +178,14 @@ export function ReturnToManagerPanel({
                   setReasonCode(
                     event.target
                       .value as
-                      ReasonCode
+                      TaskReturnReasonCode
                   );
 
                   setError('');
                 }}
               >
 
-                {reasons.map(
+                {TASK_RETURN_REASONS.map(
                   (reason) => (
 
                   <option

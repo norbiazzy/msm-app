@@ -2,9 +2,7 @@ import {
   useState,
 } from 'react';
 
-import {
-  resubmitTaskToAccounting,
-} from './api';
+import { resubmitStructuredTask, taskAttachmentCategory, taskResubmitTitle } from './taskWorkflow';
 
 import {
   startBackgroundUploadJob,
@@ -81,21 +79,9 @@ export function ManagerResubmitPanel({
 
 
   function payload() {
-    /* PART_V062_POA_RESUBMIT_DETAILS */
-    const taskDetails =
-      taskType ===
-      'POWER_OF_ATTORNEY'
-        ? {
-            supplierOrFactory:
-              details
-                .supplierOrFactory,
-            attorneyPerson:
-              details
-                .attorneyPerson,
-            items:
-              details.items,
-          }
-        : details;
+    // Retain every existing field, including type-specific metadata not
+    // represented by visible inputs. Never throw away task details.
+    const taskDetails = { ...(initialDetails || {}), ...details };
 
     return {
       actorId,
@@ -120,10 +106,7 @@ export function ManagerResubmitPanel({
       setError('');
 
       try {
-        await resubmitTaskToAccounting(
-          taskId,
-          data,
-        );
+        await resubmitStructuredTask({ taskId, taskType, ...data });
 
         await onResubmitted();
       } catch (e) {
@@ -149,15 +132,9 @@ export function ManagerResubmitPanel({
     startBackgroundUploadJob({
       taskId,
       dealId,
+      scope: 'TASK',
 
-      title:
-        taskType ===
-          'POWER_OF_ATTORNEY'
-          ? 'Повторно отправляем доверенность'
-          : taskType ===
-              'ETRN'
-            ? 'Повторно отправляем ЭТРН'
-            : 'Повторно отправляем задачу',
+      title: taskResubmitTitle(taskType),
 
       successTitle:
         'Задача повторно отправлена',
@@ -180,8 +157,7 @@ export function ManagerResubmitPanel({
             await upload(
               dealId,
               filesToUpload[index],
-              'TASK_ATTACHMENT_' +
-                taskId,
+              taskAttachmentCategory(taskId),
               index,
               filesToUpload.length,
             );
@@ -189,10 +165,7 @@ export function ManagerResubmitPanel({
 
           setProgress(94);
 
-          await resubmitTaskToAccounting(
-            taskId,
-            data,
-          );
+          await resubmitStructuredTask({ taskId, taskType, ...data });
 
           setProgress(99);
         },
