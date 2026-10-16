@@ -24,12 +24,6 @@ export class CreateDealDto {
   requestText?: string;
 
   @IsOptional() @IsString()
-  marginMode?: string;
-
-  @IsOptional() @IsNumber()
-  marginValue?: number;
-
-  @IsOptional() @IsString()
   accountingComment?: string;
 
   @IsOptional() @IsString()

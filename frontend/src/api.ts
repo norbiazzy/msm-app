@@ -635,8 +635,6 @@ export async function updateDealInfo(
     clientPhone?: string;
     managerComment?: string;
     accountingComment?: string;
-    marginMode?: string;
-    marginValue?: number;
     deliveryAddresses?: string[];
     actorId: string;
   },
@@ -679,8 +677,6 @@ export async function resubmitInvoiceRequest(
     clientName: string;
     accountingComment?: string;
     requestText?: string;
-    marginMode?: string;
-    marginValue?: number;
   },
 ) {
   return json(

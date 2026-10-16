@@ -40,8 +40,6 @@ type InvoiceSnapshot = {
   clientPhone: string;
   deliveryAddresses: string[];
   requestText: string;
-  marginMode: string;
-  marginValue: string;
   accountingComment: string;
 };
 
@@ -141,52 +139,12 @@ function invoiceSnapshot(
         deal.requestText || '',
       ),
 
-    marginMode:
-      stringValue(
-        details.marginMode,
-        deal.marginMode ||
-          'TOTAL_PLUS',
-      ),
-
-    marginValue:
-      stringValue(
-        details.marginValue,
-        deal.marginValue != null
-          ? String(
-              deal.marginValue
-            )
-          : '',
-      ),
-
     accountingComment:
       stringValue(
         details.accountingComment,
         deal.accountingComment || '',
       ),
   };
-}
-
-
-function marginModeLabel(
-  value: string,
-) {
-  if (value === 'PERCENT') {
-    return '± %';
-  }
-
-  if (value === 'TOTAL_PLUS') {
-    return '+ к сумме';
-  }
-
-  if (value === 'UNIT_PLUS') {
-    return '+ за единицу';
-  }
-
-  if (value === 'FINAL') {
-    return 'Итоговая цена';
-  }
-
-  return value || 'Не указано';
 }
 
 
@@ -506,20 +464,6 @@ export function InvoiceRequestManagerRepair({
   );
 
   const [
-    marginMode,
-    setMarginMode,
-  ] = useState(
-    initial.marginMode
-  );
-
-  const [
-    marginValue,
-    setMarginValue,
-  ] = useState(
-    initial.marginValue
-  );
-
-  const [
     accountingComment,
     setAccountingComment,
   ] = useState(
@@ -561,28 +505,6 @@ export function InvoiceRequestManagerRepair({
 
   async function saveData() {
 
-    const numericMargin =
-      marginValue.trim()
-        ? Number(
-            marginValue
-              .replace(',', '.')
-          )
-        : undefined;
-
-
-    if (
-      numericMargin !==
-        undefined &&
-      !Number.isFinite(
-        numericMargin
-      )
-    ) {
-      throw new Error(
-        'Проверьте значение условий'
-      );
-    }
-
-
     const addresses =
       deliveryAddresses
         .split(/\r?\n/)
@@ -609,11 +531,6 @@ export function InvoiceRequestManagerRepair({
           addresses,
 
         requestText,
-
-        marginMode,
-
-        marginValue:
-          numericMargin,
 
         accountingComment,
 
@@ -964,23 +881,6 @@ export function InvoiceRequestManagerRepair({
 
         
 
-
-        <label className="field">
-          <span>Условие расчёта</span>
-          <select value={marginMode} disabled={saving}
-            onChange={(event) => setMarginMode(event.target.value)}>
-            <option value="PERCENT">± %</option>
-            <option value="TOTAL_PLUS">+ к сумме</option>
-            <option value="UNIT_PLUS">+ за единицу</option>
-            <option value="FINAL">Итоговая цена</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Значение условия</span>
-          <input inputMode="decimal" value={marginValue} disabled={saving}
-            onChange={(event) => setMarginValue(event.target.value)} />
-        </label>
 
         <label className="field">
 

@@ -111,12 +111,6 @@ export class DealsService {
                 requestText:
                   dto.requestText,
 
-                marginMode:
-                  dto.marginMode,
-
-                marginValue:
-                  dto.marginValue,
-
                 accountingComment:
                   dto.accountingComment,
 
@@ -502,14 +496,6 @@ export class DealsService {
           requestText:
             deal.requestText,
 
-          marginMode:
-            deal.marginMode,
-
-          marginValue:
-            deal.marginValue !== null
-              ? deal.marginValue.toString()
-              : null,
-
           accountingComment:
             deal.accountingComment,
         },
@@ -546,8 +532,6 @@ export class DealsService {
       clientName: string;
       accountingComment?: string;
       requestText?: string;
-      marginMode?: string;
-      marginValue?: number;
     },
   ) {
 
@@ -602,16 +586,6 @@ export class DealsService {
             ? body.requestText.trim() || null
             : deal.requestText;
 
-        const nextMarginMode =
-          body.marginMode !== undefined
-            ? body.marginMode || null
-            : deal.marginMode;
-
-        const nextMarginValue =
-          body.marginValue !== undefined
-            ? body.marginValue
-            : deal.marginValue;
-
 
         await tx.deal.update({
           where: { id },
@@ -622,10 +596,6 @@ export class DealsService {
               nextAccountingComment,
             requestText:
               nextRequestText,
-            marginMode:
-              nextMarginMode,
-            marginValue:
-              nextMarginValue,
           },
         });
 
@@ -694,10 +664,6 @@ export class DealsService {
             entityId: task.id,
             newValue: {
               status: TaskStatus.NEW,
-              marginMode:
-                nextMarginMode,
-              marginValue:
-                nextMarginValue,
             },
           },
         });
@@ -789,8 +755,6 @@ export class DealsService {
       clientPhone?: string;
       managerComment?: string;
       accountingComment?: string;
-      marginMode?: string;
-      marginValue?: number;
       deliveryAddresses?: string[];
       actorId: string;
     },
@@ -924,18 +888,6 @@ export class DealsService {
         : current.accountingComment;
 
 
-    const nextMarginMode =
-      body.marginMode !== undefined
-        ? body.marginMode || null
-        : current.marginMode;
-
-
-    const nextMarginValue =
-      body.marginValue !== undefined
-        ? body.marginValue
-        : current.marginValue;
-
-
     return this.prisma
       .$transaction(
         async (tx) => {
@@ -967,12 +919,6 @@ export class DealsService {
 
                 accountingComment:
                   nextAccountingComment,
-
-                marginMode:
-                  nextMarginMode,
-
-                marginValue:
-                  nextMarginValue,
 
                 deliveryAddresses:
                   nextAddresses,

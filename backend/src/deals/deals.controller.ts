@@ -35,8 +35,6 @@ export class DealsController {
       sellerType: SellerType;
       clientName: string;
       accountingComment?: string;
-      marginMode?: string;
-      marginValue?: number;
     },
   ) {
     return this.deals.resubmitInvoiceRequest(id, body);
@@ -84,8 +82,6 @@ export class DealsController {
       clientPhone?: string;
       managerComment?: string;
       accountingComment?: string;
-      marginMode?: string;
-      marginValue?: number;
       deliveryAddresses?: string[];
       actorId: string;
     },

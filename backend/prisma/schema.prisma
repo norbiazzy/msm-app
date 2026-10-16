@@ -125,8 +125,6 @@ model Deal {
   managerComment    String?
   accountingComment String?
   requestText       String?
-  marginMode        String?
-  marginValue       Decimal?           @db.Decimal(14, 2)
   status            DealStatus         @default(ACTIVE)
   workflowMode      DealWorkflowMode   @default(AUTO)
   workflowStage     DealWorkflowStage?

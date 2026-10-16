@@ -118,8 +118,6 @@ export type Deal = {
   managerComment?: string;
   accountingComment?: string;
   requestText?: string;
-  marginMode?: string;
-  marginValue?: string | number;
   status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
   managerId?: string;
   workflowMode?: 'AUTO' | 'MANUAL';
