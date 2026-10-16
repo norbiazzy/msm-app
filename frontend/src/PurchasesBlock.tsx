@@ -1,4 +1,5 @@
 import { TaskContextStrip } from './TaskContextStrip';
+import { SupplierRealizations } from './SupplierRealizations';
 import { TaskDataSection } from './TaskDataSection';
 import { TaskWorkSection } from './TaskWorkSection';
 /* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
@@ -1570,6 +1571,8 @@ function PurchaseCard({
 
       </div>
 
+
+      <SupplierRealizations dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged} />
 
       {purchase.comment && (
 

@@ -14,6 +14,21 @@ enum UserRole {
   ADMIN
 }
 
+enum DealWorkflowStage {
+  PREPARING_QUOTE
+  REVIEW
+  AGREED
+  CANCELLED
+  PREPARING_SHIPMENT
+  DELIVERY
+  SHIPPED
+}
+
+enum DealWorkflowMode {
+  AUTO
+  MANUAL
+}
+
 enum DealStatus {
   DRAFT
   ACTIVE
@@ -109,11 +124,13 @@ model Deal {
   leadSource        String?
   managerComment    String?
   accountingComment String?
-  requestMode       String
   requestText       String?
   marginMode        String?
   marginValue       Decimal?           @db.Decimal(14, 2)
   status            DealStatus         @default(ACTIVE)
+  workflowMode      DealWorkflowMode   @default(AUTO)
+  workflowStage     DealWorkflowStage?
+  workflowReason    String?
   paymentStatus     PaymentStatus      @default(WAITING)
   deferralStartAt   DateTime?
   deferralEndAt     DateTime?
@@ -234,18 +251,31 @@ model SupplierPurchase {
   comment               String?
   requestedAmount       Decimal? @db.Decimal(14, 2)
 
+  noRealizations Boolean @default(false)
   status SupplierPurchaseStatus @default(DRAFT)
 
   createdById String
 
   tasks    Task[]
   payments SupplierPayment[]
+  realizations SupplierRealization[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([dealId, status])
   @@index([supplierName])
+}
+
+model SupplierRealization {
+  id String @id @default(cuid())
+  purchaseId String
+  purchase SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  number String @default("")
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([purchaseId, createdAt])
 }
 
 model SupplierPayment {

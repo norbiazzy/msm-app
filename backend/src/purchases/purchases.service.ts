@@ -25,6 +25,59 @@ export class PurchasesService {
   ) {}
 
 
+  private async realizationAccess(dealId: string, purchaseId: string, actorId: string) {
+    const purchase = await this.prisma.supplierPurchase.findFirstOrThrow({ where: { id: purchaseId, dealId } });
+    const user = await this.prisma.user.findUnique({ where: { id: actorId } });
+    if (!user || !['MANAGER','ACCOUNTANT','LEADER','ADMIN'].includes(user.role)) {
+      throw new BadRequestException('Нет прав на изменение реализаций');
+    }
+    return purchase;
+  }
+
+  async addRealization(dealId: string, purchaseId: string, actorId: string) {
+    const purchase = await this.realizationAccess(dealId, purchaseId, actorId);
+    if (purchase.noRealizations) throw new BadRequestException('Сначала отмените отметку «Реализаций не будет»');
+    return this.prisma.$transaction(async tx => {
+      const row = await tx.supplierRealization.create({ data: { purchaseId, number: '', createdById: actorId } });
+      await tx.auditEvent.create({ data: { dealId, actorId, action: 'SUPPLIER_REALIZATION_ADDED', entityType: 'SupplierRealization', entityId: row.id, newValue: { purchaseId, number: '' } } });
+      return row;
+    });
+  }
+
+  async editRealization(dealId: string, purchaseId: string, rowId: string, actorId: string, number: string) {
+    await this.realizationAccess(dealId, purchaseId, actorId);
+    const previous = await this.prisma.supplierRealization.findFirstOrThrow({ where: { id: rowId, purchaseId } });
+    const nextNumber = typeof number === 'string' ? number.trim().slice(0, 120) : '';
+    return this.prisma.$transaction(async tx => {
+      const row = await tx.supplierRealization.update({ where: { id: previous.id }, data: { number: nextNumber } });
+      await tx.auditEvent.create({ data: { dealId, actorId, action: 'SUPPLIER_REALIZATION_EDITED', entityType: 'SupplierRealization', entityId: row.id, oldValue: { number: previous.number }, newValue: { number: nextNumber } } });
+      return row;
+    });
+  }
+
+  async deleteRealization(dealId: string, purchaseId: string, rowId: string, actorId: string) {
+    await this.realizationAccess(dealId, purchaseId, actorId);
+    const previous = await this.prisma.supplierRealization.findFirstOrThrow({ where: { id: rowId, purchaseId } });
+    return this.prisma.$transaction(async tx => {
+      await tx.supplierRealization.delete({ where: { id: rowId } });
+      await tx.auditEvent.create({ data: { dealId, actorId, action: 'SUPPLIER_REALIZATION_DELETED', entityType: 'SupplierRealization', entityId: rowId, oldValue: { number: previous.number, purchaseId } } });
+      return { ok: true };
+    });
+  }
+
+  async setNoRealizations(dealId: string, purchaseId: string, actorId: string, value: boolean) {
+    const purchase = await this.realizationAccess(dealId, purchaseId, actorId);
+    if (value) {
+      const count = await this.prisma.supplierRealization.count({ where: { purchaseId } });
+      if (count) throw new BadRequestException('Перед отметкой «Реализаций не будет» удалите строки реализаций');
+    }
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.supplierPurchase.update({ where: { id: purchaseId }, data: { noRealizations: Boolean(value) } });
+      await tx.auditEvent.create({ data: { dealId, actorId, action: 'SUPPLIER_REALIZATION_NONE_CHANGED', entityType: 'SupplierPurchase', entityId: purchaseId, oldValue: { noRealizations: purchase.noRealizations }, newValue: { noRealizations: Boolean(value) } } });
+      return updated;
+    });
+  }
+
   async list(
     dealId: string,
   ) {
@@ -42,6 +95,7 @@ export class PurchasesService {
         },
 
         include: {
+          realizations: { orderBy: { createdAt: 'asc' } },
 
           payments: {
 

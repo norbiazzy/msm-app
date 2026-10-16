@@ -76,9 +76,28 @@ export async function login(): Promise<CurrentUser> {
   }
 }
 
+export async function addSupplierRealization(dealId: string, purchaseId: string, actorId: string) {
+ return json('/deals/'+dealId+'/suppliers/'+purchaseId+'/realizations', { method:'POST', body: JSON.stringify({actorId}) });
+}
+export async function editSupplierRealization(dealId: string, purchaseId: string, id: string, actorId: string, number: string) {
+ return json('/deals/'+dealId+'/suppliers/'+purchaseId+'/realizations/'+id, { method:'PATCH', body:JSON.stringify({actorId,number}) });
+}
+export async function deleteSupplierRealization(dealId: string, purchaseId: string, id: string, actorId: string) {
+ return json('/deals/'+dealId+'/suppliers/'+purchaseId+'/realizations/'+id, { method:'DELETE', body:JSON.stringify({actorId}) });
+}
+export async function setSupplierNoRealizations(dealId: string, purchaseId: string, actorId: string, value: boolean) {
+ return json('/deals/'+dealId+'/suppliers/'+purchaseId+'/realizations-none', { method:'PATCH', body:JSON.stringify({actorId,value}) });
+}
+
 export async function listDeals(managerId?: string): Promise<Deal[]> {
   const q = managerId ? `?managerId=${encodeURIComponent(managerId)}` : '';
   return json(`/deals${q}`);
+}
+
+export async function updateDealWorkflowStage(dealId: string, body: {
+  actorId: string; mode: 'AUTO' | 'MANUAL'; stage?: NonNullable<Deal['workflowStage']>; reason?: string;
+}) {
+  return json<Deal>(`/deals/${dealId}/workflow-stage`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export async function getDeal(id: string): Promise<Deal> {
@@ -609,7 +628,6 @@ export async function updateDealInfo(
   dealId: string,
 
   payload: {
-    requestMode?: string;
     requestText?: string;
     sellerType?: 'ST' | 'MSM' | 'IP';
     clientName?: string;

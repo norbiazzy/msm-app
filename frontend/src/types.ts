@@ -94,6 +94,8 @@ export type SupplierPurchase = {
   comment?: string;
   status: SupplierPurchaseStatus;
   payments: SupplierPayment[];
+  noRealizations?: boolean;
+  realizations?: { id: string; number: string; createdAt: string }[];
   tasks?: {
     id: string;
     type: string;
@@ -115,11 +117,14 @@ export type Deal = {
   clientPhone?: string;
   managerComment?: string;
   accountingComment?: string;
-  requestMode?: string;
   requestText?: string;
   marginMode?: string;
   marginValue?: string | number;
   status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+  managerId?: string;
+  workflowMode?: 'AUTO' | 'MANUAL';
+  workflowStage?: 'PREPARING_QUOTE' | 'REVIEW' | 'AGREED' | 'CANCELLED' | 'PREPARING_SHIPMENT' | 'DELIVERY' | 'SHIPPED' | null;
+  workflowReason?: string | null;
   paymentStatus: PaymentStatus;
   deferralStartAt?: string;
   deferralEndAt?: string;

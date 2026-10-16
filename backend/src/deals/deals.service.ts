@@ -6,6 +6,8 @@ import {
 
 import {
   SellerType,
+  DealWorkflowStage,
+  DealWorkflowMode,
   TaskStatus,
   TaskType,
 } from '@prisma/client';
@@ -27,6 +29,49 @@ export class DealsService {
       PrismaService,
   ) {}
 
+
+  async changeWorkflowStage(
+    id: string,
+    body: { actorId: string; mode: DealWorkflowMode; stage?: DealWorkflowStage; reason?: string },
+  ) {
+    if (!Object.values(DealWorkflowMode).includes(body.mode)) throw new BadRequestException('Неверный режим статусов');
+    if (body.mode === DealWorkflowMode.MANUAL && (!body.stage || !Object.values(DealWorkflowStage).includes(body.stage))) {
+      throw new BadRequestException('Укажите этап сделки');
+    }
+    const actor = await this.prisma.user.findUnique({ where: { id: body.actorId } });
+    const current = await this.prisma.deal.findUniqueOrThrow({ where: { id } });
+    if (!actor || !['MANAGER', 'LEADER', 'ADMIN'].includes(actor.role) ||
+      (actor.role === 'MANAGER' && current.managerId !== actor.id)) {
+      throw new BadRequestException('Изменить этап может только ответственный менеджер или руководитель');
+    }
+    if (body.mode === DealWorkflowMode.MANUAL && body.stage === DealWorkflowStage.SHIPPED && actor.role !== 'MANAGER') {
+      throw new BadRequestException('Отгрузку подтверждает только менеджер');
+    }
+    const protectedStage = current.workflowStage === DealWorkflowStage.CANCELLED ||
+      current.workflowStage === DealWorkflowStage.SHIPPED;
+    let stage = body.mode === DealWorkflowMode.MANUAL ? body.stage! : null;
+    if (body.mode === DealWorkflowMode.AUTO && protectedStage) stage = current.workflowStage;
+    const reason = body.reason?.trim() || '';
+    if (body.mode === DealWorkflowMode.MANUAL &&
+      (stage === DealWorkflowStage.CANCELLED || stage === DealWorkflowStage.SHIPPED) &&
+      current.workflowStage !== stage && !reason) {
+      throw new BadRequestException('Укажите подтверждение отгрузки или причину отмены');
+    }
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.deal.update({ where: { id }, data: {
+        workflowMode: body.mode, workflowStage: stage,
+        workflowReason: reason || (stage === current.workflowStage ? current.workflowReason : null),
+      } });
+      await tx.auditEvent.create({ data: {
+        dealId: id, actorId: body.actorId, action: 'DEAL_WORKFLOW_STAGE_CHANGED',
+        entityType: 'Deal', entityId: id,
+        oldValue: { mode: current.workflowMode, stage: current.workflowStage },
+        newValue: { mode: updated.workflowMode, stage: updated.workflowStage },
+        reason: reason || undefined,
+      } });
+      return updated;
+    });
+  }
 
   async create(
     dto: CreateDealDto,
@@ -62,9 +107,6 @@ export class DealsService {
 
                 leadSource:
                   dto.leadSource,
-
-                requestMode:
-                  dto.requestMode,
 
                 requestText:
                   dto.requestText,
@@ -311,6 +353,7 @@ export class DealsService {
             orderBy: {
               createdAt: 'asc',
             },
+            include: { realizations: { orderBy: { createdAt: 'asc' } } },
           },
 
 
@@ -441,9 +484,6 @@ export class DealsService {
 
       data: {
         details: {
-          requestMode:
-            deal.requestMode,
-
           sellerType:
             deal.sellerType,
 
@@ -742,7 +782,6 @@ export class DealsService {
     id: string,
 
     body: {
-      requestMode?: string;
       requestText?: string;
       sellerType?: SellerType;
       clientName?: string;
@@ -860,13 +899,6 @@ export class DealsService {
         : currentAddresses;
 
 
-    const nextRequestMode =
-      body.requestMode !== undefined
-        ? body.requestMode.trim() ||
-          current.requestMode
-        : current.requestMode;
-
-
     const nextRequestText =
       body.requestText !== undefined
         ? body.requestText.trim() ||
@@ -915,9 +947,6 @@ export class DealsService {
               },
 
               data: {
-
-                requestMode:
-                  nextRequestMode,
 
                 requestText:
                   nextRequestText,

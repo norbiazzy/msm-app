@@ -181,11 +181,6 @@ async function submit(
               ? [deliveryAddress.trim()]
               : undefined,
 
-          requestMode:
-            primaryIncomingInvoice
-              ? 'INCOMING_INVOICE'
-              : 'TEXT',
-
           requestText:
             requestText.trim() ||
             undefined,

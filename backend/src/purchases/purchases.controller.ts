@@ -23,6 +23,29 @@ export class PurchasesController {
   ) {}
 
 
+  @Post(':purchaseId/realizations')
+  addRealization(@Param('dealId') dealId: string, @Param('purchaseId') purchaseId: string, @Body() body: { actorId: string }) {
+    return this.purchases.addRealization(dealId, purchaseId, body.actorId);
+  }
+
+  @Patch(':purchaseId/realizations/:realizationId')
+  editRealization(@Param('dealId') dealId: string, @Param('purchaseId') purchaseId: string,
+    @Param('realizationId') realizationId: string, @Body() body: { actorId: string; number: string }) {
+    return this.purchases.editRealization(dealId, purchaseId, realizationId, body.actorId, body.number);
+  }
+
+  @Delete(':purchaseId/realizations/:realizationId')
+  deleteRealization(@Param('dealId') dealId: string, @Param('purchaseId') purchaseId: string,
+    @Param('realizationId') realizationId: string, @Body() body: { actorId: string }) {
+    return this.purchases.deleteRealization(dealId, purchaseId, realizationId, body.actorId);
+  }
+
+  @Patch(':purchaseId/realizations-none')
+  setNoRealizations(@Param('dealId') dealId: string, @Param('purchaseId') purchaseId: string,
+    @Body() body: { actorId: string; value: boolean }) {
+    return this.purchases.setNoRealizations(dealId, purchaseId, body.actorId, body.value);
+  }
+
   @Get()
   list(
     @Param('dealId')

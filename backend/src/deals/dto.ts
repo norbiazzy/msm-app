@@ -20,9 +20,6 @@ export class CreateDealDto {
   @IsOptional() @IsString()
   leadSource?: string;
 
-  @IsString()
-  requestMode!: 'TEXT' | 'INCOMING_INVOICE';
-
   @IsOptional() @IsString()
   requestText?: string;
 

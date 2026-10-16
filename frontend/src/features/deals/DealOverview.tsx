@@ -60,7 +60,7 @@ export function DealOverview({
   saveQuickShipmentDate,
 }: DealOverviewProps) {
   return (
-      <div className="dealOverview">
+      <div id="dealCOverview" className="dealOverview dealCAnchor">
 
         <div className="dealOverviewHead">
 

@@ -34,7 +34,6 @@ const sellerLabels:
 
 
 type InvoiceSnapshot = {
-  requestMode: string;
   sellerType: SellerType;
   clientName: string;
   contactName: string;
@@ -73,10 +72,7 @@ function invoiceSnapshot(
   const details =
     typedTask.details || {};
 
-  const deal =
-    task.deal as typeof task.deal & {
-      requestMode?: string;
-    };
+  const deal = task.deal;
 
 
   const detailsAddresses =
@@ -102,13 +98,6 @@ function invoiceSnapshot(
 
 
   return {
-    requestMode:
-      stringValue(
-        details.requestMode,
-        deal.requestMode ||
-          'TEXT',
-      ),
-
     sellerType:
       (
         seller === 'ST' ||
@@ -175,16 +164,6 @@ function invoiceSnapshot(
         deal.accountingComment || '',
       ),
   };
-}
-
-
-function requestModeLabel(
-  value: string,
-) {
-  return value ===
-    'INCOMING_INVOICE'
-    ? 'По входящему счёту'
-    : 'Текстом / позициями';
 }
 
 
@@ -483,13 +462,6 @@ export function InvoiceRequestManagerRepair({
 
 
   const [
-    requestMode,
-    setRequestMode,
-  ] = useState(
-    initial.requestMode
-  );
-
-  const [
     sellerType,
     setSellerType,
   ] = useState<SellerType>(
@@ -624,10 +596,6 @@ export function InvoiceRequestManagerRepair({
     await updateDealInfo(
       task.deal.id,
       {
-        requestMode:
-          requestMode ||
-          'TEXT',
-
         sellerType,
 
         clientName:
@@ -930,15 +898,6 @@ export function InvoiceRequestManagerRepair({
 
         </div>
 
-
-        <label className="field">
-          <span>Формат запроса</span>
-          <select value={requestMode} disabled={saving}
-            onChange={(event) => setRequestMode(event.target.value)}>
-            <option value="TEXT">Текстом / позициями</option>
-            <option value="INCOMING_INVOICE">По входящему счёту</option>
-          </select>
-        </label>
 
         <label className="field">
 

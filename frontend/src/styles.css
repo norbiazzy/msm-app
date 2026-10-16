@@ -11807,6 +11807,15 @@ html[data-theme='dark'] .shell::before {
 /* END_MSM_STEP25_SHARED_TASK_DOCUMENTS_STYLES */
 
 /* MSM_STEP29_UNIFIED_TASK_LAYOUT */
+/* MSM_STEP35_REVISED_REALIZATIONS */
+.msmSupplierRealizations { margin: 12px 0; padding: 13px; border: 1px solid var(--bo-line,#ddd); border-radius: 12px; display: grid; gap: 10px; }
+.msmSupplierRealizationsHead { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.msmSupplierRealizationsHead span,.msmSupplierRealizations small { opacity:.75; font-size: 12px; }
+.msmSupplierRealizationRow { display:grid; grid-template-columns: minmax(100px,1fr) auto auto; gap: 6px; align-items: center; }
+.msmSupplierRealizationRow input { min-width:0; }
+.msmRealizationNone { display:flex; align-items:center; gap:7px; }
+@media(max-width:520px){.msmSupplierRealizationRow {grid-template-columns:minmax(80px,1fr) auto auto;}}
+/* END_MSM_STEP35_REVISED_REALIZATIONS */
 /* A shared visual language for invoice, supplier-payment and POA tasks. */
 .boView-tasks section.taskWorkspace--unified {
   gap: 0;
@@ -12000,3 +12009,45 @@ html[data-theme='dark'] .shell::before {
   }
 }
 /* END_MSM_STEP31_ACCOUNTANT_WORK_FORMS */
+
+/* MSM_STEP34_CLIENT_PAYMENT_STATUS */
+.boView-deal .clientPayBox { gap: 16px; padding: 20px; }
+.boView-deal .clientPayHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.boView-deal .clientPayHead h3 { margin: 3px 0 3px; color: var(--bo-text); font-size: 21px; line-height: 1.25; }
+.boView-deal .clientPayHead p { margin: 0; color: var(--bo-muted); font-size: 12px; }
+.boView-deal .clientPayEyebrow { font-size: 11px; color: var(--bo-muted); }
+.boView-deal .clientPayStatus { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 100px; border: 1px solid var(--bo-line); background: var(--bo-panel-2); font-size: 12px; font-weight: 800; color: var(--bo-text); }
+.boView-deal .clientPayStatus--success { border-color: #2e906c; color: #67d6a3; }
+.boView-deal .clientPayStatus--warning { border-color: #bd8551; color: #ebaf69; }
+.boView-deal .clientPayStatus--info { border-color: #718caa; color: #a0c0e3; }
+.boView-deal .clientPayStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.boView-deal .clientPayStats > div { display: flex; flex-direction: column; min-width: 0; gap: 8px; padding: 16px; border: 1px solid var(--bo-line); border-radius: 12px; background: var(--bo-panel-2); }
+.boView-deal .clientPayStats span { color: var(--bo-muted); font-size: 12px; }
+.boView-deal .clientPayStats strong { color: var(--bo-text); font-size: clamp(17px, 1.6vw, 22px); overflow-wrap: anywhere; }
+.boView-deal .clientPayProgress { display: flex; align-items: center; gap: 14px; }
+.boView-deal .clientPayProgressTrack { flex: 1; height: 8px; background: var(--bo-panel-2); border-radius: 20px; overflow: hidden; }
+.boView-deal .clientPayProgressTrack span { display: block; height: 100%; background: #829cb7; border-radius: inherit; transition: width 180ms ease; }
+.boView-deal .clientPayProgress small { white-space: nowrap; font-size: 11px; color: var(--bo-muted); }
+.boView-deal .clientPayNotice { margin: 0; color: var(--bo-muted); font-size: 12px; line-height: 1.5; }
+.boView-deal .clientPayNotice--warning { color: #efb36c; }
+.boView-deal .clientPayDeferral { border: 1px solid var(--bo-line); border-radius: 12px; background: var(--bo-panel-2); padding: 12px 15px; display: grid; gap: 5px; }
+.boView-deal .clientPayDeferral strong { color: var(--bo-text); }
+.boView-deal .clientPayDeferral span, .boView-deal .clientPayDeferral p { margin: 0; color: var(--bo-muted); font-size: 12px; }
+.boView-deal .clientPayActions { display: grid; grid-template-columns: 1fr 1.45fr; gap: 10px; }
+.boView-deal .clientPayActions button { min-height: 48px; }
+.boView-deal .clientPayEditor { padding: 18px; border: 1px solid var(--bo-line); border-radius: 12px; background: var(--bo-panel-2); }
+.boView-deal .clientPayEditor > strong { color: var(--bo-text); font-size: 15px; }
+.boView-deal .clientPayEditor > p { margin: 0; font-size: 12px; color: var(--bo-muted); }
+.boView-deal .clientPayEditorActions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; }
+.boView-deal .clientPayEditorActions button { min-height: 44px; }
+.boView-deal .clientPayHistoryHead { display: flex; justify-content: space-between; gap: 10px; align-items: center; border-top: 1px solid var(--bo-line); padding-top: 15px; }
+.boView-deal .clientPayHistoryHead strong { color: var(--bo-text); font-size: 14px; }
+.boView-deal .clientPayHistoryHead span, .boView-deal .clientPayEmpty { color: var(--bo-muted); font-size: 12px; }
+.boView-deal .clientPayHistory { display: grid; gap: 8px; }
+@media (max-width: 720px) {
+  .boView-deal .clientPayBox { padding: 14px; }
+  .boView-deal .clientPayStats { grid-template-columns: 1fr; }
+  .boView-deal .clientPayActions, .boView-deal .clientPayEditorActions { grid-template-columns: 1fr; }
+  .boView-deal .clientPayProgress { flex-wrap: wrap; }
+}
+/* END_MSM_STEP34_CLIENT_PAYMENT_STATUS */

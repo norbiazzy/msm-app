@@ -1,5 +1,5 @@
 import { Body, Controller, Patch, Get, Param, Post, Query } from '@nestjs/common';
-import { SellerType } from '@prisma/client';
+import { SellerType, DealWorkflowStage, DealWorkflowMode } from '@prisma/client';
 import { CreateDealDto } from './dto';
 import { DealsService } from './deals.service';
 
@@ -77,7 +77,6 @@ export class DealsController {
 
     @Body()
     body: {
-      requestMode?: string;
       requestText?: string;
       sellerType?: SellerType;
       clientName?: string;
@@ -99,6 +98,14 @@ export class DealsController {
       );
   }
 
+
+  @Patch(':id/workflow-stage')
+  changeWorkflowStage(
+    @Param('id') id: string,
+    @Body() body: { actorId: string; mode: DealWorkflowMode; stage?: DealWorkflowStage; reason?: string },
+  ) {
+    return this.deals.changeWorkflowStage(id, body);
+  }
 
   @Get(':id')
   get(@Param('id') id: string) {

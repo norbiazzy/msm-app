@@ -6,6 +6,7 @@ import { useBackgroundUploads } from '../../backgroundUploads';
 import { PurchasesBlock } from '../../PurchasesBlock';
 import { PowerOfAttorneyBlock } from '../../PowerOfAttorneyBlock';
 import { updateDealInfo, getDeal } from '../../api';
+import { DealStageControl } from './DealStageControl';
 import type { CurrentUser, Deal, SellerType } from '../../types';
 import { PaymentBlock } from './payments/PaymentBlock';
 import { supplierIncomingWorkflowLabel } from './dealWorkflow';
@@ -813,6 +814,7 @@ export function DealDetail({
         <div className="dealWorkspaceCMain">
 
           <DealAttention deal={deal} />
+          <DealStageControl deal={deal} user={user} onChanged={() => reload(false)} />
 
       <DealOverview
         deal={deal}
