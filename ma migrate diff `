@@ -1,0 +1,32 @@
+warning: in the working copy of 'backend/prisma/schema.prisma', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/src/deals/deals.controller.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/src/deals/deals.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/src/payments/payments.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/src/purchases/purchases.controller.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/src/purchases/purchases.service.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/InvoiceRequestTaskPanel.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/PurchasesBlock.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/api.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/features/deals/DealDetail.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/features/deals/payments/PaymentBlock.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/shared/formatters.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/styles.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/types.ts', LF will be replaced by CRLF the next time Git touches it
+ backend/prisma/schema.prisma                       |  32 [32m++[m[31m-[m
+ backend/src/deals/deals.controller.ts              |  11 [32m+[m[31m-[m
+ backend/src/deals/deals.service.ts                 |  63 [32m+++[m[31m--[m
+ backend/src/deals/dto.ts                           |   3 [31m-[m
+ backend/src/payments/payments.service.ts           | 123 [32m+++++[m[31m---[m
+ backend/src/purchases/purchases.controller.ts      |  23 [32m++[m
+ backend/src/purchases/purchases.service.ts         |  54 [32m++++[m
+ frontend/src/InvoiceRequestTaskPanel.tsx           |  43 [32m+[m[31m--[m
+ frontend/src/PurchasesBlock.tsx                    |   3 [32m+[m
+ frontend/src/api.ts                                |  20 [32m+[m[31m-[m
+ frontend/src/features/deals/DealDetail.tsx         |   2 [32m+[m
+ frontend/src/features/deals/DealOverview.tsx       |   2 [32m+[m[31m-[m
+ frontend/src/features/deals/NewDealForm.tsx        |   5 [31m-[m
+ .../src/features/deals/payments/PaymentBlock.tsx   | 309 [32m++++++++++[m[31m-----------[m
+ frontend/src/shared/formatters.ts                  |   2 [32m+[m[31m-[m
+ frontend/src/styles.css                            |  51 [32m++++[m
+ frontend/src/types.ts                              |   7 [32m+[m[31m-[m
+ 17 files changed, 482 insertions(+), 271 deletions(-)

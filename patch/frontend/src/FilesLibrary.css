@@ -1,0 +1,30 @@
+.msmLibrary{max-width:1200px;margin:0 auto;padding:8px 0 90px;display:grid;gap:16px}
+.msmLibraryToolbar,.msmLibraryActions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.msmLibraryToolbar>input{min-width:220px;flex:1;border:1px solid var(--border,#d9dde3);border-radius:10px;padding:12px;background:var(--card,#fff);color:inherit}
+.msmLibraryToggle{display:flex;gap:4px;border:1px solid #cbd5e1;border-radius:10px;padding:3px}
+.msmLibraryToggle button{border:0;border-radius:8px;background:transparent;color:inherit;padding:8px 12px;cursor:pointer}
+.msmLibraryToggle button.active{background:#1e293b;color:white}
+.msmLibraryControls,.msmLibraryCard{background:var(--card,#fff);color:inherit;border:1px solid var(--border,#d9dde3);border-radius:14px;padding:15px}
+.msmLibraryControls h3{margin:0 0 12px}
+.msmLibraryFields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:12px}
+.msmLibraryFields label{display:grid;gap:5px;font-size:13px}
+.msmLibraryFields select{padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:var(--card,#fff);color:inherit;width:100%}
+.msmLibraryActions button,.msmLibraryUpload{border:1px solid #64748b;border-radius:10px;padding:11px 14px;cursor:pointer;background:transparent;color:inherit;font-size:14px}
+.msmLibraryActions button:disabled{opacity:.45;cursor:not-allowed}
+.msmLibraryUpload{display:inline-flex;align-items:center;font-weight:600}
+.msmLibraryMessage{font-size:13px;margin:10px 0 0}
+.msmLibraryCount{margin:0;opacity:.7;font-size:13px}
+.msmLibraryList{display:grid;gap:10px}
+.msmLibraryCard.isSelected{outline:2px solid #64748b}
+.msmLibraryCardHead{display:flex;gap:12px;align-items:center;min-width:0}
+.msmLibraryCardHead input{width:18px;height:18px;flex-shrink:0}
+.msmLibraryInfo{flex:1;min-width:0;display:grid;gap:5px;overflow-wrap:anywhere}
+.msmLibraryInfo small{opacity:.65}
+.msmLibraryCardHead a{white-space:nowrap;font-size:13px}
+.msmLibraryDetails{border-top:1px solid #d8dde3;padding-top:12px;margin-top:12px;display:grid;gap:6px;font-size:13px;overflow-wrap:anywhere}
+.msmLibraryLink{padding:7px 10px;border-radius:8px;background:rgba(148,163,184,.13)}
+@media(max-width:600px){.msmLibraryCardHead{flex-wrap:wrap}.msmLibraryCardHead a{margin-left:30px}.msmLibraryToolbar{display:grid}}
+.msmLibraryTaskSection{border:1px solid #cbd5e1;border-radius:12px;padding:12px;margin:14px 0;display:grid;gap:8px}
+.msmLibraryTaskHeader{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.msmLibraryTaskHeader button{border:1px solid #94a3b8;border-radius:8px;padding:8px;background:transparent;color:inherit;cursor:pointer}
+.msmLibraryTaskSection a{overflow-wrap:anywhere;font-size:13px}
