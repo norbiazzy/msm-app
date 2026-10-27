@@ -1,0 +1,32 @@
+/* MSM UI v1: only scoped, additive rules. No global reset. */
+.msmDesktopNav { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.msmDesktopNav button,.msmDesktopNav a { appearance: none; border: 1px solid transparent; color: #475569; background: transparent; border-radius: 9px; padding: 9px 12px; font: inherit; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.msmDesktopNav .active { color: #125e43; background: #eaf5ee; border-color: #cfe5d6; }
+.msmDesktopNav button:hover,.msmDesktopNav a:hover { background: #eef3f0; }
+@media (min-width: 721px) { .boShell .bottomNav { display: none !important; } .boShell .topbar { display: flex; align-items: center; gap: 16px; } .boShell { padding-bottom: 30px; } }
+@media (max-width: 720px) { .msmDesktopNav { display: none !important; } }
+.msmDealStageTop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.msmStageToggle { flex: 0 0 auto; width: auto !important; margin-left: auto; border: 1px solid #d2e1d7; background: #f4faf5; color: #246348; border-radius: 9px; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.msmStageToggle:focus-visible,.msmDesktopNav :focus-visible { outline: 2px solid #167a55; outline-offset: 2px; }
+.msmPickerActions { display:flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.msmPickerActions > .fileButton { flex: 1 1 165px; text-align: center; cursor: pointer; }
+.msmInvoiceHint { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: #64748b; }
+.msmInvoiceLibraryButton { min-width: 160px; text-align: center; cursor: pointer; }
+.msmLibrarySelected { margin-top: 8px; font-size: 12px; color:#475569; }
+.msmLibrarySelected strong { overflow-wrap:anywhere; }
+.msmLibModalBackdrop { position:fixed; inset:0; background:rgba(15,23,42,.5); z-index:1200; display:grid; place-items:center; padding:16px; }
+.msmLibModal { width:min(650px,100%); max-height:min(85vh,740px); display:flex; flex-direction:column; gap:12px; padding:18px; background:white; color:#152b20; border-radius:16px; box-shadow:0 24px 60px rgba(0,0,0,.22); }
+.msmLibModalHead { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.msmLibModal input { box-sizing:border-box; width:100%; border:1px solid #cbd5e1; border-radius:9px; padding:10px 12px; font:inherit; }
+.msmLibModalList { min-height:50px; overflow:auto; display:flex; flex-direction:column; gap:5px; }
+.msmLibModalList button { text-align:left; display:flex; flex-direction:column; gap:5px; background:#f8faf9; border:1px solid #e2e8e4; border-radius:8px; padding:10px; color:inherit; cursor:pointer; }
+.msmLibModalList button:hover { border-color:#6eae8f; background:#effaf3; }
+.msmLibModalList small { font-size:11px; color:#64748b; }
+@media (prefers-color-scheme: dark) { html[data-theme='dark'] .msmDesktopNav button, html[data-theme='dark'] .msmDesktopNav a { color:#dbe6df; } html[data-theme='dark'] .msmDesktopNav .active { background:#214737; color:#d6fce5; } html[data-theme='dark'] .msmLibModal { background:#1b2823; color:#eefbf1; } html[data-theme='dark'] .msmLibModalList button {background:#23352b; color:inherit; border-color:#425a4b;} }
+
+.msmInvoiceSplitPicker { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:start; }
+.msmInvoiceSplitPicker > .fileButton, .msmInvoiceSplitPicker .msmInvoiceLibraryButton { width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-height:40px; margin:0; }
+.msmInvoiceSplitPicker .versionList { grid-column:1/-1; }
+.msmInvoiceSplitPicker .msmLibrarySelected { grid-column:2; }
+@media (max-width:440px) { .msmInvoiceSplitPicker > .fileButton, .msmInvoiceSplitPicker .msmInvoiceLibraryButton { min-width:0; font-size:12px; padding:10px 6px; } }
+@media (min-width: 721px) { .msmCameraButton { display:none !important; } }

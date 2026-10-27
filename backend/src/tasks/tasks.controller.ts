@@ -67,7 +67,8 @@ export class TasksController {
       id,
       body.actorId,
       (body as any).poaNumber,
-      (body as any).accountantComment
+      (body as any).accountantComment,
+      (body as any).libraryResultFileId
       /* PART_V062_POA_COMPLETE_CONTROLLER */
     );
   }

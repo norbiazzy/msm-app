@@ -1,0 +1,48 @@
+/* MSM_UNIFIED_ATTACHMENTS_V8. One shared 50/50 picker, including narrow phones. */
+.boShell .msmUnifiedPicker {width:100%!important; min-width:0!important; max-width:none!important;}
+.boShell .msmUnifiedFileActions {display:grid!important; grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important; gap:12px!important; width:100%!important; min-width:0!important; align-items:start!important;}
+.boShell .msmUnifiedFileActions > *, .boShell .msmUnifiedLibraryArea {width:100%!important; min-width:0!important; max-width:none!important; box-sizing:border-box!important;}
+.boShell .msmUnifiedPicker .msmUnifiedFileActions .fileButton,
+.boShell .msmUnifiedPicker .msmUnifiedFileActions .msmInvoiceLibraryButton,
+.boShell .msmInvoiceSplitPicker > .fileButton,
+.boShell .msmDocumentPair > .msmTaskLibrarySelection .msmInvoiceLibraryButton,
+.boShell .msmPaymentEvidenceActions > .msmInvoiceLibraryControl .msmInvoiceLibraryButton {
+  display:flex!important; align-items:center!important; justify-content:center!important;
+  width:100%!important; min-width:0!important; max-width:none!important; min-height:52px!important;
+  box-sizing:border-box!important; padding:10px 8px!important; margin:0!important;
+  text-align:center!important; white-space:normal!important; overflow-wrap:anywhere; line-height:1.25!important;
+}
+.boShell .msmUnifiedPicker .msmInvoiceLibraryControl {width:100%!important; min-width:0!important;}
+.boShell .msmUnifiedSelectedList {margin-top:12px; min-width:0; overflow-wrap:anywhere;}
+/* v2/v3/v7 already render a real external library chooser adjacent to the native picker. */
+.boShell .msmDocumentPair, .boShell .msmPaymentEvidenceActions, .boShell .msmInvoiceSplitPicker {
+  display:grid!important; grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+  gap:12px!important; width:100%!important; align-items:start!important;
+}
+.boShell .msmDocumentPair > *, .boShell .msmPaymentEvidenceActions > *,
+.boShell .msmInvoiceSplitPicker > * { min-width:0!important; width:100%!important; box-sizing:border-box!important; }
+.boShell .msmDocumentPair .msmUnifiedFileActions,
+.boShell .msmPaymentEvidenceActions .msmUnifiedFileActions,
+.boShell .msmInvoiceSplitPicker .msmUnifiedFileActions {display:grid!important; grid-template-columns:1fr!important;}
+.boShell .msmDocumentPair .msmUnifiedLibraryArea,
+.boShell .msmPaymentEvidenceActions .msmUnifiedLibraryArea,
+.boShell .msmInvoiceSplitPicker .msmUnifiedLibraryArea { display:none!important; }
+/* When a picker has no independent library, the genuine external button occupies the second column. */
+.boShell .msmDocumentPair .msmTaskLibrarySelection,
+.boShell .msmPaymentEvidenceActions .msmInvoiceLibraryControl {width:100%!important; min-width:0!important; margin:0!important;}
+/* The legacy split invoice form: label upload and library align equally. */
+.boShell .msmInvoiceSplitPicker > .fileButton {min-height:52px!important;}
+@media (max-width:480px) {
+ .boShell .msmUnifiedFileActions, .boShell .msmDocumentPair, .boShell .msmPaymentEvidenceActions, .boShell .msmInvoiceSplitPicker {gap:8px!important;}
+ .boShell .msmUnifiedPicker .msmUnifiedFileActions .fileButton,
+ .boShell .msmUnifiedPicker .msmUnifiedFileActions .msmInvoiceLibraryButton,
+ .boShell .msmInvoiceSplitPicker > .fileButton {min-height:46px!important; font-size:12px!important; padding:9px 5px!important;}
+}
+/* Mobile-only submenu opens from the left half; never adds a third permanent action. */
+.boShell .msmUnifiedUploadArea {position:relative; min-width:0; width:100%;}
+.boShell .msmUnifiedUploadArea > .fileButton {width:100%!important;}
+.boShell .msmUnifiedMobileMenu {position:absolute; left:0; right:0; top:calc(100% + 5px); z-index:50;
+ display:grid; gap:4px; background:var(--card,#fff); padding:7px; border:1px solid #cfd6cb;
+ border-radius:12px; box-shadow:0 8px 25px rgba(0,0,0,.14);}
+.boShell .msmUnifiedMobileMenu > button {font:inherit; font-size:13px; padding:10px 5px;
+ color:inherit; border:1px solid #d6ddd3; border-radius:8px; background:transparent; cursor:pointer;}

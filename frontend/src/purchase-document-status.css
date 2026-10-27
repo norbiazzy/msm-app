@@ -1,0 +1,24 @@
+/* MSM purchase documents v5 — compact and accessible, follows existing theme variables. */
+.msmPurchaseDocControlV5 { border: 1px solid rgba(125,137,122,.23); background: rgba(140,152,131,.055); border-radius: 12px; margin: 12px 0 15px; padding: 10px 12px; color: inherit; }
+.msmPurchaseDocControlV5 > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; }
+.msmPurchaseDocControlV5 > summary::-webkit-details-marker { display: none; }
+.msmDocV5Heading { font-size: 14px; font-weight: 750; }
+.msmDocV5Summary { font-size: 12px; font-weight: 650; color: #526a59; }
+.msmDocV5Summary.msmDocV5Attention { color: #a36b20; }
+.msmDocV5Grid { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.msmDocV5Item { border: 1px solid rgba(125,137,122,.18); border-radius: 9px; background: rgba(255,255,255,.58); padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.msmDocV5Label { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 12px; font-weight: 700; }
+.msmDocV5State { font-size: 11px; font-weight: 700; padding: 3px 7px; border-radius: 999px; background: rgba(125,137,122,.13); white-space: nowrap; }
+.msmDocV5State.state-ready { color: #176347; background: rgba(31,145,93,.10); }
+.msmDocV5State.state-review, .msmDocV5State.state-missing { color: #a26415; background: rgba(227,159,41,.12); }
+.msmDocV5State.state-waiting { color: #456b98; background: rgba(78,127,191,.12); }
+.msmDocV5State.state-not-needed { color: #64716b; }
+.msmDocV5Item small { font-size: 12px; line-height: 1.38; color: #657169; }
+.msmDocV5Item a, .msmDocV5Files a { font-size: 12px; color: #235a70; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.msmDocV5Notice, .msmDocV5Footnote { font-size: 11px; line-height: 1.4; color: #657169; margin: 10px 0 0; }
+.msmDocV5Files { display: flex; flex-wrap: wrap; gap: 5px 11px; padding-top: 10px; margin-top: 10px; border-top: 1px solid rgba(125,137,122,.16); }
+@media (max-width: 680px) { .msmDocV5Grid { grid-template-columns: minmax(0,1fr); } .msmPurchaseDocControlV5 { padding: 10px; } .msmPurchaseDocControlV5 > summary { align-items: flex-start; } }
+html[data-theme='dark'] .msmPurchaseDocControlV5 { background: rgba(150,160,145,.06); border-color: rgba(180,190,175,.25); }
+html[data-theme='dark'] .msmDocV5Item { background: rgba(30,38,34,.6); border-color: rgba(180,190,175,.18); }
+html[data-theme='dark'] .msmDocV5Item small, html[data-theme='dark'] .msmDocV5Footnote, html[data-theme='dark'] .msmDocV5Notice { color: #b0bbb2; }
+html[data-theme='dark'] .msmDocV5Item a, html[data-theme='dark'] .msmDocV5Files a { color: #b2d4e2; }

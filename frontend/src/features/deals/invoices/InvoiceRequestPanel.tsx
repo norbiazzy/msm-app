@@ -1,17 +1,22 @@
+/* MSM_FIXES_V10 */
+/* MSM_DOCUMENT_FLOW_V9 */
+import { ManagerDocumentPicker } from '../../../DocumentPickerV9';
 import type { Dispatch, SetStateAction } from 'react';
 import type { AuditEvent, Deal, DealTask, Invoice, SellerType, StoredFile } from '../../../types';
 import type { BackgroundUploadJob } from '../../../backgroundUploads';
 import { Field } from '../../../shared/Field';
 import { sellerLabels } from '../../../shared/formatters';
 import { dealFileUrl } from '../../../api';
-import { MultiFilePicker, SingleFilePicker } from '../../../MultiFilePicker';
 import { InvoiceBlock } from './InvoiceViews';
+import { InvoiceManagerReviewV10 } from '../../../InvoiceManagerReviewV10';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type InvoiceRequestPanelProps = {
   deal: Deal;
   current: Invoice | undefined;
   canManageDeal: boolean;
+  reviewerId: string;
+  onInvoiceReviewed: () => Promise<void>;
   invoiceRequestEditOpen: boolean;
   setInvoiceRequestEditOpen: Setter<boolean>;
   invoiceRequestTask: DealTask | undefined;
@@ -46,6 +51,8 @@ export function InvoiceRequestPanel({
   deal,
   current,
   canManageDeal,
+  reviewerId,
+  onInvoiceReviewed,
   invoiceRequestEditOpen,
   setInvoiceRequestEditOpen,
   invoiceRequestTask,
@@ -83,13 +90,17 @@ export function InvoiceRequestPanel({
       >
       {current ? (
 
-        <InvoiceBlock
+        <>
+<InvoiceBlock
+          showRecognition={canManageDeal}
           invoice={current}
           sellerType={
             current.sellerType ||
             deal.sellerType
           }
         />
+        {canManageDeal && current.status === 'WAITING_MANAGER_REVIEW' && <InvoiceManagerReviewV10 dealId={deal.id} invoice={current} actorId={reviewerId} onChanged={onInvoiceReviewed} />}
+</>
 
       ) : (
 
@@ -413,13 +424,8 @@ export function InvoiceRequestPanel({
                 </div>
 
 
-                <Field title="Заменить входящий счёт, если нужно">
-                  <SingleFilePicker
-                    file={requestIncomingInvoice}
-                    onChange={setRequestIncomingInvoice}
-                    title="+ Выбрать новый входящий счёт"
-                    accept="application/pdf,image/*"
-                  />
+                <Field title="Документы">
+                  <ManagerDocumentPicker primaryFile={requestIncomingInvoice} onPrimaryChange={setRequestIncomingInvoice} files={requestExtraFiles} onChange={setRequestExtraFiles} />
                 </Field>
 
 
@@ -456,13 +462,7 @@ export function InvoiceRequestPanel({
                 )}
 
 
-                <Field title="Добавить новые документы / реквизиты">
-                  <MultiFilePicker
-                    files={requestExtraFiles}
-                    onChange={setRequestExtraFiles}
-                    title="+ Прикрепить документы"
-                  />
-                </Field>
+                
 
 
                 <label className="urgentToggle">

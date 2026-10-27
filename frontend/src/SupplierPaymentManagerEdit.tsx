@@ -1,3 +1,5 @@
+/* MSM_DOCUMENT_FLOW_V9 */
+import { ManagerDocumentPicker } from './DocumentPickerV9';
 import {
   useState,
 } from 'react';
@@ -9,11 +11,6 @@ import {
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
-
-import {
-  MultiFilePicker,
-  SingleFilePicker,
-} from './MultiFilePicker';
 
 import type {
   SupplierPurchase,
@@ -530,35 +527,9 @@ export function SupplierPaymentManagerEdit({
       </label>
 
 
-      <div className="field">
-
-        <span>
-          Новый входящий счёт
-        </span>
-
-        <SingleFilePicker
-          file={primaryInvoice}
-          onChange={setPrimaryInvoice}
-          title="+ Прикрепить новый счёт"
-          accept="application/pdf,image/*"
-        />
-
-      </div>
-
-
-      <div className="field">
-
-        <span>
-          Дополнительные документы
-        </span>
-
-        <MultiFilePicker
-          files={extraFiles}
-          onChange={setExtraFiles}
-          title="+ Прикрепить документы"
-        />
-
-      </div>
+      <div className="field"><span>Документы для исправления</span>
+          <ManagerDocumentPicker primaryFile={primaryInvoice} onPrimaryChange={setPrimaryInvoice} files={extraFiles} onChange={setExtraFiles} />
+        </div>
 
 
       <label className="urgentToggle">

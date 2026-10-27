@@ -67,6 +67,13 @@ enum InvoiceStatus {
   CORRECTION_REQUESTED
 }
 
+enum RecognitionStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
 enum FileProvider {
   TELEGRAM
   EXTERNAL
@@ -151,6 +158,7 @@ model Deal {
 
   @@index([managerId, status])
   @@index([clientName])
+  filePoolLinks FilePoolLink[]
 }
 
 model ClientInvoice {
@@ -198,6 +206,20 @@ model Task {
   @@index([assigneeId, status])
   @@index([supplierPurchaseId, status])
   details            Json?
+  filePoolLinks FilePoolLink[]
+}
+
+model DocumentRecognition {
+  id String @id @default(cuid())
+  fileId String @unique
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  kind String
+  status RecognitionStatus @default(PENDING)
+  engineVersion String @default("msm-recognition-1.0")
+  result Json?
+  errorText String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model StoredFile {
@@ -215,10 +237,17 @@ model StoredFile {
   telegramChatId    String?
   externalUrl       String?
   createdAt         DateTime       @default(now())
+  recognition       DocumentRecognition?
   invoice           ClientInvoice? @relation("InvoiceFile")
   clientPayment     ClientPayment? @relation("ClientPaymentFile")
 
   @@index([dealId, category])
+  sha256 String?
+  poolSource String @default("APP")
+  uploadedById String?
+  libraryLinks FilePoolLink[]
+  @@index([sha256])
+  @@index([uploadedById])
 }
 
 model ClientPayment {
@@ -313,4 +342,21 @@ model AuditEvent {
   createdAt  DateTime @default(now())
 
   @@index([dealId, createdAt])
+}
+
+// Shared file is physically stored only once; task/deal references remain separate.
+model FilePoolLink {
+  id String @id @default(cuid())
+  fileId String
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  dealId String?
+  deal Deal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  taskId String?
+  task Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  linkedById String?
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
+  @@index([dealId])
+  @@index([taskId])
 }

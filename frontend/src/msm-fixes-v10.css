@@ -1,0 +1,39 @@
+/* MSM_FIXES_V10: nested v8/v9 controls used to make left button 25% and right 50%. */
+.boShell .msmDocumentPair, .boShell .msmPaymentEvidenceActions, .boShell .msmInvoiceSplitPicker {
+  display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;column-gap:12px!important;align-items:stretch!important;width:100%!important;
+}
+.boShell .msmDocumentPair > *, .boShell .msmPaymentEvidenceActions > *, .boShell .msmInvoiceSplitPicker > * {
+  min-width:0!important; width:100%!important; max-width:none!important; box-sizing:border-box!important;
+}
+.boShell .msmDocumentPair .msmV9Documents .msmUnifiedFileActions,
+.boShell .msmPaymentEvidenceActions .msmV9Documents .msmUnifiedFileActions,
+.boShell .msmInvoiceSplitPicker .msmV9Documents .msmUnifiedFileActions,
+.boShell .msmDocumentPair .msmUnifiedFileActions,
+.boShell .msmPaymentEvidenceActions .msmUnifiedFileActions,
+.boShell .msmInvoiceSplitPicker .msmUnifiedFileActions {
+  display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:0!important;width:100%!important;
+}
+.boShell .msmDocumentPair .msmUnifiedUploadArea,
+.boShell .msmPaymentEvidenceActions .msmUnifiedUploadArea,
+.boShell .msmInvoiceSplitPicker .msmUnifiedUploadArea {
+  width:100%!important;min-width:0!important;
+}
+.boShell .msmDocumentPair button.fileButton,
+.boShell .msmPaymentEvidenceActions button.fileButton,
+.boShell .msmDocumentPair .msmInvoiceLibraryButton,
+.boShell .msmPaymentEvidenceActions .msmInvoiceLibraryButton,
+.boShell .msmInvoiceSplitPicker .msmInvoiceLibraryButton {
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;min-height:52px!important;
+}
+.boShell .msmV9Documents:not(.msmDocumentPair) .msmUnifiedFileActions:has(.msmUnifiedLibraryArea) {
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+}
+.boShell .msmInvoiceManagerReview {padding:16px;margin:12px 0 18px;border:1px solid #d9decf;border-radius:14px;display:grid;gap:12px;}
+.boShell .msmInvoiceManagerReviewHead {display:flex;flex-wrap:wrap;justify-content:space-between;gap:7px;}
+.boShell .msmInvoiceManagerReviewHead span {font-size:.85em;color:#6a735e;}
+.boShell .msmInvoiceReviewFields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.boShell .msmInvoiceReviewFields label {display:grid;gap:7px;font-weight:600;min-width:0;}
+.boShell .msmInvoiceReviewFields input {width:100%;min-width:0;box-sizing:border-box;}
+.boShell .msmInvoiceReviewWarning {color:#9b4a1e;background:#fff7ef;border-radius:10px;padding:10px;}
+@media(max-width:600px) { .boShell .msmInvoiceReviewFields {grid-template-columns:minmax(0,1fr);} }

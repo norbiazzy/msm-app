@@ -280,6 +280,39 @@ export class PurchasesService {
         });
 
 
+    // MSM_PURCHASE_DRAFT_EDIT_V11: supplier/payment changes are forbidden once sent to accounting.
+    const changeDraft = body.supplierName !== undefined || body.requestedAmount !== undefined;
+    if (changeDraft) {
+      if (current.status !== SupplierPurchaseStatus.DRAFT) {
+        throw new BadRequestException('Редактирование завода и суммы возможно только до отправки задачи бухгалтерии');
+      }
+      const [tasksCount, paymentsCount] = await Promise.all([
+        this.prisma.task.count({ where: { supplierPurchaseId: purchaseId, type: TaskType.PAY_SUPPLIER } }),
+        this.prisma.supplierPayment.count({ where: { purchaseId } }),
+      ]);
+      if (tasksCount > 0 || paymentsCount > 0) {
+        throw new BadRequestException('По закупке уже создавалась задача или проводилась оплата. Изменения недоступны');
+      }
+      if (!body.actorId) throw new BadRequestException('Не указан пользователь для записи в историю');
+      const actor = await this.prisma.user.findUnique({ where: { id: body.actorId }, select: { role: true } });
+      if (!actor || !['MANAGER', 'LEADER', 'ADMIN'].includes(actor.role)) {
+        throw new BadRequestException('Нет прав менять завод и сумму к оплате');
+      }
+      if (body.supplierName !== undefined) {
+        if (typeof body.supplierName !== 'string' || !body.supplierName.trim()) {
+          throw new BadRequestException('Укажите завод или поставщика');
+        }
+        body.supplierName = body.supplierName.trim();
+      }
+      if (body.requestedAmount !== undefined) {
+        const value = Number(body.requestedAmount);
+        if (!Number.isFinite(value) || value <= 0 || value >= 1000000000000) {
+          throw new BadRequestException('Укажите корректную положительную сумму к оплате');
+        }
+        body.requestedAmount = Math.round(value * 100) / 100;
+      }
+    }
+
     const updated =
       await this.prisma
         .supplierPurchase
@@ -301,6 +334,11 @@ export class PurchasesService {
                 ? body.incomingInvoiceNumber
                 : current.incomingInvoiceNumber,
 
+            requestedAmount:
+              body.requestedAmount !== undefined
+                ? body.requestedAmount
+                : current.requestedAmount,
+
             incomingInvoiceAmount:
               body.incomingInvoiceAmount !== undefined
                 ? body.incomingInvoiceAmount
@@ -317,6 +355,29 @@ export class PurchasesService {
           },
         });
 
+
+    if (changeDraft && body.actorId && (
+      updated.supplierName !== current.supplierName ||
+      Number(updated.requestedAmount ?? updated.incomingInvoiceAmount) !==
+        Number(current.requestedAmount ?? current.incomingInvoiceAmount)
+    )) {
+      await this.prisma.auditEvent.create({
+        data: {
+          dealId,
+          actorId: body.actorId,
+          action: 'SUPPLIER_PAYMENT_DRAFT_EDITED',
+          entityType: 'SupplierPurchase', entityId: purchaseId,
+          oldValue: {
+            supplierName: current.supplierName,
+            requestedAmount: current.requestedAmount?.toString() ?? current.incomingInvoiceAmount?.toString() ?? null,
+          },
+          newValue: {
+            supplierName: updated.supplierName,
+            requestedAmount: updated.requestedAmount?.toString() ?? null,
+          },
+        },
+      });
+    }
 
     if (body.sourceFileId) {
 

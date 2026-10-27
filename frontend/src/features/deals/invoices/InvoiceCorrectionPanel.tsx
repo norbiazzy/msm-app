@@ -1,9 +1,9 @@
+/* MSM_DOCUMENT_FLOW_V9 */
+import { ManagerDocumentPicker } from '../../../DocumentPickerV9';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Deal, Invoice, SellerType } from '../../../types';
 import { Field } from '../../../shared/Field';
 import { sellerLabels } from '../../../shared/formatters';
-import { MultiFilePicker, SingleFilePicker } from '../../../MultiFilePicker';
-
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type InvoiceCorrectionPanelProps = {
   deal: Deal;
@@ -274,33 +274,12 @@ export function InvoiceCorrectionPanel({
           </Field>
 
 
-          <Field title="Основной входящий счёт">
-
-            <SingleFilePicker
-              file={correctionPrimaryFile}
-              onChange={setCorrectionPrimaryFile}
-              title="+ Выбрать основной счёт"
-              accept="application/pdf,image/*"
-            />
-
-            <span className="fieldHint">
-              Бухгалтеру ориентироваться по этому файлу
-            </span>
-
+          <Field title="Документы для корректировки">
+            <ManagerDocumentPicker primaryFile={correctionPrimaryFile} onPrimaryChange={setCorrectionPrimaryFile} files={correctionFiles} onChange={setCorrectionFiles} />
           </Field>
 
 
-          <Field title="Дополнительные документы">
-
-            <MultiFilePicker
-              files={correctionFiles}
-              onChange={
-                setCorrectionFiles
-              }
-              title="+ Прикрепить дополнительно"
-            />
-
-          </Field>
+          
 
 
           <label className="urgentToggle">

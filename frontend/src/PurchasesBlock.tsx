@@ -1,11 +1,19 @@
+/* MSM_DOCUMENT_FLOW_V9 */
+import { ManagerDocumentPicker, AccountantDocumentPicker } from './DocumentPickerV9';
 import { TaskContextStrip } from './TaskContextStrip';
-import { SupplierRealizations } from './SupplierRealizations';
+import { PurchaseDocumentStatus } from './PurchaseDocumentStatus';
+import { LibraryFileChooser, linkLibraryFile, type LibrarySelection } from './LibraryFileChooser';
+import { TaskLibraryLinks } from './TaskLibraryLinks';
+import { SupplierRealizations } from './SupplierRealizationsV13'; // MSM_REALIZATIONS_V13
+import { PurchaseDraftEditorV11 } from './PurchaseDraftEditorV11'; // MSM_PURCHASE_DRAFT_EDIT_V11
 import { TaskDataSection } from './TaskDataSection';
 import { TaskWorkSection } from './TaskWorkSection';
+import { PurchaseRequestSummary, SupplierPaymentSummary } from './SupplierWorkflowSummary';
 /* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
 /* MSM_STEP29_UNIFIED_TASK_LAYOUT */
 import { TaskDocuments } from './TaskDocuments';
 /* MSM_STEP28_SUPPLIER_PAYMENT_DOCUMENTS */
+import { RecognitionAudit } from './RecognitionAudit';
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
@@ -37,11 +45,7 @@ import type {
   SupplierPurchase,
 } from './types';
 
-import {
-  MultiFilePicker,
-  SingleFilePicker,
-} from './MultiFilePicker';
-
+import { SingleFilePicker } from './MultiFilePicker';
 import {
   ReturnToManagerPanel,
 } from './ReturnToManagerPanel';
@@ -641,110 +645,16 @@ export function PurchasesBlock({
           </div>
 
 
-          <div className="field purchaseExistingInvoiceField">
-
-            <span>
-              Основной входящий счёт
-            </span>
-
-
-            {customerIncomingFiles.length > 0 && (
-
-              <select
-                value={selectedExistingFileId}
-                onChange={(e) => {
-                  setSelectedExistingFileId(
-                    e.target.value
-                  );
-
-                  if (e.target.value) {
-                    setNewIncomingFile(null);
-                  }
-                }}
-              >
-                <option value="">
-                  Не выбран
-                </option>
-
-                {[...customerIncomingFiles]
-                  .reverse()
-                  .map(
-                    (file, index) => (
-                    <option
-                      key={file.id}
-                      value={file.id}
-                    >
-                      {index === 0 ? 'Актуальный · ' : ''}
-                      {file.originalName}
-                    </option>
-                  ))}
-              </select>
-
-            )}
-
-
-            {selectedExistingFile &&
-              !newIncomingFile && (
-
-              <div className="purchaseSelectedInvoice">
-                <div>
-                  <b>
-                    {selectedExistingFile.originalName}
-                  </b>
-                  <span>
-                    Этот счёт будет привязан к поставщику
-                  </span>
-                </div>
-
-                <a
-                  href={
-                    dealFileUrl(
-                      selectedExistingFile.id
-                    )
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Открыть
-                </a>
-              </div>
-
-            )}
-
-
-            <SingleFilePicker
-              file={newIncomingFile}
-              onChange={(file) => {
-                setNewIncomingFile(file);
-
-                if (file) {
-                  setSelectedExistingFileId('');
-                }
-              }}
-              title={
-                selectedExistingFile
-                  ? '+ Заменить другим входящим счётом'
-                  : '+ Прикрепить входящий счёт'
-              }
-              accept="application/pdf,image/*"
-            />
-
-          </div>
-
-
-          <label className="field purchaseFileField">
-
-            <span>
-              Дополнительные документы
-            </span>
-
-            <MultiFilePicker
-              files={files}
-              onChange={setFiles}
-              title="+ Прикрепить документы"
-            />
-
-          </label>
+          <div className="field purchaseFileField">
+              <span>Документы поставщика</span>
+              <ManagerDocumentPicker primaryFile={newIncomingFile}
+                onPrimaryChange={file => { setNewIncomingFile(file); if (file) setSelectedExistingFileId(''); }}
+                files={files} onChange={setFiles} />
+              {selectedExistingFile && !newIncomingFile && <div className="purchaseSelectedInvoice">
+                <span>Ранее выбранный счёт из сделки: {selectedExistingFile.originalName}</span>
+                <button type="button" className="secondary compactButton" onClick={() => setSelectedExistingFileId('')}>Открепить</button>
+              </div>}
+            </div>
 
 
 
@@ -794,6 +704,15 @@ export function PurchasesBlock({
 
           </label>
 
+
+          {/* MSM_SUPPLIER_WORKFLOW_V6_REQUEST */}
+          <PurchaseRequestSummary
+            supplierName={supplierName}
+            amountInput={invoiceAmount}
+            mainFileName={newIncomingFile?.name || selectedExistingFile?.originalName || null}
+            attachmentCount={files.length}
+            urgent={urgent}
+          />
 
           <div className="purchaseQuickActions">
 
@@ -1190,7 +1109,7 @@ function PurchaseCard({
 
   const supplierInvoiceStatus =
     !currentPurchaseInvoice
-      ? 'Нет входящего'
+        ? (purchaseAttachments.length ? 'Документы на проверке' : 'Нет входящего')
       : financiallyPaid
         ? 'Входящий оплачен'
         : (
@@ -1546,12 +1465,13 @@ function PurchaseCard({
 
           <b className="purchaseAmountMain">
             {
-              money(
-                purchase
-                  .incomingInvoiceAmount
-              )
+              money(purchase.requestedAmount ?? purchase.incomingInvoiceAmount)
             }
-          </b>
+            </b>
+            {purchase.requestedAmount != null &&
+             Number(purchase.requestedAmount) !== Number(purchase.incomingInvoiceAmount) && (
+              <small className="msmPurchaseInvoiceAmountV11">По счёту: {money(purchase.incomingInvoiceAmount)}</small>
+            )}
 
         </div>
 
@@ -1572,7 +1492,12 @@ function PurchaseCard({
       </div>
 
 
+      <PurchaseDraftEditorV11 dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged} />
+
       <SupplierRealizations dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged} />
+
+      {/* MSM_PURCHASE_DOCUMENT_CONTROL_V5 */}
+      <PurchaseDocumentStatus deal={deal} purchase={purchase} />
 
       {purchase.comment && (
 
@@ -1636,9 +1561,7 @@ function PurchaseCard({
 
         ) : (
 
-          <div className="purchaseInvoiceMissing">
-            Входящий счёт не выбран
-          </div>
+          <div className="purchaseInvoiceMissing">{purchaseAttachments.length ? 'Документы приложены — бухгалтер определит входящий счёт' : 'Входящий счёт не выбран'}</div>
 
         )}
 
@@ -1823,12 +1746,12 @@ function PurchaseCard({
           {!paidOnlyFromBalance && (
             <div className="purchasePaymentFileList">
 
-              {paymentFiles.length === 0 &&
-                stampedPaymentFiles.length === 0 && (
-                <span className="purchasePaymentFileMissing">
-                  Файл платёжки не приложен
-                </span>
-              )}
+                <TaskLibraryLinks
+                  showRecognition={user.role !== 'ACCOUNTANT'}
+                  expectedRecipient={purchase.supplierName}
+                  taskIds={(purchase.tasks || []).filter(item => item.type === 'PAY_SUPPLIER').map(item => item.id)}
+                  emptyText={paymentFiles.length === 0 && stampedPaymentFiles.length === 0 ? 'Файл платёжки не приложен' : undefined}
+                />
 
 
               {paymentFiles.map(
@@ -1843,6 +1766,10 @@ function PurchaseCard({
                 </a>
               ))}
 
+
+              {user.role !== 'ACCOUNTANT' && paymentFiles.concat(stampedPaymentFiles).map((file) =>
+                <RecognitionAudit key={file.id} fileId={file.id} expectedRecipient={purchase.supplierName} />
+              )}
 
               {stampedPaymentFiles.map(
                 (file) => (
@@ -2371,8 +2298,7 @@ export function SupplierPaymentTask({
     useState('');
 
 
-  const [stamped, setStamped] =
-    useState(false);
+  
 
 
   const [
@@ -2383,6 +2309,7 @@ export function SupplierPaymentTask({
 
   const [files, setFiles] =
     useState<File[]>([]);
+  const [msmPaymentLibraryFile, setMsmPaymentLibraryFile] = useState<LibrarySelection | null>(null);
 
 
   const [
@@ -2405,6 +2332,7 @@ export function SupplierPaymentTask({
     stampFiles,
     setStampFiles,
   ] = useState<File[]>([]);
+  const [msmStampLibraryFile, setMsmStampLibraryFile] = useState<LibrarySelection | null>(null);
 
 
   const [saving, setSaving] =
@@ -2589,18 +2517,7 @@ export function SupplierPaymentTask({
     setError('');
 
 
-    if (
-      stamped &&
-      !paidFromBalance &&
-      files.length === 0
-    ) {
-
-      setError(
-        'Если ставите «с печатью», прикрепите платёжку.'
-      );
-
-      return;
-    }
+    
 
 
     const paymentAmount =
@@ -2611,6 +2528,7 @@ export function SupplierPaymentTask({
       paidFromBalance
         ? []
         : [...files];
+    const linkedPaymentId = paidFromBalance ? undefined : msmPaymentLibraryFile?.id;
 
 
     const commentToSave =
@@ -2618,10 +2536,8 @@ export function SupplierPaymentTask({
       undefined;
 
 
-    const stampedValue =
-      paidFromBalance
-        ? false
-        : stamped;
+    // Mark as unverified until a bank-stamped document is separately provided.
+    const stampedValue = false;
 
 
     const paidFromBalanceValue =
@@ -2629,9 +2545,11 @@ export function SupplierPaymentTask({
 
 
     setFiles([]);
+    setMsmPaymentLibraryFile(null);
     setAmount('');
     setComment('');
-    setStamped(false);
+
+
     setPaidFromBalance(false);
 
 
@@ -2686,7 +2604,9 @@ export function SupplierPaymentTask({
 
 
           setProgress(94);
-
+          if (linkedPaymentId) {
+            await linkLibraryFile(linkedPaymentId, task.deal.id, task.id, user.id);
+          }
 
           await addSupplierPayment(
             task.deal.id,
@@ -2731,7 +2651,7 @@ export function SupplierPaymentTask({
 
 
     if (
-      stampFiles.length === 0
+      stampFiles.length === 0 && !msmStampLibraryFile
     ) {
 
       setError(
@@ -2744,9 +2664,11 @@ export function SupplierPaymentTask({
 
     const filesToUpload =
       [...stampFiles];
+    const linkedStampId = msmStampLibraryFile?.id;
 
 
     setStampFiles([]);
+    setMsmStampLibraryFile(null);
     setStampPaymentId(null);
 
 
@@ -2800,7 +2722,9 @@ export function SupplierPaymentTask({
 
 
           setProgress(94);
-
+          if (linkedStampId) {
+            await linkLibraryFile(linkedStampId, task.deal.id, task.id, user.id);
+          }
 
           await markSupplierPaymentStamped(
             task.deal.id,
@@ -2966,6 +2890,16 @@ export function SupplierPaymentTask({
           title="Проведение оплаты поставщику"
           description="Укажите сумму и способ оплаты, приложите платёжное поручение при необходимости."
         >
+          {/* MSM_SUPPLIER_WORKFLOW_V6_TASK */}
+          <SupplierPaymentSummary
+            amountInput={amount}
+            requestedAmount={amountToPay}
+            paidAlready={paidAlready}
+            purchaseTarget={target}
+            paidFromBalance={paidFromBalance}
+            fileCount={files.length}
+            stamped={false}
+          />
 
           <label className="field">
 
@@ -2993,19 +2927,21 @@ export function SupplierPaymentTask({
 
           {!paidFromBalance && (
 
-            <label className="field">
+            <div className="field">
 
               <span>
                 Платёжные документы
               </span>
 
-              <MultiFilePicker
-                files={files}
-                onChange={setFiles}
-                title="+ Прикрепить платёжки"
-              />
+              {/* MSM_UPLOAD_V7_PAYMENT */}
+              <div className="msmDocumentPair">
+                <AccountantDocumentPicker files={files} onChange={next => { setFiles(next); if (next.length) setMsmPaymentLibraryFile(null); }} />
+                <div className="msmTaskLibrarySelection"><LibraryFileChooser value={msmPaymentLibraryFile} onSelect={item => { setMsmPaymentLibraryFile(item); if (item) setFiles([]); }}
+                  allowedExtensions={['pdf','jpg','jpeg','png','webp']} /></div>
+              </div>
+              <small className="msmTaskLibraryHint">Сверьте получателя и сумму платежа. Отметку «ИСПОЛНЕНО» проверяет менеджер.</small>
 
-            </label>
+            </div>
 
           )}
 
@@ -3048,7 +2984,8 @@ export function SupplierPaymentTask({
 
 
                 if (checked) {
-                  setStamped(false);
+
+
                   setFiles([]);
                 }
               }}
@@ -3073,39 +3010,7 @@ export function SupplierPaymentTask({
           </label>
 
 
-          {!paidFromBalance && (
-
-          <label data-bo-payment-choice="stamped" className="stampToggle">
-
-            <input
-              type="checkbox"
-              checked={stamped}
-
-              onChange={(e) =>
-                setStamped(
-                  e.target.checked
-                )
-              }
-            />
-
-
-            <div>
-
-              <strong>
-                Платёжка с печатью
-              </strong>
-
-              <span>
-                Если печати пока нет —
-                не отмечайте.
-                Её можно добавить позже.
-              </span>
-
-            </div>
-
-          </label>
-
-          )}
+          {/* MSM_UPLOAD_V7_REMOVE_STAMPED: отметку банка подтверждает документ, не ручной флажок */}
 
 
           <button
@@ -3227,11 +3132,13 @@ export function SupplierPaymentTask({
 
                   <div className="stampUploadBox">
 
-                    <MultiFilePicker
-                      files={stampFiles}
-                      onChange={setStampFiles}
-                      title="+ Выбрать платёжку с печатью"
-                    />
+                    {/* MSM_UPLOAD_V7_STAMP */}
+                    <div className="msmDocumentPair">
+                      <AccountantDocumentPicker files={stampFiles} onChange={next => { setStampFiles(next); if (next.length) setMsmStampLibraryFile(null); }} />
+                      <div className="msmTaskLibrarySelection"><LibraryFileChooser value={msmStampLibraryFile} onSelect={item => { setMsmStampLibraryFile(item); if (item) setStampFiles([]); }}
+                        allowedExtensions={['pdf','jpg','jpeg','png','webp']} /></div>
+                    </div>
+                    <small className="msmTaskLibraryHint">Выбирайте только документ, на котором имеется отметка «ИСПОЛНЕНО».</small>
 
 
                     <button
@@ -3240,7 +3147,7 @@ export function SupplierPaymentTask({
 
                       disabled={
                         stampFiles.length ===
-                        0
+                        0 && !msmStampLibraryFile
                       }
 
                       onClick={() =>

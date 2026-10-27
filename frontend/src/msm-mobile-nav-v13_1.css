@@ -1,0 +1,89 @@
+/* MSM_NAV_V13_1: one compact bottom navigation on phones only. */
+/* This file is imported AFTER existing styles; desktop design remains untouched. */
+@media (max-width: 720px) {
+  /* Legacy text tabs must not appear above the current icon navigation. */
+  .boShell nav.bottomNav { display: none !important; }
+
+  .boShell nav.boMobileNav {
+    display: flex !important;
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: auto !important;
+    min-height: 0 !important;
+    z-index: 1100 !important;
+    flex-flow: row nowrap !important;
+    align-items: stretch !important;
+    justify-content: space-around !important;
+    gap: 2px !important;
+    padding: 5px max(6px, env(safe-area-inset-right))
+      calc(5px + env(safe-area-inset-bottom))
+      max(6px, env(safe-area-inset-left)) !important;
+    border-top: 1px solid var(--bo-line, #d8ddd2) !important;
+    border-radius: 0 !important;
+    background: var(--bo-panel, #fff) !important;
+    color: var(--bo-text, #111) !important;
+    box-shadow: 0 -3px 14px rgba(0, 0, 0, .08);
+  }
+
+  /* Old placeholders (small dots) must not reserve space. */
+  .boShell nav.boMobileNav > .boMobileEmpty { display: none !important; }
+
+  /* Works for either 3, 4 or 5 REAL tabs; do not change links or behavior. */
+  .boShell nav.boMobileNav > :not(.boMobileEmpty) {
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex: 1 1 0 !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 3px !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 52px !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 4px 2px !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    text-align: center !important;
+    text-decoration: none !important;
+    line-height: 1.15 !important;
+    touch-action: manipulation;
+  }
+
+  .boShell nav.boMobileNav > :not(.boMobileEmpty) b {
+    display: block;
+    margin: 0 !important;
+    font-size: 19px !important;
+    line-height: 1.05 !important;
+  }
+
+  .boShell nav.boMobileNav > :not(.boMobileEmpty) span {
+    display: block;
+    max-width: 100%;
+    margin: 0 !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+  }
+
+  .boShell nav.boMobileNav > .active,
+  .boShell nav.boMobileNav > [aria-current='page'] {
+    background: var(--bo-panel-2, #e9ece4) !important;
+    color: var(--bo-text, #111) !important;
+  }
+
+  /* Prevent the fixed navigation from covering the last card/button. */
+  body:has(.boShell) {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+  }
+}

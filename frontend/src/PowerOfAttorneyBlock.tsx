@@ -1,4 +1,10 @@
+/* MSM_FIXES_V10 */
+/* MSM_DOCUMENT_FLOW_V9 */
+import { AccountantDocumentPicker } from './DocumentPickerV9';
 import { PoaEtrnPanel } from './PoaEtrnPanel';
+import { LibraryFileChooser, linkLibraryFile, type LibrarySelection } from './LibraryFileChooser';
+import { TaskLibraryLinks } from './TaskLibraryLinks';
+import { RecognitionAudit } from './RecognitionAudit';
 import { TaskContextStrip } from './TaskContextStrip';
 import { TaskDataSection } from './TaskDataSection';
 import { TaskWorkSection } from './TaskWorkSection';
@@ -20,10 +26,7 @@ import {
   type Task,
 } from './api';
 
-import {
-  MultiFilePicker,
-} from './MultiFilePicker';
-
+import { MultiFilePicker } from './MultiFilePicker';
 import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
@@ -419,10 +422,14 @@ const requestKey =
                           {file.originalName}
                         </a>
                       ))}
+                      {user.role !== 'ACCOUNTANT' && resultFiles.map((file) => (
+                        <RecognitionAudit key={file.id} fileId={file.id} expectedNumber={resultNumber} />
+                      ))}
                     </div>
                   )}
 
 
+                  <TaskLibraryLinks taskIds={[task.id]} showRecognition={user.role !== 'ACCOUNTANT'} expectedNumber={resultNumber} />
                   {/* PART_V064_N1_V5B_READY_POA_ETRN */}
                   <PoaEtrnPanel
                     deal={deal}
@@ -651,9 +658,7 @@ export function PowerOfAttorneyTask({
 
   const [files, setFiles] =
     useState<File[]>([]);
-
-  const [poaNumber, setPoaNumber] =
-    useState('');
+  const [msmPoaLibraryFile, setMsmPoaLibraryFile] = useState<LibrarySelection | null>(null);
 
   const [
     accountantComment,
@@ -886,14 +891,7 @@ export function PowerOfAttorneyTask({
   function finish() {
     setError('');
 
-    if (!poaNumber.trim()) {
-      setError(
-        'Укажите номер доверенности.'
-      );
-      return;
-    }
-
-    if (files.length === 0) {
+    if (files.length === 0 && !msmPoaLibraryFile) {
       setError(
         'Прикрепите готовую доверенность.'
       );
@@ -902,8 +900,10 @@ export function PowerOfAttorneyTask({
 
     const filesToUpload =
       [...files];
+    const linkedPoaId = msmPoaLibraryFile?.id;
 
     setFiles([]);
+    setMsmPoaLibraryFile(null);
 
     startBackgroundUploadJob({
       taskId: task.id,
@@ -939,16 +939,18 @@ export function PowerOfAttorneyTask({
         }
 
         setProgress(95);
+        if (linkedPoaId) {
+          await linkLibraryFile(linkedPoaId, task.deal.id, task.id, user.id);
+        }
         await completePowerOfAttorneyTask(
           task.id,
           {
             actorId: user.id,
-            poaNumber:
-              poaNumber.trim(),
             accountantComment:
               accountantComment
                 .trim() ||
               undefined,
+            libraryResultFileId: linkedPoaId,
           },
         );
         setProgress(99);
@@ -1165,34 +1167,19 @@ export function PowerOfAttorneyTask({
       {status === 'IN_PROGRESS' && (
         <TaskWorkSection
           title="Оформление доверенности"
-          description="Укажите номер, прикрепите готовую доверенность и при необходимости оставьте комментарий."
+          description="Приложите готовую доверенность. Номер извлечём автоматически, менеджер проверит результат."
         >
-          <label className="field">
-            <span>
-              Номер доверенности
-            </span>
-            <input
-              value={poaNumber}
-              disabled={saving}
-              onChange={(event) =>
-                setPoaNumber(
-                  event.target.value
-                )
-              }
-              placeholder="Например: 1757"
-            />
-          </label>
 
-          <label className="field">
-            <span>
-              Готовая доверенность
-            </span>
-            <MultiFilePicker
-              files={files}
-              onChange={setFiles}
-              title="+ Прикрепить доверенность"
-            />
-          </label>
+          {/* MSM_UPLOAD_V7_POA */}
+          <div className="field msmDocumentField">
+            <span>Готовая доверенность</span>
+            <div className="msmDocumentPair">
+              <AccountantDocumentPicker files={files} onChange={next => { setFiles(next); if (next.length) setMsmPoaLibraryFile(null); }} />
+              <div className="msmTaskLibrarySelection"><LibraryFileChooser value={msmPoaLibraryFile} onSelect={item => { setMsmPoaLibraryFile(item); if (item) setFiles([]); }}
+                allowedExtensions={['pdf','jpg','jpeg','png','webp']} /></div>
+            </div>
+            <small className="msmTaskLibraryHint">Если документ уже в библиотеке, выбирайте его без повторной загрузки.</small>
+          </div>
 
           <label className="field">
             <span>

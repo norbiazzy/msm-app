@@ -1,0 +1,20 @@
+/* MSM 2.0 / purchase + accountant task UI v6 */
+.msmWorkflowV6 {
+  border: 1px solid rgba(125,137,122,.23);
+  border-radius: 12px;
+  padding: 13px 14px;
+  margin: 14px 0;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  min-width: 0;
+}
+.msmWorkflowV6Head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.msmWorkflowV6Head strong { font-size: 14px; font-weight: 750; }
+.msmWorkflowV6Urgent { border-radius: 100px; padding: 3px 9px; background: rgba(194,89,43,.13); color: #a34421; font-size: 12px; font-weight: 700; }
+.msmWorkflowV6Facts { margin: 12px 0 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.msmWorkflowV6Facts > div { min-width: 0; display: grid; gap: 4px; }
+.msmWorkflowV6Facts dt { font-size: 12px; opacity: .7; }
+.msmWorkflowV6Facts dd { margin: 0; font-size: 13px; line-height: 1.35; font-weight: 650; overflow-wrap: anywhere; }
+.msmWorkflowV6Wide { grid-column: 1 / -1; }
+.msmWorkflowV6Notice { margin: 10px 0 0; font-size: 12px; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(197,124,39,.32); background: rgba(197,124,39,.075); }
+.msmWorkflowV6Help { margin: 10px 0 0; font-size: 12px; line-height: 1.5; opacity: .78; }
+@media(max-width:520px) { .msmWorkflowV6 { padding: 12px; } .msmWorkflowV6Facts { grid-template-columns: minmax(0,1fr); } }

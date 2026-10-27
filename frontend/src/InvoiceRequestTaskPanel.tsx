@@ -1,3 +1,4 @@
+/* MSM_DOCUMENT_FLOW_V9 */
 import {
   useMemo,
   useState,
@@ -10,13 +11,9 @@ import {
 } from './api';
 
 import {
-  SingleFilePicker,
-  MultiFilePicker,
-} from './MultiFilePicker';
-
-import {
   startBackgroundUploadJob,
 } from './backgroundUploads';
+import { ManagerDocumentPicker } from './DocumentPickerV9';
 import { TaskDocuments } from './TaskDocuments';
 
 import type {
@@ -910,39 +907,8 @@ export function InvoiceRequestManagerRepair({
           <span>Срочно</span>
         </label>
 
-        <div className="field">
-
-          <span>
-            Новый входящий счёт,
-            если изменился
-          </span>
-
-          <SingleFilePicker
-            file={primaryFile}
-            onChange={
-              setPrimaryFile
-            }
-            title="+ Новый входящий счёт"
-            accept="application/pdf,image/*"
-          />
-
-        </div>
-
-
-        <div className="field">
-
-          <span>
-            Новые дополнительные документы
-          </span>
-
-          <MultiFilePicker
-            files={extraFiles}
-            onChange={
-              setExtraFiles
-            }
-            title="+ Прикрепить документы"
-          />
-
+        <div className="field"><span>Документы для исправленной заявки</span>
+          <ManagerDocumentPicker primaryFile={primaryFile} onPrimaryChange={setPrimaryFile} files={extraFiles} onChange={setExtraFiles} />
         </div>
 
 

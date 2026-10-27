@@ -1,3 +1,4 @@
+/* MSM_FIXES_V10 */
 import { useEffect, useState } from 'react';
 import { formatMoneyInput } from '../../shared/formatters';
 import { EtrnSourceDocuments } from '../../EtrnSourceDocuments';
@@ -880,6 +881,8 @@ export function DealDetail({
         deal={deal}
         current={current}
         canManageDeal={canManageDeal}
+        reviewerId={user.id}
+        onInvoiceReviewed={() => reload(false)}
         invoiceRequestEditOpen={invoiceRequestEditOpen}
         setInvoiceRequestEditOpen={setInvoiceRequestEditOpen}
         invoiceRequestTask={invoiceRequestTask}

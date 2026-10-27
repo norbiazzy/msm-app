@@ -1,0 +1,13 @@
+/* MSM Payments UI v2 — additive scoped styles, no layout resets. */
+.msmPaymentEvidence { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.msmPaymentEvidenceActions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.msmPaymentEvidenceActions > .multiFilePicker { flex: 1 1 185px; min-width: 145px; }
+.msmPaymentEvidenceActions > .msmInvoiceLibraryControl { flex: 1 1 155px; min-width: 130px; }
+.msmPaymentEvidenceActions .msmInvoiceLibraryButton { width: 100%; min-height: 42px; }
+.msmPaymentEvidenceActions .msmPaymentCamera { flex: 1 1 125px; text-align: center; min-height: 42px; }
+.msmPaymentEvidence > small { font-size: 12px; color: #64748b; line-height: 1.45; }
+.msmPayHelper { font-size: 12px; line-height: 1.5; color: #64748b; margin: 0 0 10px; }
+.msmCashHolderPanel { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin: 12px 0; }
+.msmCashHolderPanel > .field { flex: 1 1 190px; min-width: 0; }
+@media (min-width: 721px) { .msmPaymentCamera { display: none !important; } }
+@media (max-width: 560px) { .msmPaymentEvidenceActions > .multiFilePicker, .msmPaymentEvidenceActions > .msmInvoiceLibraryControl { flex-basis: calc(50% - 8px); min-width: 0; } .msmPaymentEvidenceActions .msmInvoiceLibraryButton { min-width: 0; } }

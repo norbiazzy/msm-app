@@ -1,3 +1,4 @@
+/* MSM_FIXES_V10 */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InvoiceStatus, SellerType, TaskStatus, TaskType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -69,7 +70,7 @@ export class InvoicesService {
           body.fileId;
 
         if (
-          latest.number === body.number &&
+          latest.number === (body.number?.trim() || 'Ожидает проверки') &&
           sameAmount &&
           sameFile
         ) {
@@ -78,14 +79,13 @@ export class InvoicesService {
       }
 
       await tx.clientInvoice.updateMany({ where: { dealId, isCurrent: true }, data: { isCurrent: false } });
-
       const invoice = await tx.clientInvoice.create({
         data: {
           dealId,
           sellerType: deal.sellerType as SellerType,
-          number: body.number,
+          number: body.number?.trim() || 'Ожидает проверки',
           invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : undefined,
-          amount: body.amount,
+          amount: null,
           fileId: body.fileId,
           version: (latest?.version ?? 0) + 1,
           isCurrent: true,
@@ -211,6 +211,27 @@ export class InvoicesService {
   }
 
 
+  async reviewDetails(dealId: string, invoiceId: string, body: {actorId: string; number: string; amount: number}) {
+    const number = (body.number || '').trim();
+    const amount = Number(body.amount);
+    if (!number || number === 'Ожидает проверки' || !Number.isFinite(amount) || amount <= 0)
+      throw new BadRequestException('Укажите корректный номер и сумму счёта');
+    return this.prisma.$transaction(async tx => {
+      const actor = await tx.user.findUnique({where:{id:body.actorId},select:{role:true}});
+      if (!actor || !['MANAGER','LEADER','ADMIN'].includes(String(actor.role)))
+        throw new BadRequestException('Реквизиты подтверждает менеджер или руководитель');
+      const invoice = await tx.clientInvoice.findFirstOrThrow({where:{id:invoiceId,dealId}});
+      if (!invoice.isCurrent || invoice.status !== InvoiceStatus.WAITING_MANAGER_REVIEW)
+        throw new BadRequestException('Изменять реквизиты можно до подтверждения текущего счёта');
+      const result = await tx.clientInvoice.update({where:{id:invoiceId},data:{number,amount}});
+      await tx.auditEvent.create({data:{dealId,actorId:body.actorId,action:'INVOICE_DETAILS_REVIEWED',
+        entityType:'ClientInvoice',entityId:invoiceId,
+        oldValue:{number:invoice.number,amount:invoice.amount?.toString() ?? null},
+        newValue:{number,amount:String(amount)}}});
+      return result;
+    });
+  }
+
   async confirm(dealId: string, invoiceId: string, actorId: string) {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
@@ -219,6 +240,12 @@ export class InvoicesService {
       if (invoice.status !== InvoiceStatus.WAITING_MANAGER_REVIEW) {
         throw new BadRequestException('Счёт уже прошёл проверку менеджера');
       }
+      const reviewer = await tx.user.findUnique({where:{id:actorId},select:{role:true}});
+      if (!reviewer || !['MANAGER','LEADER','ADMIN'].includes(String(reviewer.role)))
+        throw new BadRequestException('Подтвердить счёт может менеджер или руководитель');
+      const verified = await tx.auditEvent.findFirst({where:{dealId,entityType:'ClientInvoice',entityId:invoiceId,action:'INVOICE_DETAILS_REVIEWED'}});
+      if (!verified || !invoice.number?.trim() || invoice.number === 'Ожидает проверки' || invoice.amount == null || Number(invoice.amount) <= 0)
+        throw new BadRequestException('Перед подтверждением проверьте и сохраните номер и сумму счёта');
 
       const updated = await tx.clientInvoice.update({
         where: { id: invoiceId },

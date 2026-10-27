@@ -316,6 +316,9 @@ export function auditLabel(
     SUPPLIER_PURCHASE_UPDATED:
       'Изменены данные входящего счёта',
 
+    SUPPLIER_PAYMENT_DRAFT_EDITED:
+      'Изменены завод или сумма к оплате до отправки бухгалтерии',
+
     SUPPLIER_INVOICE_CHANGED:
       'Изменён входящий счёт поставщика',
 

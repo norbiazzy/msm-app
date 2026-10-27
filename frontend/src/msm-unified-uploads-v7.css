@@ -1,0 +1,78 @@
+/* MSM v7: two equal controls for real file + shared-library workflows. */
+.boShell .msmDocumentPair,
+.boShell .msmPaymentEvidenceActions,
+.boShell .msmInvoiceSplitPicker {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 12px !important;
+  align-items: start !important;
+  width: 100%;
+  min-width: 0;
+}
+.boShell .msmDocumentPair > *,
+.boShell .msmPaymentEvidenceActions > *,
+.boShell .msmInvoiceSplitPicker > * {
+  min-width: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
+  box-sizing: border-box;
+}
+/* Reuse the same control skin across the application. */
+.boShell .msmDocumentPair .fileButton,
+.boShell .msmPaymentEvidenceActions .fileButton,
+.boShell .msmInvoiceSplitPicker > .fileButton,
+.boShell .msmInvoiceSplitPicker .msmInvoiceLibraryButton {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 52px;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 12px 9px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  white-space: normal;
+  line-height: 1.25;
+  font-weight: 700;
+  cursor: pointer;
+}
+.boShell .msmDocumentPair .msmInvoiceLibraryControl,
+.boShell .msmPaymentEvidenceActions .msmInvoiceLibraryControl,
+.boShell .msmInvoiceSplitPicker .msmInvoiceLibraryControl { width: 100%; min-width: 0; }
+.boShell .msmDocumentPair .multiFilePicker,
+.boShell .msmDocumentPair .msmPickerActions,
+.boShell .msmPaymentEvidenceActions .multiFilePicker,
+.boShell .msmPaymentEvidenceActions .msmPickerActions {width: 100%; min-width: 0;}
+.boShell .msmDocumentPair .msmTaskLibrarySelection {
+  display: block !important;
+  margin: 0 !important;
+  width: 100%;
+  min-width: 0;
+}
+/* The two actions are Upload | Library. Mobile cameras stay available through the native file chooser. */
+.boShell .msmDocumentPair .msmCameraButton,
+.boShell .msmPaymentEvidenceActions .msmPaymentCamera,
+.boShell .msmPaymentEvidenceActions .msmCameraButton { display: none !important; }
+.boShell .msmDocumentPair .msmPickerActions > .fileButton { flex: 1 1 100%; }
+/* Names of selected files and upload progress live beneath the action row. */
+.boShell .msmDocumentPair .versionList,
+.boShell .msmDocumentPair .msmLibrarySelected,
+.boShell .msmPaymentEvidenceActions .versionList,
+.boShell .msmPaymentEvidenceActions .msmLibrarySelected,
+.boShell .msmInvoiceSplitPicker .versionList {min-width:0; overflow-wrap:anywhere; margin-top:10px;}
+.boShell .msmDocumentHint {display:block; color:var(--text-muted,#68766b); font-size:12px; line-height:1.5; margin-top:9px;}
+@media (max-width: 480px) {
+  .boShell .msmDocumentPair, .boShell .msmPaymentEvidenceActions,
+  .boShell .msmInvoiceSplitPicker {gap:8px !important;}
+  .boShell .msmDocumentPair .fileButton,
+  .boShell .msmPaymentEvidenceActions .fileButton,
+  .boShell .msmInvoiceSplitPicker > .fileButton,
+  .boShell .msmInvoiceSplitPicker .msmInvoiceLibraryButton {
+    min-height:46px;
+    padding:10px 6px !important;
+    font-size:12px !important;
+  }
+}
+/* The acknowledgement of a bank stamp belongs to the later evidence workflow, not to posting a payment. */

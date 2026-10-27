@@ -1,3 +1,4 @@
+/* MSM_FIXES_V10 */
 import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
 import { SellerType } from '@prisma/client';
 import { InvoicesService } from './invoices.service';
@@ -37,6 +38,12 @@ export class InvoicesController {
       );
   }
 
+
+  @Patch(':invoiceId/review-details')
+  reviewDetails(@Param('dealId') dealId: string, @Param('invoiceId') invoiceId: string,
+    @Body() body: {actorId:string;number:string;amount:number}) {
+    return this.invoices.reviewDetails(dealId, invoiceId, body);
+  }
 
   @Patch(':invoiceId/confirm')
   confirm(

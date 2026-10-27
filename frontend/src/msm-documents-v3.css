@@ -1,0 +1,10 @@
+/* MSM documents v3: library reuse in accountant tasks, responsive layouts */
+.msmTaskLibrarySelection {display:grid;gap:8px;min-width:0;margin-top:10px}
+.msmTaskLibrarySelection .msmInvoiceLibraryControl {min-width:0}
+.msmTaskLibraryHint {font-size:12px;color:var(--text-muted,#73766f);line-height:1.45}
+.msmLinkedTaskFiles {display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:9px;min-width:0}
+.msmLinkedTaskFiles a {display:inline-flex;max-width:100%;overflow-wrap:anywhere;text-decoration:none;border:1px solid #d9e3d6;background:#f3f7f1;border-radius:9px;padding:8px 10px;font-weight:600;font-size:13px;color:#316446}
+.msmLinkedTaskHint,.msmLinkedTaskWarning {display:block;font-size:12px;margin-top:7px}
+.msmLinkedTaskWarning {color:#af5e26}
+html[data-theme='dark'] .msmLinkedTaskFiles a {background:#20362c;color:#d4efd8;border-color:#375746}
+@media(max-width:720px){.msmLinkedTaskFiles a{width:100%}.msmTaskLibrarySelection button{max-width:100%}}

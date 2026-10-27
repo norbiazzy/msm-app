@@ -46,15 +46,7 @@ export function BlockOfficeMobileNav() {
       className="boMobileNav"
       aria-label="Основная навигация"
     >
-      <button
-        type="button"
-        className="boMobileEmpty"
-        aria-label="Свободная кнопка 1"
-        disabled
-      >
-        <b>·</b>
-        <span>&nbsp;</span>
-      </button>
+      <a href="#files"><b>▤</b><span>Файлы</span></a>
 
       <button
         type="button"

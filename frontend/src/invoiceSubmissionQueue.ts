@@ -1,6 +1,7 @@
 import {
   createInvoice,
 } from './api';
+import { linkLibraryFile } from './LibraryFileChooser';
 
 import {
   startBackgroundUploadJob,
@@ -27,6 +28,7 @@ type PendingInvoiceSubmission = {
   fileCount: number;
   uploadedFileIds:
     Array<string | null>;
+  linkedFileId?: string;
 };
 
 
@@ -39,6 +41,7 @@ type StartInvoiceSubmissionInput = {
   invoiceDate: string;
   actorId: string;
   files: File[];
+  linkedFileId?: string;
 };
 
 
@@ -302,6 +305,9 @@ function startPendingJob(
 
         setProgress(94);
 
+        if (pending.linkedFileId) {
+          await linkLibraryFile(pending.linkedFileId, pending.dealId, pending.taskId, actorId);
+        }
 
         await createInvoice(
           pending.dealId,
@@ -317,7 +323,7 @@ function startPendingJob(
               pending.invoiceDate,
 
             fileId:
-              uploadedFileIds[0] ||
+              pending.linkedFileId || uploadedFileIds[0] ||
               undefined,
 
             actorId,
@@ -379,6 +385,7 @@ export async function startInvoiceSubmission(
       invoiceDate:
         input.invoiceDate,
 
+      linkedFileId: input.linkedFileId,
       fileCount:
         input.files.length,
 

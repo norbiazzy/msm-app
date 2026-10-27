@@ -1,0 +1,8 @@
+/* MSM_DOCUMENT_FLOW_V9: a single pair per form, two equal-width actions. */
+.boShell .msmV9Documents, .boShell .msmV9Documents .msmUnifiedPicker { width:100%; min-width:0; max-width:none; }
+.boShell .msmV9Documents .msmUnifiedFileActions { display:grid!important; grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important; gap:12px; }
+.boShell .msmV9Documents .msmUnifiedFileActions > * { width:100%;min-width:0; }
+.boShell .msmV9Documents .msmUnifiedFileActions .fileButton,
+.boShell .msmV9Documents .msmUnifiedFileActions .msmInvoiceLibraryButton { width:100%!important;min-width:0!important;max-width:none!important;min-height:52px!important;display:flex!important;align-items:center;justify-content:center;white-space:normal; }
+.boShell .msmV9LegacyNotice {display:block;margin-top:8px;color:#886b35;line-height:1.4}
+@media(max-width:480px) { .boShell .msmV9Documents .msmUnifiedFileActions {gap:8px!important} .boShell .msmV9Documents .msmUnifiedFileActions .fileButton,.boShell .msmV9Documents .msmUnifiedFileActions .msmInvoiceLibraryButton {min-height:46px!important;font-size:12px!important} }

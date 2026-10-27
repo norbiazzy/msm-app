@@ -1,0 +1,12 @@
+.msmRecognition{margin:14px 0 0;padding:12px;background:#fff;border:1px solid #e1e5dc;border-radius:14px;color:#20251d}
+.msmRecognitionHeading{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px;font-size:15px}
+.msmRecognitionHeading span{color:#70786a;font-size:12px}
+.msmRecognitionScroll{overflow-x:auto}.msmRecognition table{width:100%;border-collapse:collapse;text-align:left;font-size:13px;min-width:500px}
+.msmRecognition th{background:#f3f5f7;color:#5c6876;font-size:12px;font-weight:500}
+.msmRecognition th,.msmRecognition td{padding:10px;border-bottom:1px solid #e9ecef}
+.msmRecognition td:nth-child(n+2),.msmRecognition th:nth-child(n+2){white-space:nowrap}
+.msmRecognitionTotal{margin-top:10px;text-align:right}
+.msmRecognitionPending,.msmRecognitionCompact{font-size:13px;margin-top:9px;padding:9px 11px;background:#f4f6f0;border-radius:9px}
+.msmRecognitionWarning{color:#a74f26;background:#fff4e9;padding:8px 10px;border-radius:8px;margin-top:7px;font-size:13px}
+.msmRecognitionOk{color:#42632b;font-weight:650}
+.msmRecognitionCompact small{color:#727d70;display:block;margin-top:4px}

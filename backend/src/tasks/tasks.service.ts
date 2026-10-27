@@ -605,7 +605,8 @@ tx.task.update({
   async completePowerOfAttorney(id: string,
     actorId: string,
     poaNumber?: string,
-    accountantComment?: string) {
+    accountantComment?: string,
+    libraryResultFileId?: string) {
 
 
     /* PART_V062_POA_COMPLETE_SERVICE */
@@ -684,10 +685,21 @@ return this.prisma.$transaction(
           });
 
 
-        if (!resultFile) {
-          throw new BadRequestException(
-            'Прикрепите готовую доверенность',
-          );
+        // A reused original belongs to FilePoolLink rather than the
+        // legacy POWER_OF_ATTORNEY_RESULT_* category. Validate the EXACT
+        // chosen file for this task, never any arbitrary task attachment.
+        const libraryResult = libraryResultFileId
+          ? await tx.filePoolLink.findFirst({
+              where: { fileId: libraryResultFileId, dealId: task.dealId, taskId: task.id },
+              include: { file: { select: { id: true, originalName: true } } },
+            })
+          : null;
+        if (libraryResultFileId &&
+            (!libraryResult || !/\.(pdf|jpg|jpeg|png|webp)$/i.test(libraryResult.file.originalName))) {
+          throw new BadRequestException('Выбранный файл библиотеки не привязан к этой задаче или имеет неподходящий формат');
+        }
+        if (!resultFile && !libraryResult) {
+          throw new BadRequestException('Прикрепите готовую доверенность');
         }
 
 

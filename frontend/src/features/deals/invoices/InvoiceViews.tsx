@@ -1,13 +1,16 @@
 import { money, sellerLabels } from '../../../shared/formatters';
 import { dealFileUrl } from '../../../api';
+import { RecognitionAudit } from '../../../RecognitionAudit';
 import type { Invoice, SellerType } from '../../../types';
 
 export function InvoiceBlock({
   invoice,
   sellerType,
+  showRecognition = false,
 }: {
   invoice: Invoice;
   sellerType: SellerType;
+  showRecognition?: boolean;
 }) {
 
   return (
@@ -103,6 +106,9 @@ export function InvoiceBlock({
         </a>
 
       )}
+
+      {showRecognition && (invoice.fileId || invoice.file?.id) &&
+        <RecognitionAudit fileId={(invoice.fileId || invoice.file!.id)} expectedNumber={invoice.number} expectedAmount={invoice.amount} />}
 
     </div>
   );

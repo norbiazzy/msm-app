@@ -1,0 +1,15 @@
+.msmRecognitionAudit { min-width: 0; width: 100%; }
+.msmRecognitionAuditWarnings {
+  margin: 8px 0 12px; padding: 10px 12px; border: 1px solid #e6ad53;
+  background: #fff8e8; border-radius: 9px; color: #5e431c;
+  font-size: 13px; line-height: 1.5;
+}
+.msmRecognitionAuditWarnings strong { display: block; margin-bottom: 6px; }
+.msmRecognitionAuditWarnings p { margin: 4px 0; }
+.msmRecognitionAuditWarnings small { display: block; margin-top: 6px; opacity: .85; }
+html[data-theme='dark'] .msmRecognitionAuditWarnings {
+  background: #382e20; border-color: #82602e; color: #ffdfaa;
+}
+.msmLinkedTaskFile { min-width: 0; display: grid; gap: 7px; }
+.msmLinkedTaskFile > a { overflow-wrap: anywhere; }
+@media(max-width: 720px) { .msmRecognitionAuditWarnings { padding: 10px; } }

@@ -1,7 +1,8 @@
+/* MSM_DOCUMENT_FLOW_V9 */
+import { ManagerDocumentPicker } from '../../DocumentPickerV9';
 import { type FormEvent, useState } from 'react';
 import { Field } from '../../shared/Field';
 import { sellerLabels } from '../../shared/formatters';
-import { SingleFilePicker } from '../../MultiFilePicker';
 import { startBackgroundUploadJob } from '../../backgroundUploads';
 import { createDeal, submitInvoiceRequest } from '../../api';
 import type { CurrentUser, SellerType } from '../../types';
@@ -58,70 +59,6 @@ export function NewDealForm({ user, onCancel, onCreated }: { user: CurrentUser; 
     useState('');
 
 
-  function addAttachments(
-    files:
-      FileList | null,
-  ) {
-
-    if (!files) return;
-
-
-    const newFiles =
-      Array.from(files);
-
-
-    setAttachments(
-      (current) => {
-
-        const combined = [
-          ...current,
-          ...newFiles,
-        ];
-
-
-        return combined.filter(
-          (
-            file,
-            index,
-            all,
-          ) =>
-
-            all.findIndex(
-              (candidate) =>
-
-                candidate.name ===
-                  file.name &&
-
-                candidate.size ===
-                  file.size &&
-
-                candidate.lastModified ===
-                  file.lastModified
-
-            ) === index
-        );
-      }
-    );
-  }
-
-
-  function removeAttachment(
-    index: number,
-  ) {
-
-    setAttachments(
-      (current) =>
-
-        current.filter(
-          (_, fileIndex) =>
-            fileIndex !==
-            index
-        )
-    );
-  }
-
-
-  
 async function submit(
     e: FormEvent,
   ) {
@@ -434,128 +371,11 @@ async function submit(
       </Field>
 
 
-      <Field title="Входящий счёт заказчика · если есть">
-
-        <SingleFilePicker
-          file={incomingInvoice}
-          onChange={setIncomingInvoice}
-          title="+ Прикрепить входящий счёт"
-          accept="application/pdf,image/*"
-        />
-
+      <Field title="Документы">
+        <ManagerDocumentPicker primaryFile={incomingInvoice} onPrimaryChange={setIncomingInvoice} files={attachments} onChange={setAttachments} />
       </Field>
-
-
-      <Field title="Документы / реквизиты">
-
-        <div>
-
-          <label className="fileButton">
-
-            {
-              attachments.length
-                ? '+ Прикрепить ещё'
-                : '+ Прикрепить файлы'
-            }
-
-
-            <input
-              type="file"
-              multiple
-
-              style={{
-                display: 'none',
-              }}
-
-              onChange={(e) => {
-
-                addAttachments(
-                  e.target.files
-                );
-
-                e.currentTarget.value =
-                  '';
-              }}
-            />
-
-          </label>
-
-
-          {
-            attachments.length >
-              0 && (
-
-            <div className="versionList">
-
-              {attachments.map(
-                (
-                  attachment,
-                  index,
-                ) => (
-
-                <div
-                  className="versionRow"
-
-                  key={
-                    attachment.name +
-                    attachment.size +
-                    attachment.lastModified
-                  }
-                >
-
-                  <div>
-
-                    <b>
-                      {
-                        attachment.name
-                      }
-                    </b>
-
-                    <span>
-                      {
-                        (
-                          attachment.size /
-                          1024 /
-                          1024
-                        ).toFixed(2)
-                      } МБ
-                    </span>
-
-                  </div>
-
-
-                  <button
-                    type="button"
-                    className="secondary"
-
-                    onClick={() =>
-                      removeAttachment(
-                        index
-                      )
-                    }
-                  >
-                    Удалить
-                  </button>
-
-                </div>
-
-              ))}
-
-            </div>
-
-          )}
-
-
-          <div className="microcopy">
-
-            Здесь можно добавить спецификации, фото и другие документы.
-            Сам входящий счёт прикрепляется отдельным полем выше.
-
-          </div>
-
-        </div>
-
-      </Field>
+      {/* MSM_UNIFIED_ATTACHMENTS_V8_NEW_DEAL */}
+      
 
 
       <Field

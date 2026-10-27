@@ -1,4 +1,5 @@
 import { TasksView } from './features/tasks/TasksView';
+import { FilesLibrary } from './FilesLibrary';
 import { DealDetail } from './features/deals/DealDetail';
 import { NewDealForm } from './features/deals/NewDealForm';
 import { paymentStatusLabel, roleName, sellerLabels, statusLabel, taskStatus } from './shared/formatters';
@@ -11,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { listDeals, login } from './api';
 import type { CurrentUser, Deal } from './types';
 
-type View = 'home' | 'new' | 'tasks' | 'deal';
+type View = 'home' | 'new' | 'tasks' | 'deal' | 'files';
 
 function readRoute(): { view: View; dealId?: string } {
   const hash = window.location.hash.replace(/^#/, '');
@@ -19,6 +20,8 @@ function readRoute(): { view: View; dealId?: string } {
   if (hash === 'new') {
     return { view: 'new' };
   }
+
+  if (hash === 'files') return { view: 'files' };
 
   if (hash === 'tasks' || hash.startsWith('tasks/')) {
     return { view: 'tasks' };
@@ -59,6 +62,7 @@ function App() {
     );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [msmLibraryAvailable, setMsmLibraryAvailable] = useState(false);
 
   async function reload(currentUser = user) {
     if (!currentUser) return;
@@ -157,15 +161,28 @@ function App() {
   }, [user?.id, user?.role]);
 
 
+  useEffect(() => {
+    let live = true;
+    void fetch((import.meta.env.VITE_API_URL || '/api') + '/file-library')
+      .then(response => { if (live && response.ok) setMsmLibraryAvailable(true); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
   if (loading) return <ScreenMessage>Загрузка…</ScreenMessage>;
   if (error || !user) return <ScreenMessage>Не удалось запустить приложение: {error}</ScreenMessage>;
 
-  const title = view === 'new' ? 'Новый запрос на счёт' : view === 'tasks' ? 'Задачи' : view === 'deal' ? 'Сделка' : 'Мои сделки';
+  const title = view === 'new' ? 'Новый запрос на счёт' : view === 'tasks' ? 'Задачи' : view === 'deal' ? 'Сделка' : view === 'files' ? 'Файлы' : 'Мои сделки';
 
   return (
     <main className={'shell boShell boView-' + view}>
       <header className="topbar">
         <div><div className="eyebrow">МСМ · Telegram Mini App</div><h1>{title}</h1></div>
+        <nav className="msmDesktopNav" aria-label="Разделы приложения">
+          <button type="button" className={view === 'home' || view === 'deal' ? 'active' : ''} onClick={() => navigate('home')}>Сделки</button>
+          <button type="button" className={view === 'tasks' ? 'active' : ''} onClick={() => navigate('tasks')}>Задачи</button>
+          {msmLibraryAvailable && <a className={window.location.hash.startsWith('#files') ? 'active' : ''} href="#files">Файлы</a>}
+        </nav>
         <div className="topbarActions">
           <ThemeToggle />
           <div className="userBadge">{user.firstName}<span>{roleName(user.role)}</span></div>
@@ -180,6 +197,8 @@ function App() {
         />
       ) : view === 'tasks' ? (
         <TasksView user={user} onChanged={() => reload()} />
+      ) : view === 'files' ? (
+        <FilesLibrary user={user} deals={deals} />
       ) : view === 'deal' && selectedDealId ? (
         <DealDetail
           dealId={selectedDealId}
@@ -206,6 +225,7 @@ function App() {
       <nav className="bottomNav">
         <button className={view === 'home' || view === 'deal' ? 'active' : ''} onClick={() => navigate('home')}>Сделки</button>
         <button className={view === 'tasks' ? 'active' : ''} onClick={() => navigate('tasks')}>Задачи</button>
+        <button className={view === 'files' ? 'active' : ''} onClick={() => navigate('files')}>Файлы</button>
         <button disabled>Месяц</button>
       </nav>
     

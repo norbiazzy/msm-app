@@ -9,6 +9,7 @@ export function DealStageControl({ deal, user, onChanged }: { deal: Deal; user: 
   const [stage, setStage] = useState<DealStage>(visibleDealStage(deal));
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [msmStageExpanded, setMsmStageExpanded] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { setManual(deal.workflowMode === 'MANUAL'); setStage(visibleDealStage(deal)); setReason(''); }, [deal.workflowMode, deal.workflowStage, deal.invoices, deal.tasks]);
   const allowed = user.role === 'ADMIN' || user.role === 'LEADER' || (user.role === 'MANAGER' && deal.managerId === user.id);
@@ -18,6 +19,7 @@ export function DealStageControl({ deal, user, onChanged }: { deal: Deal; user: 
     try {
       await updateDealWorkflowStage(deal.id, { actorId: user.id, mode, stage: mode === 'MANUAL' ? next : undefined, reason: reason.trim() || undefined });
       await onChanged();
+      setMsmStageExpanded(false);
     } catch(e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setSaving(false); }
   }
@@ -25,8 +27,9 @@ export function DealStageControl({ deal, user, onChanged }: { deal: Deal; user: 
   return (
     <section className="msmDealStage" aria-label="Этап сделки">
       <div className="msmDealStageTop"><div><small>Этап сделки</small><strong>{dealStageOptions.find(s => s.value === current)?.label}</strong></div>
-        <span>{deal.workflowMode === 'MANUAL' ? 'Вручную' : 'Авто'}</span></div>
-      {allowed && <div className="msmDealStageControls">
+        <span>{deal.workflowMode === 'MANUAL' ? 'Вручную' : 'Авто'}</span>
+        {allowed && <button type="button" className="msmStageToggle" aria-expanded={msmStageExpanded} onClick={() => setMsmStageExpanded(value => !value)}>{msmStageExpanded ? 'Скрыть настройки' : 'Изменить этап'}</button>}</div>
+      {allowed && msmStageExpanded && <div className="msmDealStageControls">
         <label><input type="checkbox" checked={!manual} onChange={e => { setManual(!e.target.checked); setReason(''); }} /> Автоматический режим</label>
         {manual && <label>Установить этап
           <select value={stage} onChange={e => {setStage(e.target.value as DealStage);setReason('');}}>

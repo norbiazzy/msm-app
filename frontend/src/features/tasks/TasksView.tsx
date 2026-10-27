@@ -1,9 +1,13 @@
+/* MSM_FIXES_V10 */
+/* MSM_DOCUMENT_FLOW_V9 */
+import { AccountantDocumentPicker } from '../../DocumentPickerV9';
 import { useEffect, useMemo, useState } from 'react';
 import type { CurrentUser } from '../../types';
 import { type Task, dealFileUrl, listTasks, returnInvoiceRequest, updateTaskStatus } from '../../api';
 import { useBackgroundUploads } from '../../backgroundUploads';
 import { clearInvoiceTaskDraft, loadInvoiceTaskDraftFiles, readInvoiceTaskDraftFields, saveInvoiceTaskDraftFields, saveInvoiceTaskDraftFiles } from '../../invoiceTaskDraft';
 import { startInvoiceSubmission } from '../../invoiceSubmissionQueue';
+import { LibraryFileChooser, type LibrarySelection } from '../../LibraryFileChooser';
 import { EtrnSourceDocuments } from '../../EtrnSourceDocuments';
 import { TaskDataSection } from '../../TaskDataSection';
 import { TaskWorkSection } from '../../TaskWorkSection';
@@ -16,6 +20,7 @@ import { ManagerResubmitPanel } from '../../ManagerResubmitPanel';
 import { TaskStructuredFields } from '../../TaskStructuredFields';
 import { InvoiceRequestDataCard, InvoiceRequestManagerRepair } from '../../InvoiceRequestTaskPanel';
 import { TaskDocuments } from '../../TaskDocuments';
+import { TaskPoolAttachments } from '../../FilesLibrary';
 import { formatMoneyInput, parseMoneyInput, sellerLabels, taskStatus, todayLocalDate } from '../../shared/formatters';
 import { Field } from '../../shared/Field';
 
@@ -1064,6 +1069,8 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     invoiceFiles,
     setInvoiceFiles,
   ] = useState<File[]>([]);
+  const [msmInvoiceLibraryFile, setMsmInvoiceLibraryFile] = useState<LibrarySelection | null>(null);
+  useEffect(() => { setMsmInvoiceLibraryFile(null); }, [task.id]);
 
   const [
     invoiceDraftReady,
@@ -1230,68 +1237,6 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
 
 
-  function addInvoiceFiles(
-    files:
-      FileList | null,
-  ) {
-
-    if (!files) return;
-
-
-    const selected =
-      Array.from(files);
-
-
-    setInvoiceFiles(
-      (current) => {
-
-        const combined = [
-          ...current,
-          ...selected,
-        ];
-
-
-        return combined.filter(
-          (
-            file,
-            index,
-            all,
-          ) =>
-
-            all.findIndex(
-              (candidate) =>
-
-                candidate.name ===
-                  file.name &&
-
-                candidate.size ===
-                  file.size &&
-
-                candidate.lastModified ===
-                  file.lastModified
-
-            ) === index
-        );
-      }
-    );
-  }
-
-
-  function removeInvoiceFile(
-    index: number,
-  ) {
-
-    setInvoiceFiles(
-      (current) =>
-        current.filter(
-          (_, fileIndex) =>
-            fileIndex !==
-            index
-        )
-    );
-  }
-
-
   async function take() {
 
     setSaving(true);
@@ -1395,11 +1340,11 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     setError('');
 
 
-    const filesToUpload =
-      [...invoiceFiles];
+    const filesToUpload = [...invoiceFiles];
+    if (filesToUpload.length > 1) { setError('Выберите один готовый счёт. В черновике осталось несколько файлов из старой версии.'); return; }
 
 
-    if (filesToUpload.length === 0) {
+    if (filesToUpload.length === 0 && !msmInvoiceLibraryFile) {
       setError(
         'Прикрепите файл готового счёта.'
       );
@@ -1407,12 +1352,10 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
     }
 
 
-    const numberToSave =
-      number.trim();
+    const numberToSave = '';
 
 
-    const amountToSave =
-      parseMoneyInput(amount);
+    const amountToSave = undefined;
 
 
     setSaving(true);
@@ -1445,6 +1388,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
         files:
           filesToUpload,
+        linkedFileId: msmInvoiceLibraryFile?.id,
       });
 
 
@@ -1719,6 +1663,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
       {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
       <TaskContextStrip task={task} />
+        <TaskPoolAttachments taskId={task.id} dealId={task.deal.id} />
 
       {/* MSM_STEP30_ETRN_UNIFIED_LAYOUT: structured details and documents after the task header. */}
       {task.type === 'ETRN' && (
@@ -2200,146 +2145,14 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
         <TaskWorkSection
           title={task.type === 'CORRECT_CLIENT_INVOICE' ? 'Исправление готового счёта' : 'Подготовка готового счёта'}
-          description="Проверьте номер и сумму, приложите PDF готового счёта."
+          description="Приложите готовый документ. Реквизиты распознаются автоматически и проверяются менеджером."
         >
 
-          <Field title="Номер готового счёта">
-
-            <input
-              value={number}
-
-              onChange={(e) =>
-                setNumber(
-                  e.target.value
-                )
-              }
-
-              placeholder="1548"
-            />
-
-          </Field>
+          
 
 
-          <Field title="Сумма">
-
-            <input
-              inputMode="decimal"
-
-              value={amount}
-
-              onChange={(e) =>
-                setAmount(
-                  formatMoneyInput(
-                    e.target.value
-                  )
-                )
-              }
-
-              placeholder="420 000"
-            />
-
-          </Field>
-
-
-          <Field title="Файлы готового счёта">
-
-            <div>
-
-              <label className="fileButton">
-
-                {
-                  invoiceFiles.length
-                    ? '+ Прикрепить ещё'
-                    : '+ Прикрепить файлы'
-                }
-
-
-                <input
-                  type="file"
-                  multiple
-
-                  style={{
-                    display: 'none',
-                  }}
-
-                  onChange={(e) => {
-
-                    addInvoiceFiles(
-                      e.target.files
-                    );
-
-                    e.currentTarget.value =
-                      '';
-                  }}
-                />
-
-              </label>
-
-
-              {invoiceFiles.length > 0 && (
-
-                <div className="versionList">
-
-                  {invoiceFiles.map(
-                    (
-                      invoiceFile,
-                      index,
-                    ) => (
-
-                    <div
-                      className="versionRow"
-
-                      key={
-                        invoiceFile.name +
-                        invoiceFile.size +
-                        invoiceFile.lastModified
-                      }
-                    >
-
-                      <div>
-
-                        <b>
-                          {
-                            invoiceFile.name
-                          }
-                        </b>
-
-                        <span>
-                          {
-                            (
-                              invoiceFile.size /
-                              1024 /
-                              1024
-                            ).toFixed(2)
-                          } МБ
-                        </span>
-
-                      </div>
-
-
-                      <button
-                        type="button"
-                        className="secondary"
-
-                        onClick={() =>
-                          removeInvoiceFile(
-                            index
-                          )
-                        }
-                      >
-                        Удалить
-                      </button>
-
-                    </div>
-
-                  ))}
-
-                </div>
-
-              )}
-
-            </div>
-
+          <Field title="Готовый счёт">
+            <AccountantDocumentPicker files={invoiceFiles} onChange={setInvoiceFiles} accept="application/pdf,image/*,.xml" />
           </Field>
 
 

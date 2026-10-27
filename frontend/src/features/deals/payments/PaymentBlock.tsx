@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Field } from '../../../shared/Field';
 import { formatMoneyInput, money, parseMoneyInput, paymentMethodLabel } from '../../../shared/formatters';
-import { SingleFilePicker } from '../../../MultiFilePicker';
+import { PaymentEvidencePicker } from '../../../PaymentEvidencePicker';
+import { linkLibraryFile, type LibrarySelection } from '../../../LibraryFileChooser';
 import { startBackgroundUploadJob } from '../../../backgroundUploads';
 import { addClientPayment, dealFileUrl, updatePaymentStatus } from '../../../api';
 import { clientPaymentSummary, paymentTermsStatus } from '../../../clientPaymentSummary';
@@ -23,9 +24,12 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
   const [deferralTerms, setDeferralTerms] = useState(deal.deferralTerms || '');
   const [amount, setAmount] = useState('');
   const [paidAt, setPaidAt] = useState(localToday());
-  const [method, setMethod] = useState<ClientPaymentMethod>('NONCASH');
+  const [method, setMethod] = useState<ClientPaymentMethod>(deal.sellerType === 'ST' ? 'CASH' : 'NONCASH');
   const [comment, setComment] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [msmPaymentLibraryFile, setMsmPaymentLibraryFile] = useState<LibrarySelection | null>(null);
+  const [msmCashHolder, setMsmCashHolder] = useState<'DRIVER' | 'MANAGER' | ''>('');
+  const [msmCashPerson, setMsmCashPerson] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -35,6 +39,9 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
     setDeferralEndAt(deal.deferralEndAt?.slice(0, 10) || '');
     setDeferralTerms(deal.deferralTerms || '');
   }, [deal.paymentStatus, deal.deferralStartAt, deal.deferralEndAt, deal.deferralTerms]);
+
+  useEffect(() => { setMethod(deal.sellerType === 'ST' ? 'CASH' : 'NONCASH'); }, [deal.sellerType]);
+  useEffect(() => { if (!adding) { setMsmPaymentLibraryFile(null); setMsmCashHolder(''); setMsmCashPerson(''); } }, [adding]);
 
   const overview = clientPaymentSummary(deal);
   const payments = [...(deal.clientPayments || [])].sort((a, b) =>
@@ -74,8 +81,28 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
     }
     const paidAtToSave = paidAt;
     const methodToSave = method;
-    const commentToSave = comment.trim() || undefined;
+    // Cash custody is recorded in the existing comment history in this UI-only version.
+    const cashCustodyNote = deal.sellerType === 'ST' && (method === 'CASH' || method === 'ADVANCE') && msmCashHolder
+      ? 'Наличные у: ' + (msmCashHolder === 'DRIVER' ? 'водитель' : 'менеджер') + (msmCashPerson.trim() ? ' (' + msmCashPerson.trim() + ')' : '')
+      : '';
+    const commentToSave = [comment.trim(), cashCustodyNote].filter(Boolean).join(' · ') || undefined;
     const fileToUpload = file;
+    const linkedProofId = msmPaymentLibraryFile?.id;
+
+    if (linkedProofId) {
+      setSaving(true);
+      try {
+        await linkLibraryFile(linkedProofId, deal.id, undefined, user.id);
+        await addClientPayment(deal.id, {
+          amount: amountToSave, paidAt: paidAtToSave, method: methodToSave,
+          comment: commentToSave, actorId: user.id, fileId: linkedProofId,
+        });
+        setAmount(''); setComment(''); setFile(null); setAdding(false);
+        await onChanged();
+      } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+      finally { setSaving(false); }
+      return;
+    }
 
     if (fileToUpload) {
       startBackgroundUploadJob({
@@ -158,8 +185,8 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
           <p>«Аванс», «Частично оплачено» и «Оплачено» определяются по зарегистрированным поступлениям.</p>
           <Field title="Условия оплаты">
             <select value={status} onChange={(e) => setStatus(e.target.value as TermsStatus)}>
-              <option value="NO_PREPAYMENT">Без предоплаты</option>
-              <option value="WAITING">Ожидаем оплату</option>
+              <option value="NO_PREPAYMENT">По факту / без предоплаты</option>
+              <option value="WAITING">Предоплата / ожидаем перевод</option>
               <option value="DEFERRED">Отсрочка</option>
             </select>
           </Field>
@@ -187,11 +214,31 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
             <Field title="Дата поступления"><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
           </div>
           <Field title="Способ оплаты"><select value={method} onChange={(e) => setMethod(e.target.value as ClientPaymentMethod)}>
-            <option value="NONCASH">Безналичный перевод</option><option value="CASH">Наличные</option>
-            <option value="CARD">Карта</option><option value="ADVANCE">Авансовый платёж</option>
+            {deal.sellerType === 'ST' ? <>
+              <option value="CASH">Оплата наличными</option>
+              <option value="ADVANCE">Аванс наличными</option>
+            </> : <>
+              <option value="NONCASH">Безналичный перевод</option>
+              <option value="CASH">Наличные (фактическое поступление)</option>
+              <option value="CARD">Карта</option>
+              <option value="ADVANCE">Авансовый платёж</option>
+            </>}
           </select></Field>
+          {deal.sellerType === 'ST' && (method === 'CASH' || method === 'ADVANCE') && <div className="msmCashHolderPanel">
+            <Field title="У кого наличные"><select value={msmCashHolder} onChange={e => setMsmCashHolder(e.target.value as 'DRIVER' | 'MANAGER' | '')}>
+              <option value="">Пока не указано</option>
+              <option value="DRIVER">У водителя</option>
+              <option value="MANAGER">У менеджера</option>
+            </select></Field>
+            {msmCashHolder && <Field title="ФИО (необязательно)"><input value={msmCashPerson} onChange={e => setMsmCashPerson(e.target.value)} placeholder="У кого находятся деньги" /></Field>}
+            <p className="msmPayHelper">В этой версии отметка о хранителе наличных сохраняется в комментарии к поступлению.</p>
+          </div>}
+          {deal.sellerType !== 'ST' && <p className="msmPayHelper">Это учёт фактически полученных денег. Залог наличными, ещё не зачтённый в оплату, сюда не вносите — для залогов будет отдельный учёт.</p>}
           <Field title="Комментарий"><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: частичная оплата по счёту" /></Field>
-          <Field title="Подтверждение оплаты"><SingleFilePicker file={file} onChange={setFile} title="+ Прикрепить подтверждение" accept="application/pdf,image/*" /></Field>
+          <div className="field">
+            <span>Подтверждение оплаты</span>
+            <PaymentEvidencePicker file={file} onFileChange={setFile} libraryFile={msmPaymentLibraryFile} onLibraryChange={setMsmPaymentLibraryFile} />
+          </div>
           <div className="clientPayEditorActions">
             <button className="secondary" type="button" disabled={saving} onClick={() => setAdding(false)}>Отмена</button>
             <button className="primary" type="button" disabled={saving} onClick={addPayment}>{saving ? 'Сохраняем…' : 'Сохранить поступление'}</button>

@@ -1,7 +1,14 @@
+/* MSM_FIXES_V10 */
 import type { SupplierPayment, SupplierPurchase } from './types';
 import type { ClientPayment, ClientPaymentMethod, CurrentUser, Deal, PaymentStatus, UserRole } from './types';
 
 const API = import.meta.env.VITE_API_URL || '/api';
+
+export async function getDocumentRecognition(fileId: string): Promise<unknown> {
+  const response = await fetch(`${API}/files/${encodeURIComponent(fileId)}/recognition`);
+  if (!response.ok) throw new Error('Не удалось получить результат распознавания');
+  return response.json();
+}
 
 const CURRENT_USER_CACHE_KEY =
   'msm.current-user.v1';
@@ -161,6 +168,27 @@ export function uploadDealFileWithProgress(
     percent: number
   ) => void,
 ): Promise<{ id: string }> {
+
+  // MSM_UNIFIED_ATTACHMENTS_V8_API: reuse the original bytes; only link its metadata.
+  if (file.type === 'application/x-msm-library-reference') {
+    return file.text().then(async contents => {
+      let reference: { fileId?: string };
+      try { reference = JSON.parse(contents); }
+      catch { throw new Error('Повреждена ссылка на документ из библиотеки'); }
+      if (!reference.fileId || typeof reference.fileId !== 'string') {
+        throw new Error('Не указан идентификатор файла из библиотеки');
+      }
+      const reply = await fetch(`${API}/files/deal/${encodeURIComponent(dealId)}/from-library`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ fileId: reference.fileId, category }),
+      });
+      if (!reply.ok) throw new Error('Не удалось прикрепить файл из библиотеки: ' + await reply.text());
+      const payload = await reply.json() as { id: string };
+      onProgress?.(100);
+      return payload;
+    });
+  }
 
   return new Promise(
     (
@@ -426,6 +454,7 @@ export async function updateSupplierPurchase(
   dealId: string,
   purchaseId: string,
   payload: {
+    requestedAmount?: number; // MSM_PURCHASE_DRAFT_EDIT_V11
     supplierName?: string;
     incomingInvoiceAmount?: number;
     comment?: string;
@@ -764,8 +793,9 @@ export async function completePowerOfAttorneyTask(
   /* PART_V062_POA_COMPLETE_META */
   payload: {
     actorId: string;
-    poaNumber: string;
+    poaNumber?: string;
     accountantComment?: string;
+    libraryResultFileId?: string;
   },
 ) {
   return json(
@@ -870,4 +900,13 @@ export async function resubmitSupplierPaymentTask(
         ),
     },
   );
+}
+
+export async function reviewInvoiceDetails(dealId: string, invoiceId: string, payload: { number: string; amount: number; actorId: string }) {
+  return json(`/deals/${encodeURIComponent(dealId)}/invoices/${encodeURIComponent(invoiceId)}/review-details`, {
+    method: 'PATCH', body: JSON.stringify(payload),
+  });
+}
+export async function retryDocumentRecognition(fileId: string): Promise<unknown> {
+  return json(`/files/${encodeURIComponent(fileId)}/recognition/retry`, { method: 'POST' });
 }
