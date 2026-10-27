@@ -20,7 +20,6 @@ import { ManagerResubmitPanel } from '../../ManagerResubmitPanel';
 import { TaskStructuredFields } from '../../TaskStructuredFields';
 import { InvoiceRequestDataCard, InvoiceRequestManagerRepair } from '../../InvoiceRequestTaskPanel';
 import { TaskDocuments } from '../../TaskDocuments';
-import { TaskPoolAttachments } from '../../FilesLibrary';
 import { formatMoneyInput, parseMoneyInput, sellerLabels, taskStatus, todayLocalDate } from '../../shared/formatters';
 import { Field } from '../../shared/Field';
 
@@ -1663,7 +1662,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
       {/* PART_V064_L_GENERIC_TASK_CONTEXT */}
       <TaskContextStrip task={task} />
-        <TaskPoolAttachments taskId={task.id} dealId={task.deal.id} />
+        
 
       {/* MSM_STEP30_ETRN_UNIFIED_LAYOUT: structured details and documents after the task header. */}
       {task.type === 'ETRN' && (

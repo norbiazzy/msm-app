@@ -27,28 +27,22 @@ function useExternalLibrary() {
 }
 
 function DocumentActions({
-  input, camera, label, selected, onSelected, external,
+  input, label, selected, onSelected, external,
 }: {
   input: RefObject<HTMLInputElement | null>;
-  camera: RefObject<HTMLInputElement | null>;
   label: string;
   selected: LibrarySelection | null;
   onSelected: (item: LibrarySelection | null) => void;
   external: boolean;
 }) {
-  const [mobileChoice, setMobileChoice] = useState(false);
+  // MSM_V14_NATIVE_PICKER: one tap opens the operating system file chooser.
   function openUpload() {
-    if (window.matchMedia?.('(pointer: coarse)').matches) setMobileChoice(value => !value);
-    else input.current?.click();
+    input.current?.click();
   }
   return <div className="msmUnifiedFileActions">
     <div className="msmUnifiedUploadArea">
       <button type="button" className="fileButton msmUnifiedUploadButton"
-        aria-label={label} onClick={openUpload} aria-expanded={mobileChoice}>Прикрепить файл</button>
-      {mobileChoice && <div className="msmUnifiedMobileMenu" aria-label="Способ прикрепления">
-        <button type="button" onClick={() => { setMobileChoice(false);input.current?.click(); }}>Выбрать файл</button>
-        <button type="button" onClick={() => { setMobileChoice(false);camera.current?.click(); }}>Сделать фото</button>
-      </div>}
+        aria-label={label} onClick={openUpload}>Прикрепить файл</button>
     </div>
     {!external && <div className="msmUnifiedLibraryArea">
       <LibraryFileChooser
@@ -80,7 +74,6 @@ export function MultiFilePicker({
   accept?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const camera = useRef<HTMLInputElement>(null);
   const { node, external } = useExternalLibrary();
   const [selected, setSelected] = useState<LibrarySelection | null>(null);
   function add(chosen: FileList | null) {
@@ -90,7 +83,7 @@ export function MultiFilePicker({
     setSelected(null);
   }
   return <div ref={node} className="multiFilePicker msmUnifiedPicker">
-    <DocumentActions input={input} camera={camera} label={title} selected={selected} external={external}
+    <DocumentActions input={input} label={title} selected={selected} external={external}
       onSelected={item => {
         setSelected(item);
         if (!item) return;
@@ -99,9 +92,6 @@ export function MultiFilePicker({
           onChange([...files, reference]);
       }} />
     <input ref={input} type="file" multiple accept={accept} hidden onChange={event => {
-      add(event.target.files);event.currentTarget.value = '';
-    }} />
-    <input ref={camera} type="file" accept="image/*" capture="environment" multiple hidden onChange={event => {
       add(event.target.files);event.currentTarget.value = '';
     }} />
     {files.length > 0 && <div className="versionList msmUnifiedSelectedList">
@@ -123,11 +113,10 @@ export function SingleFilePicker({
   accept?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const camera = useRef<HTMLInputElement>(null);
   const { node, external } = useExternalLibrary();
   const [selected, setSelected] = useState<LibrarySelection | null>(null);
   return <div ref={node} className="multiFilePicker msmUnifiedPicker">
-    <DocumentActions input={input} camera={camera} label={title} selected={selected} external={external}
+    <DocumentActions input={input} label={title} selected={selected} external={external}
       onSelected={item => {
         setSelected(item);
         if (item) onChange(asLibraryReference(item));
@@ -136,11 +125,6 @@ export function SingleFilePicker({
     <input ref={input} type="file" accept={accept} hidden onChange={event => {
       const next = event.target.files?.[0] || null;
       if (next) { onChange(next); setSelected(null); }
-      event.currentTarget.value = '';
-    }} />
-    <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={event => {
-      const next = event.target.files?.[0] || null;
-      if (next) { onChange(next);setSelected(null); }
       event.currentTarget.value = '';
     }} />
     {file && <div className="versionList msmUnifiedSelectedList">
