@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../../AutoTextarea';
 /* MSM_DOCUMENT_FLOW_V9 */
 import { ManagerDocumentPicker } from '../../../DocumentPickerV9';
 import type { Dispatch, SetStateAction } from 'react';
@@ -77,6 +78,8 @@ export function InvoiceCorrectionPanel({
             type="button"
             className="secondary"
             disabled={saving}
+            aria-expanded={correctionOpen}
+            aria-controls="invoice-correction-editor"
             onClick={openCorrectionEditor}
           >
             Скорректировать
@@ -197,7 +200,7 @@ export function InvoiceCorrectionPanel({
       {correctionOpen &&
         current && (
 
-        <div className="correctionBox">
+        <div className="correctionBox" id="invoice-correction-editor">
 
           <div className="correctionTitle">
 
@@ -208,7 +211,7 @@ export function InvoiceCorrectionPanel({
               </strong>
 
               <span>
-                Текущий счёт {sellerLabels[current.sellerType || deal.sellerType]}-{current.number}. Новую версию выставить от {sellerLabels[correctionSellerType]}.
+                Запрос бухгалтерии на изменение документа.
               </span>
 
             </div>
@@ -216,7 +219,8 @@ export function InvoiceCorrectionPanel({
 
             <button
               type="button"
-              className="invoiceMenuClose"
+              className="invoiceMenuClose msmCorrectionClose"
+              aria-label="Закрыть корректировку"
 
               onClick={() =>
                 setCorrectionOpen(
@@ -257,7 +261,7 @@ export function InvoiceCorrectionPanel({
 
           <Field title="Что нужно изменить">
 
-            <textarea
+            <AutoTextarea
               rows={4}
 
               value={correction}

@@ -53,6 +53,7 @@ export function PurchaseDraftEditorV11({ dealId, purchase, user, onChanged }: Pr
       await updateSupplierPurchase(dealId, purchase.id, {
         supplierName: name,
         requestedAmount: amountToSave,
+        incomingInvoiceAmount: amountToSave,
         actorId: user.id,
       });
       await onChanged();
@@ -69,7 +70,7 @@ export function PurchaseDraftEditorV11({ dealId, purchase, user, onChanged }: Pr
       <span>До отправки бухгалтерии</span>
       <button type="button" className="secondary compactButton" aria-expanded={open}
         onClick={() => { setOpen(value => !value); setError(''); }}>
-        {open ? 'Закрыть' : 'Изменить завод / сумму'}
+        {open ? 'Закрыть' : 'Изменить поставщика / сумму'}
       </button>
     </div>
     {open && <div className="msmPurchaseDraftEditBodyV11">
@@ -78,13 +79,13 @@ export function PurchaseDraftEditorV11({ dealId, purchase, user, onChanged }: Pr
           <input value={supplier} disabled={saving} onChange={(e: { target: { value: string } }) => setSupplier(e.target.value)}
             placeholder="Например: ДЗГИ" />
         </label>
-        <label>Сумма к оплате, ₽
+        <label>Сумма счёта, ₽
           <input inputMode="decimal" value={amount} disabled={saving}
             onChange={(e: { target: { value: string } }) => setAmount(formatMoneyInput(e.target.value))}
             placeholder="194 400" />
         </label>
       </div>
-      <p className="msmPurchaseDraftHintV11">Сумма входящего счёта не меняется. Эта сумма будет передана бухгалтерии при создании задачи на оплату.</p>
+      <p className="msmPurchaseDraftHintV11">До отправки в оплату можно исправить реквизиты черновика. Для новой версии счёта используйте «Скорректировать счёт».</p>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="msmPurchaseDraftEditActionsV11">
         <button type="button" className="secondary" disabled={saving} onClick={() => {

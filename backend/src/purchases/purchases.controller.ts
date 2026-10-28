@@ -23,6 +23,12 @@ export class PurchasesController {
   ) {}
 
 
+  @Post(':purchaseId/invoice-revision')
+  reviseInvoice(@Param('dealId') dealId:string,@Param('purchaseId') purchaseId:string,
+    @Body() body:{actorId:string;sourceFileId:string;number?:string;amount:number;supplierName:string;reason:string}) {
+    return this.purchases.reviseInvoice(dealId,purchaseId,body);
+  }
+
   @Post(':purchaseId/realizations')
   addRealization(@Param('dealId') dealId: string, @Param('purchaseId') purchaseId: string, @Body() body: { actorId: string }) {
     return this.purchases.addRealization(dealId, purchaseId, body.actorId);

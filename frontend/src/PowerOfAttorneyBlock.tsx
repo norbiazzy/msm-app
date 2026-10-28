@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 /* MSM_FIXES_V10 */
 /* MSM_DOCUMENT_FLOW_V9 */
 import { AccountantDocumentPicker } from './DocumentPickerV9';
@@ -522,7 +523,7 @@ const requestKey =
 
           <label className="field">
             <span>На кого доверенность</span>
-            <textarea
+            <AutoTextarea
               rows={4}
               value={recipientName}
               onChange={(e) =>
@@ -540,7 +541,7 @@ const requestKey =
 
           <label className="field">
             <span>Что получаем</span>
-            <textarea
+            <AutoTextarea
               rows={4}
               value={goodsDescription}
               onChange={(e) =>
@@ -555,7 +556,7 @@ const requestKey =
 
           <label className="field">
             <span>Комментарий для бухгалтерии</span>
-            <textarea
+            <AutoTextarea
               rows={3}
               value={accountingComment}
               onChange={(e) =>
@@ -569,7 +570,7 @@ const requestKey =
 
           <label className="field">
             <span>Комментарий для себя</span>
-            <textarea
+            <AutoTextarea
               rows={3}
               value={managerComment}
               onChange={(e) =>
@@ -1185,7 +1186,7 @@ export function PowerOfAttorneyTask({
             <span>
               Комментарий бухгалтера
             </span>
-            <textarea
+            <AutoTextarea
               rows={3}
               value={accountantComment}
               disabled={saving}

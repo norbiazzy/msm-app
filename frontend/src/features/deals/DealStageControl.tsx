@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../AutoTextarea';
 import { useEffect, useState } from 'react';
 import type { CurrentUser, Deal } from '../../types';
 import { updateDealWorkflowStage } from '../../api';
@@ -36,7 +37,7 @@ export function DealStageControl({ deal, user, onChanged }: { deal: Deal; user: 
             {dealStageOptions.map(s => <option value={s.value} key={s.value}>{s.label}</option>)}
           </select></label>}
         {manual && (stage === 'CANCELLED' || stage === 'SHIPPED') && <label>{stage === 'SHIPPED' ? 'Подтверждение фактической отгрузки' : 'Причина отмены'}
-          <textarea value={reason} onChange={e => setReason(e.target.value)} placeholder={stage === 'SHIPPED' ? 'Номер реализации / дата / подтверждение менеджера' : 'Почему отменили сделку'} /></label>}
+          <AutoTextarea value={reason} onChange={e => setReason(e.target.value)} placeholder={stage === 'SHIPPED' ? 'Номер реализации / дата / подтверждение менеджера' : 'Почему отменили сделку'} /></label>}
         <button className="secondary" disabled={saving || (!manual && deal.workflowMode !== 'MANUAL') || (manual && ['CANCELLED','SHIPPED'].includes(stage) && stage !== deal.workflowStage && !reason.trim())} type="button" onClick={() => save(manual ? 'MANUAL' : 'AUTO', stage)}>{saving ? 'Сохраняем…' : 'Сохранить этап'}</button>
       </div>}
       {deal.workflowReason && (deal.workflowStage === 'CANCELLED' || deal.workflowStage === 'SHIPPED') && <small>Основание: {deal.workflowReason}</small>}

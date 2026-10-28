@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../AutoTextarea';
 /* MSM_FIXES_V10 */
 /* MSM_DOCUMENT_FLOW_V9 */
 import { AccountantDocumentPicker } from '../../DocumentPickerV9';
@@ -2086,7 +2087,7 @@ function TaskDetail({ task, user, onBack }: { task: Task; user: CurrentUser; onB
 
 
             <Field title="Комментарий">
-              <textarea
+              <AutoTextarea
                 rows={3}
                 value={returnComment}
                 onChange={(e) =>

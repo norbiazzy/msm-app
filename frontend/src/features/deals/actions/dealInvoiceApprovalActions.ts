@@ -1,3 +1,4 @@
+import type { InvoiceReviewDraft } from '../../../InvoiceManagerReviewV10';
 import type { Dispatch, SetStateAction } from 'react';
 import { updateInvoiceAmount, updateShipmentDate, confirmInvoice } from '../../../api';
 import type { CurrentUser, Deal, Invoice } from '../../../types';
@@ -5,6 +6,7 @@ import type { CurrentUser, Deal, Invoice } from '../../../types';
 type Set<T> = Dispatch<SetStateAction<T>>;
 
 type DealInvoiceApprovalActionArgs = {
+  invoiceReviewDraft: InvoiceReviewDraft | null;
   dealId: string;
   user: CurrentUser;
   deal: Deal | null;
@@ -20,6 +22,7 @@ type DealInvoiceApprovalActionArgs = {
 
 /** Existing invoice approval and save handlers, extracted without behavioral changes. */
 export function createDealInvoiceApprovalActions({
+  invoiceReviewDraft,
   dealId, user, deal, current, managerAmount, shipmentDate,
   parsedManagerAmount, setInvoiceMenuOpen, setSaving, setError, reload,
 }: DealInvoiceApprovalActionArgs) {
@@ -157,69 +160,19 @@ export function createDealInvoiceApprovalActions({
     }
 
 
-    const parsed =
-      parsedManagerAmount();
-
-
-    if (
-      managerAmount.trim() &&
-      parsed === undefined
-    ) {
-
-      setError(
-        'Проверьте сумму счёта'
-      );
-
-      return;
+    const draft = invoiceReviewDraft?.invoiceId === current.id ? invoiceReviewDraft : null;
+    const parsedAmount = draft ? Number(draft.amount.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.')) : undefined;
+    if (draft && (!draft.number.trim() || draft.number.trim() === 'Ожидает проверки' || !Number.isFinite(parsedAmount) || parsedAmount! <= 0)) {
+      setError('Укажите номер счёта и сумму больше нуля.');return;
     }
-
-
     setSaving(true);
     setError('');
-
-
     try {
-
-      const currentAmount =
-        current.amount ===
-          undefined ||
-        current.amount === null
-
-          ? undefined
-
-          : Number(
-              current.amount
-            );
-
-
-      if (
-        parsed !== undefined &&
-        (
-          currentAmount ===
-            undefined ||
-
-          Math.abs(
-            currentAmount -
-            parsed
-          ) > 0.001
-        )
-      ) {
-
-        await updateInvoiceAmount(
-          dealId,
-          current.id,
-          {
-            amount: parsed,
-            actorId: user.id,
-          },
-        );
-      }
-
-
       await confirmInvoice(
         dealId,
         current.id,
         user.id,
+        draft ? {number:draft.number.trim(),amount:parsedAmount!} : undefined,
       );
 
 

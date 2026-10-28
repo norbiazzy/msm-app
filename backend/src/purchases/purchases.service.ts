@@ -25,6 +25,32 @@ export class PurchasesService {
   ) {}
 
 
+  async reviseInvoice(dealId:string,purchaseId:string,body:{actorId:string;sourceFileId:string;number?:string;amount:number;supplierName:string;reason:string}) {
+    if(typeof body.amount!=='number'||!Number.isFinite(body.amount)||body.amount<=0||body.amount>=1e12||
+       !body.supplierName?.trim()||!body.reason?.trim()||!body.sourceFileId)
+      throw new BadRequestException('Нужны новый файл счёта, поставщик, положительная сумма и причина изменения');
+    return this.prisma.$transaction(async tx=>{
+      const actor=await tx.user.findUnique({where:{id:body.actorId},select:{role:true}});
+      if(!actor||!['MANAGER','LEADER','ADMIN'].includes(actor.role))throw new BadRequestException('Нет прав корректировать счёт');
+      const current=await tx.supplierPurchase.findFirstOrThrow({where:{id:purchaseId,dealId},include:{payments:true}});
+      if(current.status===SupplierPurchaseStatus.CANCELLED)throw new BadRequestException('Закупка отменена');
+      const active=await tx.task.count({where:{supplierPurchaseId:purchaseId,type:TaskType.PAY_SUPPLIER,status:{notIn:[TaskStatus.DONE,TaskStatus.CANCELLED]}}});
+      if(active)throw new BadRequestException('Сначала завершите или отмените активную задачу на оплату, затем скорректируйте счёт');
+      const source=await tx.storedFile.findFirst({where:{id:body.sourceFileId,dealId,category:'SUPPLIER_INVOICE_DRAFT'}});
+      if(!source)throw new BadRequestException('Новый файл счёта не найден или уже используется');
+      const oldFiles=await tx.storedFile.findMany({where:{dealId,category:'SUPPLIER_INVOICE_'+purchaseId},select:{id:true}});
+      const cents=Math.round(body.amount*100),amount=cents/100;
+      const paidCents=current.payments.reduce((n,p)=>n+Math.round(Number(p.amount)*100),0);
+      const status=paidCents>=cents?SupplierPurchaseStatus.PAID:paidCents>0?SupplierPurchaseStatus.PARTIALLY_PAID:SupplierPurchaseStatus.DRAFT;
+      await tx.storedFile.update({where:{id:source.id},data:{category:'SUPPLIER_INVOICE_'+purchaseId}});
+      const result=await tx.supplierPurchase.update({where:{id:purchaseId},data:{supplierName:body.supplierName.trim(),incomingInvoiceNumber:body.number?.trim()||current.incomingInvoiceNumber,incomingInvoiceAmount:amount,requestedAmount:amount,status},include:{payments:true}});
+      await tx.auditEvent.create({data:{dealId,actorId:body.actorId,action:'SUPPLIER_INVOICE_REVISED',entityType:'SupplierPurchase',entityId:purchaseId,
+        oldValue:{supplierName:current.supplierName,number:current.incomingInvoiceNumber,amount:current.incomingInvoiceAmount?.toString()??null,requestedAmount:current.requestedAmount?.toString()??null,status:current.status,fileIds:oldFiles.map(f=>f.id)},
+        newValue:{supplierName:result.supplierName,number:result.incomingInvoiceNumber,amount:String(amount),status,sourceFileId:source.id,reason:body.reason.trim(),paid:String(paidCents/100),balance:String((cents-paidCents)/100)}}});
+      return result;
+    },{isolationLevel:'Serializable'});
+  }
+
   private async realizationAccess(dealId: string, purchaseId: string, actorId: string) {
     const purchase = await this.prisma.supplierPurchase.findFirstOrThrow({ where: { id: purchaseId, dealId } });
     const user = await this.prisma.user.findUnique({ where: { id: actorId } });
@@ -145,9 +171,26 @@ export class PurchasesService {
     body: any,
   ) {
 
+    if(body.clientRequestId!==undefined&&(typeof body.clientRequestId!=='string'||!body.clientRequestId||body.clientRequestId.length>120))
+      throw new BadRequestException('Некорректный идентификатор запроса');
+    if(body.incomingInvoiceAmount!==undefined&&body.incomingInvoiceAmount!==null&&
+      (typeof body.incomingInvoiceAmount!=='number'||!Number.isFinite(body.incomingInvoiceAmount)||body.incomingInvoiceAmount<=0||body.incomingInvoiceAmount>=1e12))
+      throw new BadRequestException('Сумма счёта должна быть положительной');
     return this.prisma
       .$transaction(
         async (tx) => {
+
+          if(body.clientRequestId){
+            const previous=await tx.auditEvent.findFirst({where:{dealId,actorId:body.createdById,action:'SUPPLIER_PURCHASE_CREATED',entityType:'SupplierPurchase',newValue:{path:['clientRequestId'],equals:body.clientRequestId}}});
+            if(previous?.entityId){
+              const saved=await tx.supplierPurchase.findFirstOrThrow({where:{id:previous.entityId,dealId},include:{payments:true}});
+              if(saved.supplierName!==(body.supplierName?.trim()||'Поставщик не указан')||
+                 (saved.incomingInvoiceNumber||'')!==(body.incomingInvoiceNumber?.trim()||'')||
+                 (saved.incomingInvoiceAmount==null?null:Number(saved.incomingInvoiceAmount))!==(body.incomingInvoiceAmount??null))
+                throw new BadRequestException('Этот запрос уже сохранён с другими реквизитами. Проверьте карточку в списке счетов');
+              return saved;
+            }
+          }
 
           const purchase =
             await tx.supplierPurchase
@@ -160,7 +203,7 @@ export class PurchasesService {
                   supplierName:
                     body.supplierName
                       ?.trim() ||
-                    'Тестовый поставщик',
+                    'Поставщик не указан',
 
                   incomingInvoiceNumber:
                     body
@@ -202,6 +245,9 @@ export class PurchasesService {
 
             if (source) {
 
+              if(source.category==='SUPPLIER_INVOICE_DRAFT') {
+                await tx.storedFile.update({where:{id:source.id},data:{category:'SUPPLIER_INVOICE_'+purchase.id}});
+              } else {
               await tx.storedFile
                 .create({
                   data: {
@@ -229,6 +275,7 @@ export class PurchasesService {
                       source.externalUrl,
                   },
                 });
+              }
             }
           }
 
@@ -245,6 +292,7 @@ export class PurchasesService {
               entityId:
                 purchase.id,
               newValue: {
+                ...(body.clientRequestId?{clientRequestId:body.clientRequestId}:{}),
                 supplierName:
                   purchase.supplierName,
                 amount:
@@ -259,6 +307,7 @@ export class PurchasesService {
 
           return purchase;
         },
+        {isolationLevel:'Serializable'},
       );
   }
 
@@ -497,6 +546,17 @@ export class PurchasesService {
     body: any,
   ) {
 
+    if(body.clientRequestId){
+      if(typeof body.clientRequestId!=='string'||body.clientRequestId.length>120)throw new BadRequestException('Некорректный идентификатор запроса');
+      const previous=await this.prisma.task.findFirst({where:{dealId,supplierPurchaseId:purchaseId,type:TaskType.PAY_SUPPLIER,createdById:body.actorId,payload:{path:['clientRequestId'],equals:body.clientRequestId}}});
+      if(previous){
+        const payload=previous.payload as Record<string,unknown>|null;
+        if(previous.status===TaskStatus.CANCELLED)throw new BadRequestException('Этот запрос оплаты отменён. Создайте новый запрос из карточки счёта');
+        if(Number(payload?.amountToPay)!==Number(body.amount))throw new BadRequestException('Запрос уже отправлен с другой суммой');
+        return previous;
+      }
+    }
+
     const purchase =
       await this.prisma
         .supplierPurchase
@@ -508,6 +568,14 @@ export class PurchasesService {
           },
         });
 
+
+    if(!purchase.supplierName?.trim()||purchase.supplierName==='Поставщик не указан'||purchase.supplierName==='Тестовый поставщик')
+      throw new BadRequestException('Укажите поставщика перед отправкой в оплату');
+    const paid=purchase ? await this.prisma.supplierPayment.findMany({where:{purchaseId},select:{amount:true}}):[];
+    const target=Number(purchase.requestedAmount??purchase.incomingInvoiceAmount);
+    const due=Math.round(target*100)-paid.reduce((n,p)=>n+Math.round(Number(p.amount)*100),0);
+    if(!Number.isFinite(target)||target<=0||due<=0||!Number.isFinite(Number(body.amount))||Number(body.amount)<=0||Math.round(Number(body.amount)*100)>due)
+      throw new BadRequestException('Проверьте сумму счёта и положительный остаток к оплате');
 
     const existing =
       await this.prisma
@@ -545,6 +613,12 @@ export class PurchasesService {
       .$transaction(
         async (tx) => {
 
+          const concurrent=await tx.task.findFirst({where:{dealId,supplierPurchaseId:purchaseId,type:TaskType.PAY_SUPPLIER,status:{notIn:[TaskStatus.DONE,TaskStatus.CANCELLED]}}});
+          if(concurrent){
+            const payload=concurrent.payload as Record<string,unknown>|null;
+            if(body.clientRequestId&&payload?.clientRequestId===body.clientRequestId&&Number(payload?.amountToPay)===Number(body.amount))return concurrent;
+            throw new BadRequestException('По этому счёту уже есть активная задача оплаты');
+          }
           await tx
             .supplierPurchase
             .update({
@@ -596,6 +670,7 @@ export class PurchasesService {
                   ),
 
                 payload: {
+                  ...(body.clientRequestId?{clientRequestId:body.clientRequestId}:{}),
                   kind:
                     'PAY_SUPPLIER',
                   amountToPay:
@@ -642,6 +717,7 @@ export class PurchasesService {
 
           return task;
         },
+        {isolationLevel:'Serializable'},
       );
   }
 

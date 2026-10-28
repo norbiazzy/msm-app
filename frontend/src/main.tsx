@@ -52,3 +52,7 @@ import './msm-fixes-v10.css';
 import './msm-mobile-compact-v12.css';
 import './msm-ui-v13.css';
 import './msm-mobile-nav-v13_1.css';
+
+import "./msm-ui-v15.css";
+
+import './msm-supplier-v17.css';

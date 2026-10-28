@@ -343,10 +343,10 @@ export async function updateInvoiceAmount(
 }
 
 
-export async function confirmInvoice(dealId: string, invoiceId: string, actorId: string) {
+export async function confirmInvoice(dealId: string, invoiceId: string, actorId: string, details?: {number:string;amount:number}) {
   return json(`/deals/${dealId}/invoices/${invoiceId}/confirm`, {
     method: 'PATCH',
-    body: JSON.stringify({ actorId }),
+    body: JSON.stringify({ actorId, ...details }),
   });
 }
 
@@ -431,6 +431,7 @@ export async function createSupplierPurchase(
   dealId: string,
 
   payload: {
+    clientRequestId?: string;
     supplierName?: string;
     incomingInvoiceNumber?: string;
     incomingInvoiceAmount?: number;
@@ -477,6 +478,7 @@ export async function requestSupplierPayment(
   purchaseId: string,
 
   payload: {
+    clientRequestId?: string;
     amount?: number;
     comment?: string;
     urgent?: boolean;
@@ -909,4 +911,8 @@ export async function reviewInvoiceDetails(dealId: string, invoiceId: string, pa
 }
 export async function retryDocumentRecognition(fileId: string): Promise<unknown> {
   return json(`/files/${encodeURIComponent(fileId)}/recognition/retry`, { method: 'POST' });
+}
+
+export async function reviseSupplierInvoice(dealId:string,purchaseId:string,payload:{actorId:string;sourceFileId:string;number?:string;amount:number;supplierName:string;reason:string}) {
+ return json(`/deals/${dealId}/suppliers/${purchaseId}/invoice-revision`,{method:'POST',body:JSON.stringify(payload)});
 }

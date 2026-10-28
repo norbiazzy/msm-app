@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../../AutoTextarea';
 import { useEffect, useState } from 'react';
 import { Field } from '../../../shared/Field';
 import { formatMoneyInput, money, parseMoneyInput, paymentMethodLabel } from '../../../shared/formatters';
@@ -196,7 +197,7 @@ export function PaymentBlock({ deal, user, onChanged }: { deal: Deal; user: Curr
                 <Field title="Дата начала"><input type="date" value={deferralStartAt} onChange={(e) => setDeferralStartAt(e.target.value)} /></Field>
                 <Field title="Оплатить до"><input type="date" value={deferralEndAt} onChange={(e) => setDeferralEndAt(e.target.value)} /></Field>
               </div>
-              <Field title="Условия отсрочки"><textarea rows={2} value={deferralTerms} onChange={(e) => setDeferralTerms(e.target.value)} placeholder="Например: 14 календарных дней после отгрузки" /></Field>
+              <Field title="Условия отсрочки"><AutoTextarea rows={2} value={deferralTerms} onChange={(e) => setDeferralTerms(e.target.value)} placeholder="Например: 14 календарных дней после отгрузки" /></Field>
             </>
           )}
           <div className="clientPayEditorActions">

@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 /* MSM_DOCUMENT_FLOW_V9 */
 import {
   useMemo,
@@ -765,6 +766,117 @@ export function InvoiceRequestManagerRepair({
         
 
 
+        <label className="field">
+
+          <span>
+            На кого выставлять
+          </span>
+
+          <input
+            value={clientName}
+            disabled={saving}
+            onChange={(event) =>
+              setClientName(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        
+
+
+        
+
+
+        <label className="field">
+          <span>Контактное лицо</span>
+          <input value={contactName} disabled={saving}
+            onChange={(event) => setContactName(event.target.value)} />
+        </label>
+
+        <label className="field">
+          <span>Телефон клиента</span>
+          <input type="tel" value={clientPhone} disabled={saving}
+            onChange={(event) => setClientPhone(event.target.value)} />
+        </label>
+
+        <label className="field">
+          <span>Адреса доставки (каждый с новой строки)</span>
+          <AutoTextarea rows={3} value={deliveryAddresses} disabled={saving}
+            onChange={(event) => setDeliveryAddresses(event.target.value)} />
+        </label>
+
+        <label className="field">
+
+          <span>
+            Что выставляем / текст запроса
+          </span>
+
+          <AutoTextarea
+            rows={5}
+            value={requestText}
+            disabled={saving}
+            onChange={(event) =>
+              setRequestText(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        
+
+
+        <label className="field">
+
+          <span>
+            Комментарий для бухгалтерии
+          </span>
+
+          <AutoTextarea
+            rows={3}
+            value={
+              accountingComment
+            }
+            disabled={saving}
+            onChange={(event) =>
+              setAccountingComment(
+                event.target.value
+              )
+            }
+          />
+
+        </label>
+
+
+        <label className="urgentToggle">
+          <input type="checkbox" checked={urgent} disabled={saving}
+            onChange={(event) => setUrgent(event.target.checked)} />
+          <span>Срочно</span>
+        </label>
+
+        <div className="field"><span>Документы для исправленной заявки</span>
+          <ManagerDocumentPicker primaryFile={primaryFile} onPrimaryChange={setPrimaryFile} files={extraFiles} onChange={setExtraFiles} />
+        </div>
+
+
+        
+
+
+        {error && (
+
+          <div className="error">
+            {error}
+          </div>
+
+        )}
+
+
         <div className="field">
 
           <span>
@@ -812,118 +924,6 @@ export function InvoiceRequestManagerRepair({
 
         </div>
 
-
-        <label className="field">
-
-          <span>
-            На кого выставлять
-          </span>
-
-          <input
-            value={clientName}
-            disabled={saving}
-            onChange={(event) =>
-              setClientName(
-                event.target.value
-              )
-            }
-          />
-
-        </label>
-
-
-        
-
-
-        
-
-
-        <label className="field">
-          <span>Контактное лицо</span>
-          <input value={contactName} disabled={saving}
-            onChange={(event) => setContactName(event.target.value)} />
-        </label>
-
-        <label className="field">
-          <span>Телефон клиента</span>
-          <input type="tel" value={clientPhone} disabled={saving}
-            onChange={(event) => setClientPhone(event.target.value)} />
-        </label>
-
-        <label className="field">
-          <span>Адреса доставки (каждый с новой строки)</span>
-          <textarea rows={3} value={deliveryAddresses} disabled={saving}
-            onChange={(event) => setDeliveryAddresses(event.target.value)} />
-        </label>
-
-        <label className="field">
-
-          <span>
-            Что выставляем / текст запроса
-          </span>
-
-          <textarea
-            rows={5}
-            value={requestText}
-            disabled={saving}
-            onChange={(event) =>
-              setRequestText(
-                event.target.value
-              )
-            }
-          />
-
-        </label>
-
-
-        
-
-
-        <label className="field">
-
-          <span>
-            Комментарий для бухгалтерии
-          </span>
-
-          <textarea
-            rows={3}
-            value={
-              accountingComment
-            }
-            disabled={saving}
-            onChange={(event) =>
-              setAccountingComment(
-                event.target.value
-              )
-            }
-          />
-
-        </label>
-
-
-        <label className="urgentToggle">
-          <input type="checkbox" checked={urgent} disabled={saving}
-            onChange={(event) => setUrgent(event.target.checked)} />
-          <span>Срочно</span>
-        </label>
-
-        <div className="field"><span>Документы для исправленной заявки</span>
-          <ManagerDocumentPicker primaryFile={primaryFile} onPrimaryChange={setPrimaryFile} files={extraFiles} onChange={setExtraFiles} />
-        </div>
-
-
-        
-
-
-        {error && (
-
-          <div className="error">
-            {error}
-          </div>
-
-        )}
-
-
         <button
           type="button"
           className="primary wide"
@@ -935,7 +935,7 @@ export function InvoiceRequestManagerRepair({
           {
             saving
               ? 'Отправляем…'
-              : 'Сохранить и повторно отправить'
+              : `Повторно запросить счёт от ${sellerLabels[sellerType]}`
           }
         </button>
 

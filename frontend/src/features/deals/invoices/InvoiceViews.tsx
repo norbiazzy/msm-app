@@ -25,6 +25,7 @@ export function InvoiceBlock({
       </div>
 
 
+      {!(showRecognition && invoice.status === 'WAITING_MANAGER_REVIEW') && <>
       <div>
 
         <span>
@@ -60,6 +61,8 @@ export function InvoiceBlock({
 
       </div>
 
+
+      </>}
 
       <div>
 

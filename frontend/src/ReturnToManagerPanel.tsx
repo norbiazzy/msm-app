@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 import {
   useState,
 } from 'react';
@@ -217,7 +218,7 @@ export function ReturnToManagerPanel({
                 }
               </span>
 
-              <textarea
+              <AutoTextarea
                 rows={3}
                 value={comment}
                 disabled={saving}

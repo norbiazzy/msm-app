@@ -18,7 +18,7 @@ RU_MONTHS = {'января':1,'февраля':2,'марта':3,'апреля':4
              'августа':8,'сентября':9,'октября':10,'ноября':11,'декабря':12}
 MONEY = r'[\d\s\u00a0]+[,.]\d{2}'
 TITLE = re.compile(r'Сч[её]т\s+на\s+оплату\s*№\s*([^\s]+)\s+от\s+(\d{1,2})\s+([а-яё]+)\s+(\d{4})', re.I)
-ITEM_ROW = re.compile(r'^\s*(\d{1,3})\s{2,}(.+?)\s{2,}([\d\s]+(?:[,.]\d+)?)\s+(м3|м³|м2|м²|шт|упак|усл\.?|кг|л|т)\s{2,}('+MONEY+r')\s{2,}('+MONEY+r')\s*$', re.I)
+ITEM_ROW = re.compile(r'^\s*(\d{1,3})\s{2,}(.+?)\s{2,}([\d\s]+(?:[,.]\d+)?)\s+([^\d\s][^\r\n]*?)\s{2,}('+MONEY+r')\s{2,}('+MONEY+r')\s*$', re.I)
 
 
 def dec(s):
@@ -126,7 +126,7 @@ def parse_invoice_pdf(pages):
             if m:
                 n,name,qty,unit,price,total=m.groups()
                 items.append({'row':int(n),'name':name.strip(),'quantity':str(dec(qty)),
-                    'unit':unit,'price':strmoney(price),'amount':strmoney(total),'page':page_no})
+                    'unit':unit.strip(),'price':strmoney(price),'amount':strmoney(total),'page':page_no})
             elif items and not re.match(r'^\s*\d+\s{2,}',line):
                 # A continued product name can span two lines, possibly separate PDF pages.
                 if not any(word in line for word in ('Номер по порядку','Единица измерения','Материальные ценности')):
@@ -153,62 +153,101 @@ def parse_invoice_pdf(pages):
 
 
 def excel_cells(path):
-    try:from python_calamine import CalamineWorkbook
-    except ImportError:raise RuntimeError('Excel support requires python-calamine: pip install python-calamine')
-    w=CalamineWorkbook.from_path(str(path))
-    return [(name,w.get_sheet_by_name(name).to_python()) for name in w.sheet_names]
+    try:
+        from python_calamine import CalamineWorkbook
+    except ImportError:
+        if path.suffix.lower() == '.xls':
+            try: import xlrd
+            except ImportError: raise RuntimeError('Для Excel установите зависимости из backend/src/recognition/python-requirements.txt тем же Python, которым запускается распознавание')
+            book=xlrd.open_workbook(str(path))
+            return [(sheet.name,[sheet.row_values(i) for i in range(sheet.nrows)]) for sheet in book.sheets()]
+        raise RuntimeError('Для XLSX требуется python-calamine. Установите backend/src/recognition/python-requirements.txt')
+    book=CalamineWorkbook.from_path(str(path))
+    return [(name,book.get_sheet_by_name(name).to_python()) for name in book.sheet_names]
 
 
 def parse_invoice_excel(path):
     sheets=excel_cells(path)
-    # Variable supplier layouts are supported through keyword and row/column heuristics.
     text='\n'.join(' | '.join(str(v) for v in row if v is not None and str(v).strip()) for _,rows in sheets for row in rows)
-    title=(re.search(r'(?:Сч[её]т\s+(?:на\s+оплату\s+)?)?№\s*([А-Яа-яA-Za-z0-9-]+)\s+от\s+(\d{1,2})[.\s]+(\d{1,2}|[а-яё]+)[.\s]+(\d{4})',text,re.I))
+    title=re.search(r'(?:Сч[её]т\s+(?:на\s+оплату\s+)?)?№\s*([А-Яа-яA-Za-z0-9-]+)\s+от\s+(\d{1,2})[.\s]+(\d{1,2}|[а-яё]+)[.\s]+(\d{4})',text,re.I)
     number=title.group(1) if title else None
     datevalue=None
     if title:
         try:
-            mm=RU_MONTHS.get(title.group(3).lower(),int(title.group(3)) if title.group(3).isdigit() else 0)
-            datevalue=date(int(title.group(4)),mm,int(title.group(2))).isoformat()
-        except ValueError:pass
-    inn_matches=re.findall(r'\bИНН\s*[: ]\s*(\d{10,12})\b',text,re.I)
-    parties=[]
-    for kw in ('Поставщик','Продавец','Покупатель','Заказчик','Получатель'):
-        m=re.search(kw+r'\s*[:|]?\s*([^\n]{0,230})',text,re.I)
-        if m:
-            n=re.search(r'((?:ООО|АО|ПАО|ИП)\s*[«\"].+?[»\"]|ИП\s+[А-ЯЁ][^,\|]+)',m.group(1),re.I)
-            parties.append((kw,n.group(1) if n else None))
-    seller=next(({'name':n,'inn':inn_matches[0] if inn_matches else None} for k,n in parties if k in ('Поставщик','Продавец')),{'name':None,'inn':None})
-    buyer=next(({'name':n,'inn':inn_matches[-1] if len(inn_matches)>1 else None} for k,n in parties if k in ('Покупатель','Заказчик')),{'name':None,'inn':None})
-    items=[];total=None;vat=None
+            month=RU_MONTHS.get(title.group(3).lower(),int(title.group(3)) if title.group(3).isdigit() else 0)
+            datevalue=date(int(title.group(4)),month,int(title.group(2))).isoformat()
+        except ValueError: pass
+    def party(labels):
+        match=re.search(r'(?:^|\n)\s*(?:'+labels+r')\s*[:|]\s*([^\n]{0,1200})',text,re.I)
+        content=match.group(1) if match else ''
+        name=re.search(r'\b(?:ОБЩЕСТВО\s+С\s+ОГРАНИЧЕННОЙ\s+ОТВЕТСТВЕННОСТЬЮ|ООО|ПАО|ЗАО|ОАО|АО|ИП)\b[^,\n|]*',content,re.I)
+        inn=re.search(r'ИНН\s*[:|]?\s*(\d{10,12})\b',content,re.I)
+        return {'name':name.group(0).strip() if name else None,'inn':inn.group(1) if inn else None}
+    seller=party('Поставщик|Продавец')
+    buyer=party('Покупатель|Заказчик')
+    items=[];total=None;priority=-1;vat=None
     for sheet_name,rows in sheets:
+        header={};quantities=[];units=[]
         for ri,row in enumerate(rows,1):
             vals=[str(c).strip() if c is not None else '' for c in row]
             line=' '.join(v for v in vals if v)
-            t=re.search(r'(?:Всего\s+к\s+оплате|Итого\s+к\s+оплате|Всего):?\s*('+MONEY+')',line,re.I)
-            if t:total=strmoney(t.group(1))
-            vr=re.search(r'(?:в\s+том\s+числе\s+)?НДС\s*(\d{1,2})?\s*%?\s*:?\s*('+MONEY+')',line,re.I)
-            if vr:vat={'rate':int(vr.group(1)) if vr.group(1) else None,'amount':strmoney(vr.group(2))}
-            # Positions: require non-empty product description plus quantity, price and line total.
-            # Skip grouped subtotals and header-only cells.
-            if any(s in line.lower() for s in ('промежуточный итог','итого по группе','всего к оплате')):continue
-            nums=[(i,dec(v)) for i,v in enumerate(vals) if dec(v) is not None and dec(v)>=0]
-            if len(nums)<3:continue
-            price=nums[-2][1];amount=nums[-1][1]
-            if price is None or amount is None or price==0:continue
-            quantity=next((q for ix,q in reversed(nums[:-2]) if q is not None and q>0 and abs(q*price-amount)<=Decimal('0.04')),None)
-            if quantity is None:continue
-            # Identify descriptive product text; exclude date/organization fields.
-            labels=[v for v in vals[:nums[-2][0]] if re.search(r'[а-яёА-ЯЁA-Za-z]',v) and not re.search(r'ИНН|КПП|БИК|Итого|оплату|Поставщик|Покупатель',v,re.I)]
-            name=max(labels,key=len) if labels else ''
-            if len(name)<4:continue
-            unit=next((v for v in vals if v.lower() in ('шт','м2','м3','м²','м³','т','кг','упак','пог.м')),None)
-            items.append({'row':len(items)+1,'name':name,'quantity':str(quantity),
-                          'unit':unit,'price':strmoney(price),'amount':strmoney(amount),'sheet':sheet_name,'sheet_row':ri})
+            if not line: continue
+            # Remember the actual table columns, including multiple quantity/unit pairs.
+            price_cols=[i for i,v in enumerate(vals) if re.fullmatch(r'Цена(?:,?\s*(?:руб\.?|₽))?',v,re.I)]
+            sum_cols=[i for i,v in enumerate(vals) if re.fullmatch(r'Сумма(?:,?\s*(?:руб\.?|₽))?',v,re.I)]
+            if price_cols and sum_cols:
+                header={'price':price_cols[-1],'sum':sum_cols[-1]}
+                name_cols=[i for i,v in enumerate(vals) if re.search(r'^(?:Товар|Наименование|Работы|Услуги)',v,re.I)]
+                if name_cols:header['name']=name_cols[0]
+                row_cols=[i for i,v in enumerate(vals) if re.fullmatch(r'№|N|Номер',v,re.I)]
+                if row_cols:header['row']=row_cols[0]
+                quantities=[i for i,v in enumerate(vals) if re.search(r'кол[- .]*(?:во|ичество)',v,re.I)]
+                units=[i for i,v in enumerate(vals) if re.match(r'^Ед(?:\.|иниц)',v,re.I)]
+                continue
+            label=next((v.lower().rstrip(':').strip() for v in vals if re.match(r'^(?:итого|всего|в том числе|ндс)',v,re.I)), '')
+            numeric=[(i,dec(v)) for i,v in enumerate(vals) if dec(v) is not None]
+            if label:
+                if re.fullmatch(r'(?:всего|итого)\s+к\s+оплате|итого|всего',label) and numeric:
+                    rank=3 if 'оплате' in label else 2
+                    if rank>=priority: total=strmoney(numeric[-1][1]);priority=rank
+                if re.match(r'^(?:в том числе\s+)?ндс',label) and numeric:
+                    rate=re.search(r'(\d{1,2})\s*%',label)
+                    vat={'rate':int(rate.group(1)) if rate else None,'amount':strmoney(numeric[-1][1])}
+                continue
+            if header:
+                if max(header.values())>=len(vals):continue
+                price=dec(vals[header['price']]);amount=dec(vals[header['sum']])
+                # Group rows have quantities and totals but no unit price.
+                if price is None or price<=0 or amount is None: continue
+                if 'row' in header:
+                    row_number=dec(vals[header['row']])
+                    if row_number is None or row_number<=0 or row_number!=row_number.to_integral_value():continue
+            else:
+                if len(numeric)<3:continue
+                price=numeric[-2][1];amount=numeric[-1][1]
+                if price<=0:continue
+            price_index=header.get('price',numeric[-2][0])
+            candidates=[(i,q) for i,q in numeric if i<price_index and q>0 and abs(q*price-amount)<=Decimal('0.04')]
+            if not candidates:continue
+            preferred=[pair for pair in candidates if pair[0] in quantities]
+            qi,quantity=(preferred or candidates)[-1]
+            if 'name' in header:name=vals[header['name']]
+            else:
+                labels=[v for v in vals[:price_index] if re.search(r'[а-яёА-ЯЁA-Za-z]',v) and not re.search(r'ИНН|КПП|БИК|Поставщик|Покупатель',v,re.I)]
+                name=max(labels,key=len) if labels else ''
+            if not name:continue
+            # Unit belongs to the quantity used in quantity*price, not to packaging places.
+            unit_columns=[i for i in units if qi<i<price_index]
+            unit=vals[unit_columns[0]] if unit_columns else next((v for v in vals[qi+1:price_index] if v and dec(v) is None),None)
+            items.append({'row':int(dec(vals[header['row']])) if 'row' in header else len(items)+1,'name':name,
+                          'quantity':str(quantity),'unit':unit.strip() if unit else None,'price':strmoney(price),'amount':strmoney(amount),'sheet':sheet_name,'sheet_row':ri})
     issues=[]
+    declared=re.search(r'Всего\s+наименований\s+(\d+)',text,re.I)
     if not number:issues.append('Не удалось надёжно определить номер Excel-счёта')
+    if not seller['name']:issues.append('Проверьте поставщика Excel-счёта')
     if not total:issues.append('Не удалось найти итог Excel-счёта')
-    if not items:issues.append('Товарные строки Excel не распознаны — необходима настройка шаблона')
+    if not items:issues.append('Товарные строки Excel не распознаны — проверьте оригинал')
+    if declared and int(declared.group(1))!=len(items):issues.append(f'В счёте указано {declared.group(1)} позиций, прочитано {len(items)}')
     if total and items and abs(sum((dec(i['amount']) for i in items),Decimal(0))-dec(total))>Decimal('.01'):
         issues.append('Сумма Excel-позиций не совпадает с итогом — проверьте групповые строки')
     return {'number':number,'date':datevalue,'amount':total,'vat_rate':vat['rate'] if vat else None,
@@ -314,7 +353,7 @@ def recognize(path,kind):
         data=parse_invoice_excel(path);data['pages']=None
     else:raise RuntimeError('Формат не поддерживается: '+suffix)
     data['kind']=kind
-    data['engine_version']='msm-recognition-1.0'
+    data['engine_version']='msm-recognition-1.2'
     return data
 
 if __name__=='__main__':

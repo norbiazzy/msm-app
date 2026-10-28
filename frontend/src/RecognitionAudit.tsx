@@ -73,7 +73,7 @@ export function RecognitionAudit({ fileId, expectedNumber, expectedAmount, expec
   if (recognition?.status === 'DONE' || recognition?.status === 'COMPLETED' || recognition?.status === 'SUCCESS') {
     const d = recognition.result ?? {};
     const number = cleanNumber(d.number);
-    const expected = cleanNumber(expectedNumber);
+    const expected = expectedNumber?.trim().toLowerCase() === 'ожидает проверки' ? '' : cleanNumber(expectedNumber);
     // Only compare when both values were actually read; missing data isn't a mismatch.
     if (number && expected && number !== expected) {
       warnings.push(`Номер документа: в карточке «${expectedNumber}», в файле «${String(d.number)}».`);

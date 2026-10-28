@@ -232,7 +232,7 @@ export class InvoicesService {
     });
   }
 
-  async confirm(dealId: string, invoiceId: string, actorId: string) {
+  async confirm(dealId: string, invoiceId: string, actorId: string, details: {number?:string;amount?:number} = {}) {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.clientInvoice.findFirstOrThrow({ where: { id: invoiceId, dealId } });
       if (!invoice.isCurrent) throw new BadRequestException('Подтвердить можно только актуальную версию счёта');
@@ -243,13 +243,24 @@ export class InvoicesService {
       const reviewer = await tx.user.findUnique({where:{id:actorId},select:{role:true}});
       if (!reviewer || !['MANAGER','LEADER','ADMIN'].includes(String(reviewer.role)))
         throw new BadRequestException('Подтвердить счёт может менеджер или руководитель');
-      const verified = await tx.auditEvent.findFirst({where:{dealId,entityType:'ClientInvoice',entityId:invoiceId,action:'INVOICE_DETAILS_REVIEWED'}});
-      if (!verified || !invoice.number?.trim() || invoice.number === 'Ожидает проверки' || invoice.amount == null || Number(invoice.amount) <= 0)
-        throw new BadRequestException('Перед подтверждением проверьте и сохраните номер и сумму счёта');
+      // Approval and details are persisted in the same transaction.
+      const recognized = invoice.fileId
+        ? await tx.documentRecognition.findUnique({ where: { fileId: invoice.fileId } }) : null;
+      const result = recognized?.status === 'DONE' && recognized.result && typeof recognized.result === 'object'
+        ? recognized.result as Record<string, unknown> : {};
+      const number = details.number !== undefined ? (typeof details.number === 'string' ? details.number.trim() : '') : invoice.number?.trim() && invoice.number !== 'Ожидает проверки'
+        ? invoice.number.trim() : typeof result.number === 'string' ? result.number.trim() : '';
+      const amount = details.amount !== undefined ? (typeof details.amount === 'number' ? details.amount : NaN) : invoice.amount == null ? Number(result.amount) : Number(invoice.amount);
+      if (!number || number === 'Ожидает проверки' || !Number.isFinite(amount) || amount <= 0)
+        throw new BadRequestException('Не удалось определить номер или сумму счёта. Дождитесь распознавания или отправьте счёт на корректировку.');
+      await tx.auditEvent.create({data:{dealId,actorId,action:'INVOICE_DETAILS_REVIEWED',
+        entityType:'ClientInvoice',entityId:invoiceId,
+        oldValue:{number:invoice.number,amount:invoice.amount?.toString() ?? null},
+        newValue:{number,amount:String(amount)}}});
 
       const updated = await tx.clientInvoice.update({
         where: { id: invoiceId },
-        data: { status: InvoiceStatus.CONFIRMED },
+        data: { status: InvoiceStatus.CONFIRMED, number, amount },
       });
 
       await tx.auditEvent.create({

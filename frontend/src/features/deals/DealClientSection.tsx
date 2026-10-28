@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../AutoTextarea';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Deal } from '../../types';
 import { Field } from '../../shared/Field';
@@ -367,7 +368,7 @@ export function DealClientSection({
 
             <Field title="Комментарий менеджера">
 
-              <textarea
+              <AutoTextarea
                 rows={3}
 
                 value={

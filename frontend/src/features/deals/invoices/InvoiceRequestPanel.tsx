@@ -1,3 +1,6 @@
+import type { InvoiceReviewDraft } from '../../../InvoiceManagerReviewV10';
+import { InvoiceManagerReviewV10 } from '../../../InvoiceManagerReviewV10';
+import { AutoTextarea } from '../../../AutoTextarea';
 /* MSM_FIXES_V10 */
 /* MSM_DOCUMENT_FLOW_V9 */
 import { ManagerDocumentPicker } from '../../../DocumentPickerV9';
@@ -8,10 +11,11 @@ import { Field } from '../../../shared/Field';
 import { sellerLabels } from '../../../shared/formatters';
 import { dealFileUrl } from '../../../api';
 import { InvoiceBlock } from './InvoiceViews';
-import { InvoiceManagerReviewV10 } from '../../../InvoiceManagerReviewV10';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type InvoiceRequestPanelProps = {
+  invoiceReviewDraft: InvoiceReviewDraft | null;
+  setInvoiceReviewDraft: (value: InvoiceReviewDraft) => void;
   deal: Deal;
   current: Invoice | undefined;
   canManageDeal: boolean;
@@ -48,6 +52,7 @@ type InvoiceRequestPanelProps = {
 };
 
 export function InvoiceRequestPanel({
+  invoiceReviewDraft, setInvoiceReviewDraft,
   deal,
   current,
   canManageDeal,
@@ -99,7 +104,7 @@ export function InvoiceRequestPanel({
             deal.sellerType
           }
         />
-        {canManageDeal && current.status === 'WAITING_MANAGER_REVIEW' && <InvoiceManagerReviewV10 dealId={deal.id} invoice={current} actorId={reviewerId} onChanged={onInvoiceReviewed} />}
+        {canManageDeal && current.status === 'WAITING_MANAGER_REVIEW' && <InvoiceManagerReviewV10 invoice={current} draft={invoiceReviewDraft} onChange={setInvoiceReviewDraft} disabled={saving} />}
 </>
 
       ) : (
@@ -318,27 +323,7 @@ export function InvoiceRequestPanel({
 
               <div className="invoiceRequestRepairForm">
 
-                <Field title="От кого выставляем">
-                  <div className="segmented">
-                    {(['ST', 'MSM', 'IP'] as SellerType[]).map(
-                      (type) => (
-                      <button
-                        type="button"
-                        key={type}
-                        className={
-                          requestSellerType === type
-                            ? 'selected'
-                            : ''
-                        }
-                        onClick={() =>
-                          setRequestSellerType(type)
-                        }
-                      >
-                        {sellerLabels[type]}
-                      </button>
-                    ))}
-                  </div>
-                </Field>
+
 
 
                 <Field title="На кого выставлять">
@@ -353,7 +338,7 @@ export function InvoiceRequestPanel({
                 </Field>
 
                 <Field title="Позиции и стоимость">
-                  <textarea
+                  <AutoTextarea
                     rows={5}
                     value={requestRequestText}
                     onChange={(e) =>
@@ -367,7 +352,7 @@ export function InvoiceRequestPanel({
 
 
                 <Field title="Комментарий бухгалтерии">
-                  <textarea
+                  <AutoTextarea
                     rows={3}
                     value={requestAccountingComment}
                     onChange={(e) =>
@@ -479,6 +464,28 @@ export function InvoiceRequestPanel({
                 </label>
 
 
+                <Field title="От кого выставляем">
+                  <div className="segmented">
+                    {(['ST', 'MSM', 'IP'] as SellerType[]).map(
+                      (type) => (
+                      <button
+                        type="button"
+                        key={type}
+                        className={
+                          requestSellerType === type
+                            ? 'selected'
+                            : ''
+                        }
+                        onClick={() =>
+                          setRequestSellerType(type)
+                        }
+                      >
+                        {sellerLabels[type]}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+
                 <button
                   type="button"
                   className="primary wide"
@@ -489,8 +496,8 @@ export function InvoiceRequestPanel({
                     saving
                       ? 'Отправляем…'
                       : invoiceRequestNeedsData
-                        ? 'Сохранить и повторно отправить'
-                        : 'Сохранить и отправить бухгалтерии'
+                        ? `Повторно запросить счёт от ${sellerLabels[requestSellerType]}`
+                        : `Запросить счёт от ${sellerLabels[requestSellerType]}`
                   }
                 </button>
 

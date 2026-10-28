@@ -1,3 +1,4 @@
+import { AutoTextarea } from '../../AutoTextarea';
 /* MSM_DOCUMENT_FLOW_V9 */
 import { ManagerDocumentPicker } from '../../DocumentPickerV9';
 import { type FormEvent, useState } from 'react';
@@ -265,42 +266,7 @@ async function submit(
     >
 
 
-      <Field title="От кого выставляем">
 
-        <div className="segmented">
-
-          {(['ST', 'MSM', 'IP'] as SellerType[]).map(
-            (type) => (
-
-              <button
-                type="button"
-                key={type}
-
-                className={
-                  sellerType === type
-                    ? 'selected'
-                    : ''
-                }
-
-                onClick={() =>
-                  setSellerType(
-                    type
-                  )
-                }
-              >
-                {
-                  sellerLabels[
-                    type
-                  ]
-                }
-              </button>
-
-            )
-          )}
-
-        </div>
-
-      </Field>
 
 
       <Field title="Кому продаём">
@@ -356,7 +322,8 @@ async function submit(
 
       <Field title="Адрес доставки · необязательно">
 
-        <input
+        <AutoTextarea
+          rows={1}
           value={deliveryAddress}
 
           onChange={(e) =>
@@ -382,7 +349,7 @@ async function submit(
         title={'Позиции и стоимость'}
       >
 
-        <textarea
+        <AutoTextarea
           rows={5}
 
           value={requestText}
@@ -403,7 +370,7 @@ async function submit(
 
       <Field title="Комментарий для бухгалтерии">
 
-        <textarea
+        <AutoTextarea
           rows={3}
 
           value={
@@ -424,7 +391,7 @@ async function submit(
 
       <Field title="Мой комментарий">
 
-        <textarea
+        <AutoTextarea
           rows={3}
 
           value={managerComment}
@@ -480,6 +447,43 @@ async function submit(
       )}
 
 
+      <Field title="От кого выставляем">
+
+        <div className="segmented">
+
+          {(['ST', 'MSM', 'IP'] as SellerType[]).map(
+            (type) => (
+
+              <button
+                type="button"
+                key={type}
+
+                className={
+                  sellerType === type
+                    ? 'selected'
+                    : ''
+                }
+
+                onClick={() =>
+                  setSellerType(
+                    type
+                  )
+                }
+              >
+                {
+                  sellerLabels[
+                    type
+                  ]
+                }
+              </button>
+
+            )
+          )}
+
+        </div>
+
+      </Field>
+
       <div className="actions">
 
         <button
@@ -500,7 +504,7 @@ async function submit(
           {
             saving
               ? 'Отправляем…'
-              : 'Отправить бухгалтерии'
+              : sellerType ? `Запросить счёт от ${sellerLabels[sellerType]}` : 'Запросить счёт'
           }
 
         </button>

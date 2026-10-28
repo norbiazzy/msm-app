@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { dealFileUrl } from './api';
 import { useEffect, useMemo, useState } from 'react';
 
 export type LibrarySelection = { id: string; originalName: string };
@@ -14,10 +16,11 @@ export async function linkLibraryFile(fileId: string, dealId: string, taskId: st
   if (!response.ok) throw new Error(`Не удалось связать файл библиотеки: ${await response.text()}`);
 }
 
-export function LibraryFileChooser({value, onSelect, allowedExtensions = ['pdf','xls','xlsx']}: {
+export function LibraryFileChooser({value, onSelect, allowedExtensions = ['pdf','xls','xlsx'], showSelection = true}: {
   value: LibrarySelection | null;
   onSelect: (value: LibrarySelection | null) => void;
   allowedExtensions?: string[];
+  showSelection?: boolean;
 }) {
   const [opened, setOpened] = useState(false);
   const [query, setQuery] = useState('');
@@ -44,26 +47,26 @@ export function LibraryFileChooser({value, onSelect, allowedExtensions = ['pdf',
   ), [items, query, allowedExtensions]);
   return <>
     <div className="msmInvoiceLibraryControl">
-      <button type="button" className="fileButton msmInvoiceLibraryButton" onClick={() => setOpened(true)}>Библиотека</button>
-      {value && <div className="msmLibrarySelected">Выбран файл: <strong>{value.originalName}</strong>{' '}
-        <button type="button" className="secondary compactButton" onClick={() => onSelect(null)}>Убрать</button></div>}
+      <button type="button" className="fileButton msmInvoiceLibraryButton" onClick={event => {event.preventDefault();event.stopPropagation();setOpened(true);}}>Библиотека</button>
+      {showSelection && value && <div className="msmLibrarySelected">Выбран файл: <strong>{value.originalName}</strong>{' '}
+        <a className="fileButton" href={dealFileUrl(value.id)} target="_blank" rel="noopener noreferrer">Открыть</a>{' '}<button type="button" className="secondary compactButton" onClick={event => {event.preventDefault();event.stopPropagation();onSelect(null);}}>Убрать</button></div>}
     </div>
-    {opened && <div className="msmLibModalBackdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setOpened(false); }}>
+    {opened && createPortal(<div className="msmLibModalBackdrop" role="presentation" onClick={e => {e.stopPropagation();if (e.target === e.currentTarget) {e.preventDefault();setOpened(false);}}}>
       <section className="msmLibModal" role="dialog" aria-modal="true" aria-label="Выбор файла из библиотеки">
         <div className="msmLibModalHead"><strong>Выбрать из библиотеки</strong>
-          <button type="button" className="secondary compactButton" onClick={() => setOpened(false)} aria-label="Закрыть">✕</button>
+          <button type="button" className="secondary compactButton" onClick={event => {event.preventDefault();event.stopPropagation();setOpened(false);}} aria-label="Закрыть">✕</button>
         </div>
         <input aria-label="Поиск в библиотеке" placeholder="Поиск по названию или контрагенту" value={query} onChange={e => setQuery(e.target.value)} autoFocus />
         {busy && <p>Загружаем файлы…</p>}
         {error && <p className="error" role="alert">{error}</p>}
         {!busy && !error && filtered.length === 0 && <p>Подходящие файлы не найдены.</p>}
         <div className="msmLibModalList">
-          {filtered.map(item => <button type="button" key={item.id} onClick={() => { onSelect({id:item.id,originalName:item.originalName}); setOpened(false); }}>
+          {filtered.map(item => <button type="button" key={item.id} onClick={event => { event.preventDefault();event.stopPropagation();onSelect({id:item.id,originalName:item.originalName}); setOpened(false); }}>
             <strong>{item.originalName}</strong><small>{item.deal?.clientName || 'Без сделки'}{item.createdAt ? ' · ' + new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}</small>
           </button>)}
         </div>
         <small>Файл не копируется: при сохранении он связывается с нужной сделкой или задачей.</small>
       </section>
-    </div>}
+    </div>, document.body)}
   </>;
 }

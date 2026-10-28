@@ -1,0 +1,13 @@
+.msmDropZone { border: 1px dashed transparent; border-radius: 12px; transition: background .15s, border-color .15s; min-width: 0; }
+.msmDropZone.msmDragging { border-color: #718747; background: #eff5e4; }
+.msmDropHint { display: none; color: #626b55; padding: 4px 0 8px; }
+@media (hover: hover) and (pointer: fine) { .msmDropHint { display: block; } }
+.msmFileRowActions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; flex-shrink:0; }
+.msmUnifiedFileRow > div:first-child {min-width:0;overflow-wrap:anywhere;}
+.msmUnifiedFileRow {flex-wrap:wrap;}
+
+.msmInvoiceEditable {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:14px 0;}
+.msmInvoiceEditable small {grid-column:1 / -1;}
+.boShell button.msmCorrectionClose {color:#ff7272 !important;background:#df444422 !important;border:1px solid #df444477 !important;min-width:44px;min-height:44px;}
+.boShell button.msmCorrectionClose:hover {background:#df444444 !important;}
+@media(max-width:420px){.msmInvoiceEditable{gap:8px;}}

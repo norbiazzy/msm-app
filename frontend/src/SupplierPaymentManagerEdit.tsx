@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 /* MSM_DOCUMENT_FLOW_V9 */
 import { ManagerDocumentPicker } from './DocumentPickerV9';
 import {
@@ -513,7 +514,7 @@ export function SupplierPaymentManagerEdit({
           Комментарий
         </span>
 
-        <textarea
+        <AutoTextarea
           rows={4}
           value={comment}
           disabled={saving}

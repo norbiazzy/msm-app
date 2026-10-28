@@ -1,3 +1,4 @@
+import type { InvoiceReviewDraft } from '../../InvoiceManagerReviewV10';
 /* MSM_FIXES_V10 */
 import { useEffect, useState } from 'react';
 import { formatMoneyInput } from '../../shared/formatters';
@@ -90,6 +91,8 @@ export function DealDetail({
     incomingAmountDraft,
     setIncomingAmountDraft,
   ] = useState('');
+
+  const [invoiceReviewDraft, setInvoiceReviewDraft] = useState<InvoiceReviewDraft | null>(null);
 
   const [saving, setSaving] =
     useState(false);
@@ -732,6 +735,7 @@ export function DealDetail({
 
 
   function openCorrectionEditor() {
+    if (correctionOpen) {setCorrectionOpen(false);return;}
     const activeDeal = deal;
 
     if (!activeDeal) {
@@ -773,6 +777,7 @@ export function DealDetail({
 
 
   const { saveInvoiceData, confirm } = createDealInvoiceApprovalActions({
+    invoiceReviewDraft,
     dealId, user, deal, current, managerAmount, shipmentDate,
     parsedManagerAmount, setInvoiceMenuOpen, setSaving, setError, reload,
   });
@@ -878,6 +883,8 @@ export function DealDetail({
       />
 
       <InvoiceRequestPanel
+        invoiceReviewDraft={invoiceReviewDraft}
+        setInvoiceReviewDraft={setInvoiceReviewDraft}
         deal={deal}
         current={current}
         canManageDeal={canManageDeal}

@@ -1,5 +1,8 @@
+import {SupplierInvoicesComposer} from './SupplierInvoicesComposer';
+import {SupplierInvoiceRevision} from './SupplierInvoiceRevision';
+import { AutoTextarea } from './AutoTextarea';
 /* MSM_DOCUMENT_FLOW_V9 */
-import { ManagerDocumentPicker, AccountantDocumentPicker } from './DocumentPickerV9';
+import { AccountantDocumentPicker } from './DocumentPickerV9';
 import { TaskContextStrip } from './TaskContextStrip';
 import { PurchaseDocumentStatus } from './PurchaseDocumentStatus';
 import { LibraryFileChooser, linkLibraryFile, type LibrarySelection } from './LibraryFileChooser';
@@ -8,7 +11,7 @@ import { SupplierRealizations } from './SupplierRealizationsV13'; // MSM_REALIZA
 import { PurchaseDraftEditorV11 } from './PurchaseDraftEditorV11'; // MSM_PURCHASE_DRAFT_EDIT_V11
 import { TaskDataSection } from './TaskDataSection';
 import { TaskWorkSection } from './TaskWorkSection';
-import { PurchaseRequestSummary, SupplierPaymentSummary } from './SupplierWorkflowSummary';
+import { SupplierPaymentSummary } from './SupplierWorkflowSummary';
 /* MSM_STEP31_ACCOUNTANT_WORK_FORMS */
 /* MSM_STEP29_UNIFIED_TASK_LAYOUT */
 import { TaskDocuments } from './TaskDocuments';
@@ -27,7 +30,6 @@ import {
   addSupplierPayment,
   cancelSupplierPurchase,
   markSupplierPaymentStamped,
-  createSupplierPurchase,
   dealFileUrl,
   listSupplierPurchases,
   requestSupplierPayment,
@@ -175,666 +177,21 @@ function todayLocalDate() {
 // BLOCK IN DEAL
 // ======================================================
 
-export function PurchasesBlock({
-  deal,
-  user,
-  onChanged,
-}: {
-  deal: Deal;
-  user: CurrentUser;
-  onChanged:
-    () =>
-      void |
-      Promise<void>;
-}) {
-
-  const [
-    purchases,
-    setPurchases,
-  ] = useState<
-    SupplierPurchase[]
-  >([]);
-
-
-  const [adding, setAdding] =
-    useState(false);
-
-  const [
-    supplierName,
-    setSupplierName,
-  ] = useState('');
-
-  const [
-    invoiceAmount,
-    setInvoiceAmount,
-  ] = useState('');
-
-  const [comment, setComment] =
-    useState('');
-
-  const [files, setFiles] =
-    useState<File[]>([]);
-
-  const [
-    newIncomingFile,
-    setNewIncomingFile,
-  ] = useState<File | null>(null);
-
-  const [
-    selectedExistingFileId,
-    setSelectedExistingFileId,
-  ] = useState('');
-
-  const [urgent, setUrgent] =
-    useState(false);
-
-  const [saving, setSaving] =
-    useState(false);
-
-  const [error, setError] =
-    useState('');
-
-
-  const canManage =
-    user.role !==
-    'ACCOUNTANT';
-
-
-  const customerIncomingFiles =
-    (
-      deal.files || []
-    )
-      .filter(
-        (file) =>
-          file.category ===
-            'CUSTOMER_INVOICE_PRIMARY' ||
-          file.category
-            ?.startsWith(
-              'CORRECTION_PRIMARY_'
-            )
-      )
-      .sort(
-        (a, b) =>
-          new Date(
-            a.createdAt || 0
-          ).getTime() -
-          new Date(
-            b.createdAt || 0
-          ).getTime()
-      );
-
-
-  const defaultIncomingFileId =
-    customerIncomingFiles[
-      customerIncomingFiles.length - 1
-    ]?.id || '';
-
-
-  const selectedExistingFile =
-    customerIncomingFiles.find(
-      (file) =>
-        file.id ===
-        selectedExistingFileId
-    );
-
-
-  async function reload() {
-
-    setPurchases(
-      await listSupplierPurchases(
-        deal.id
-      )
-    );
-  }
-
-
-  useEffect(() => {
-
-    void reload();
-
-  }, [
-    deal.id,
-  ]);
-
-
-  useEffect(() => {
-    setSelectedExistingFileId(
-      defaultIncomingFileId
-    );
-  }, [
-    deal.id,
-    defaultIncomingFileId,
-  ]);
-
-
-  async function refreshAll() {
-
-    await reload();
-    await onChanged();
-  }
-
-
-  function resetForm() {
-
-    setSupplierName('');
-    setInvoiceAmount('');
-    setComment('');
-    setFiles([]);
-    setNewIncomingFile(null);
-    setSelectedExistingFileId(
-      defaultIncomingFileId
-    );
-    setUrgent(false);
-    setAdding(false);
-  }
-
-
-  async function submit(
-    mode:
-      'SAVE' |
-      'PAY',
-  ) {
-
-    const supplier =
-      supplierName.trim();
-
-
-    const amount =
-      parseMoney(
-        invoiceAmount
-      );
-
-
-    if (!supplier) {
-
-      setError(
-        'Укажите поставщика.'
-      );
-
-      return;
-    }
-
-
-    if (
-      amount === undefined
-    ) {
-
-      setError(
-        'Укажите сумму закупки.'
-      );
-
-      return;
-    }
-
-
-    setSaving(true);
-    setError('');
-
-
-    try {
-
-      const purchase =
-        await createSupplierPurchase(
-          deal.id,
-          {
-
-            supplierName:
-              supplier,
-
-            incomingInvoiceAmount:
-              amount,
-
-            comment:
-              comment.trim() ||
-              undefined,
-
-            sourceFileId:
-              newIncomingFile
-                ? undefined
-                : selectedExistingFileId ||
-                  undefined,
-
-            createdById:
-              user.id,
-          }
-        );
-
-
-      const mainFileToUpload =
-        newIncomingFile;
-
-
-      const extraFilesToUpload =
-        [...files];
-
-
-      const filesToUpload = [
-        ...(mainFileToUpload
-          ? [mainFileToUpload]
-          : []),
-        ...extraFilesToUpload,
-      ];
-
-
-      const commentToSend =
-        comment.trim() ||
-        undefined;
-
-
-      const urgentToSend =
-        urgent;
-
-
-      resetForm();
-
-
-      if (
-        filesToUpload.length > 0 ||
-        mode === 'PAY'
-      ) {
-
-        startBackgroundUploadJob({
-
-        // PART_V064_O22_EXISTING_DEAL_UPLOAD_PROGRESS
-        dealId:
-          deal.id,
-
-          title:
-            mode === 'PAY'
-              ? 'Передаём оплату бухгалтерии'
-              : 'Сохраняем документы закупки',
-
-          subtitle:
-            supplier,
-
-          files:
-            filesToUpload,
-
-
-          run:
-            async ({
-              upload,
-              setProgress,
-            }) => {
-
-              let uploadIndex = 0;
-
-
-              if (mainFileToUpload) {
-
-                await upload(
-                  deal.id,
-                  mainFileToUpload,
-                  'SUPPLIER_INVOICE_' +
-                  purchase.id,
-                  uploadIndex,
-                  filesToUpload.length,
-                );
-
-                uploadIndex++;
-              }
-
-
-              for (
-                const extraFile of
-                  extraFilesToUpload
-              ) {
-
-                await upload(
-                  deal.id,
-                  extraFile,
-                  'SUPPLIER_ATTACHMENT_' +
-                  purchase.id,
-                  uploadIndex,
-                  filesToUpload.length,
-                );
-
-                uploadIndex++;
-              }
-
-
-              if (
-                mode === 'PAY'
-              ) {
-
-                setProgress(94);
-
-
-                await requestSupplierPayment(
-                  deal.id,
-                  purchase.id,
-                  {
-
-                    amount,
-
-                    comment:
-                      commentToSend,
-
-                    urgent:
-                      urgentToSend,
-
-                    actorId:
-                      user.id,
-                  }
-                );
-              }
-
-
-              setProgress(99);
-
-              await refreshAll();
-            },
-        });
-
-
-        await reload();
-        await onChanged();
-
-      } else {
-
-        await refreshAll();
-      }
-
-
-    } catch (e) {
-
-      setError(
-        e instanceof Error
-          ? e.message
-          : String(e)
-      );
-
-
-    } finally {
-
-      setSaving(false);
-    }
-  }
-
-
-  const showForm =
-    canManage &&
-    (
-      purchases.length === 0 ||
-      adding
-    );
-
-
-  return (
-
-    <div className="purchaseBox purchaseBoxSimple">
-
-      <div className="purchaseHead">
-
-        <div>
-
-          {/* PART_V064_O1_INCOMING_TITLE */}
-          <span>
-            Входящие счета
-          </span>
-
-          <strong>
-            Поставщики
-          </strong>
-
-        </div>
-
-
-        <b>
-          {purchases.length}
-        </b>
-
-      </div>
-
-
-      {showForm && (
-
-        <div className="purchaseQuickForm">
-
-          <div className="purchaseQuickMain">
-
-            <label className="field">
-
-              <span>
-                Поставщик
-              </span>
-
-              <input
-                value={
-                  supplierName
-                }
-
-                onChange={(e) =>
-                  setSupplierName(
-                    e.target.value
-                  )
-                }
-
-                placeholder="Например: Bonolit"
-              />
-
-            </label>
-
-
-            <label className="field">
-
-              <span>
-                Сумма
-              </span>
-
-              <input
-                inputMode="decimal"
-
-                value={
-                  invoiceAmount
-                }
-
-                onChange={(e) =>
-                  setInvoiceAmount(
-                    formatMoneyInput(
-                      e.target.value
-                    )
-                  )
-                }
-
-                placeholder="215 000"
-              />
-
-            </label>
-
-          </div>
-
-
-          <div className="field purchaseFileField">
-              <span>Документы поставщика</span>
-              <ManagerDocumentPicker primaryFile={newIncomingFile}
-                onPrimaryChange={file => { setNewIncomingFile(file); if (file) setSelectedExistingFileId(''); }}
-                files={files} onChange={setFiles} />
-              {selectedExistingFile && !newIncomingFile && <div className="purchaseSelectedInvoice">
-                <span>Ранее выбранный счёт из сделки: {selectedExistingFile.originalName}</span>
-                <button type="button" className="secondary compactButton" onClick={() => setSelectedExistingFileId('')}>Открепить</button>
-              </div>}
-            </div>
-
-
-
-          <label className="field">
-
-            <span>
-              Комментарий
-              <small>
-                необязательно
-              </small>
-            </span>
-
-            <textarea
-              rows={2}
-
-              value={comment}
-
-              onChange={(e) =>
-                setComment(
-                  e.target.value
-                )
-              }
-
-              placeholder="Например: ДЗГИ, можно не оплачивать сразу"
-            />
-
-          </label>
-
-
-          <label className="urgentToggle purchaseUrgent">
-
-            <input
-              type="checkbox"
-
-              checked={urgent}
-
-              onChange={(e) =>
-                setUrgent(
-                  e.target.checked
-                )
-              }
-            />
-
-            <span>
-              Срочно
-            </span>
-
-          </label>
-
-
-          {/* MSM_SUPPLIER_WORKFLOW_V6_REQUEST */}
-          <PurchaseRequestSummary
-            supplierName={supplierName}
-            amountInput={invoiceAmount}
-            mainFileName={newIncomingFile?.name || selectedExistingFile?.originalName || null}
-            attachmentCount={files.length}
-            urgent={urgent}
-          />
-
-          <div className="purchaseQuickActions">
-
-            {
-              purchases.length > 0 && (
-
-              <button
-                type="button"
-                className="secondary"
-
-                disabled={saving}
-
-                onClick={() => {
-
-                  resetForm();
-                }}
-              >
-                Отмена
-              </button>
-
-            )}
-
-
-            <button
-              type="button"
-              className="secondary"
-
-              disabled={saving}
-
-              onClick={() =>
-                void submit(
-                  'SAVE'
-                )
-              }
-            >
-              Сохранить
-            </button>
-
-
-            <button
-              type="button"
-              className="primary"
-
-              disabled={saving}
-
-              onClick={() =>
-                void submit(
-                  'PAY'
-                )
-              }
-            >
-              {
-                saving
-                  ? 'Отправляем…'
-                  : 'Отправить в оплату'
-              }
-            </button>
-
-          </div>
-
-        </div>
-
-      )}
-
-
-      {purchases.length > 0 && (
-
-        <div className="purchaseList">
-
-          {purchases.map(
-            (purchase) => (
-
-            <PurchaseCard
-              key={purchase.id}
-              deal={deal}
-              purchase={purchase}
-              user={user}
-              canManage={canManage}
-              onChanged={refreshAll}
-            />
-
-          ))}
-
-        </div>
-
-      )}
-
-
-      {canManage &&
-        purchases.length > 0 &&
-        !adding && (
-
-        <button
-          type="button"
-          className="purchaseAddAnother"
-
-          onClick={() =>
-            setAdding(true)
-          }
-        >
-          + Добавить ещё поставщика
-        </button>
-
-      )}
-
-
-      {error && (
-
-        <div className="error">
-          {error}
-        </div>
-
-      )}
-
-    </div>
-  );
+export function PurchasesBlock({deal,user,onChanged}:{deal:Deal;user:CurrentUser;onChanged:()=>void|Promise<void>}) {
+  const [purchases,setPurchases]=useState<SupplierPurchase[]>([]);
+  const [adding,setAdding]=useState(false),[error,setError]=useState('');
+  const canManage=user.role!=='ACCOUNTANT';
+  async function reload(){setPurchases(await listSupplierPurchases(deal.id));}
+  useEffect(()=>{let live=true;setPurchases([]);setAdding(false);setError('');void listSupplierPurchases(deal.id).then(rows=>{if(live)setPurchases(rows);}).catch(e=>{if(live)setError(e instanceof Error?e.message:String(e));});return()=>{live=false;};},[deal.id]);
+  async function refreshAll(){await reload();await onChanged();}
+  return <div className="purchaseBox purchaseBoxSimple">
+    <div className="purchaseHead"><div><span>Документы и расчёты</span><strong>Входящие счета / реализации</strong></div><b>{purchases.length}</b></div>
+    {canManage&&(purchases.length===0||adding)&&<SupplierInvoicesComposer key={deal.id} dealId={deal.id} actorId={user.id} onCancel={purchases.length?()=>setAdding(false):undefined} onSaved={async complete=>{setAdding(!complete);await refreshAll();}}/>}
+    {purchases.map(purchase=><PurchaseCard key={purchase.id} deal={deal} purchase={purchase} user={user} canManage={canManage} onChanged={refreshAll}/>)}
+    {canManage&&purchases.length>0&&!adding&&<button type="button" className="purchaseAddAnother" onClick={()=>setAdding(true)}>+ Добавить входящие счета</button>}
+    {error&&<p className="error" role="alert">{error}</p>}
+  </div>;
 }
-
-
-// ======================================================
-// PURCHASE CARD
-// ======================================================
 
 function PurchaseCard({
   deal,
@@ -1363,6 +720,7 @@ function PurchaseCard({
 
   function requestPayment() {
 
+    if(!purchase.supplierName?.trim()||purchase.supplierName==='Поставщик не указан'){setError('Укажите поставщика перед отправкой в оплату.');return;}
     setError('');
 
 
@@ -1463,15 +821,7 @@ function PurchaseCard({
             {purchase.supplierName}
           </strong>
 
-          <b className="purchaseAmountMain">
-            {
-              money(purchase.requestedAmount ?? purchase.incomingInvoiceAmount)
-            }
-            </b>
-            {purchase.requestedAmount != null &&
-             Number(purchase.requestedAmount) !== Number(purchase.incomingInvoiceAmount) && (
-              <small className="msmPurchaseInvoiceAmountV11">По счёту: {money(purchase.incomingInvoiceAmount)}</small>
-            )}
+          {purchase.incomingInvoiceNumber&&<small>Счёт № {purchase.incomingInvoiceNumber}</small>}
 
         </div>
 
@@ -1492,7 +842,14 @@ function PurchaseCard({
       </div>
 
 
+      <div className="supplierBalanceGrid">
+        <div><span>Сумма счёта</span><b>{money(purchase.incomingInvoiceAmount)}</b></div>
+        <div><span>Учтено оплат</span><b>{money(paid)}</b></div>
+        <div><span>{Number(purchase.incomingInvoiceAmount??0)-paid<0?'Переплата':'К оплате'}</span><b>{purchase.incomingInvoiceAmount==null?'—':money(Math.abs(Math.round(Number(purchase.incomingInvoiceAmount)*100)-Math.round(paid*100))/100)}</b></div>
+      </div>
       <PurchaseDraftEditorV11 dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged} />
+      <SupplierInvoiceRevision dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged}/>
+
 
       <SupplierRealizations dealId={deal.id} purchase={purchase} user={user} onChanged={onChanged} />
 
@@ -1513,20 +870,7 @@ function PurchaseCard({
         <div className="purchaseInvoiceCurrentHead">
           <span>Входящий счёт</span>
 
-          {canManage &&
-            purchase.status !== 'PAID' && (
-            <button
-              type="button"
-              className="purchaseInvoiceEditButton"
-              onClick={() =>
-                invoiceEditOpen
-                  ? setInvoiceEditOpen(false)
-                  : openInvoiceEditor()
-              }
-            >
-              {invoiceEditOpen ? 'Закрыть' : 'Изменить'}
-            </button>
-          )}
+
         </div>
 
 
@@ -1567,6 +911,11 @@ function PurchaseCard({
 
       </div>
 
+
+      {previousPurchaseInvoices.length>0&&<details className="supplierInvoiceHistory"><summary>Предыдущие версии счёта · {previousPurchaseInvoices.length}</summary>
+        {previousPurchaseInvoices.map(file=><div className="versionRow" key={file.id}><span>{file.originalName}</span><a href={dealFileUrl(file.id)} target="_blank" rel="noreferrer">Открыть</a></div>)}
+        {(deal.auditEvents||[]).filter(event=>event.action==='SUPPLIER_INVOICE_REVISED'&&event.entityId===purchase.id).map(event=><p key={event.id}>{new Date(event.createdAt).toLocaleString('ru-RU')} · {String(event.oldValue?.amount??'—')} → {String(event.newValue?.amount??'—')} ₽ · {String(event.newValue?.reason??'')}</p>)}
+      </details>}
 
       {invoiceEditOpen && (
 
@@ -1861,7 +1210,7 @@ function PurchaseCard({
               <label className="field">
                 <span>Комментарий бухгалтерии</span>
 
-                <textarea
+                <AutoTextarea
                   rows={2}
                   value={balanceCorrectionComment}
                   onChange={(e) =>
@@ -2952,7 +2301,7 @@ export function SupplierPaymentTask({
               Комментарий
             </span>
 
-            <textarea
+            <AutoTextarea
               rows={2}
               value={comment}
 

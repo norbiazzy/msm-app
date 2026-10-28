@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 export type TaskDetails =
   Record<string, unknown>;
 
@@ -41,7 +42,7 @@ function Field({
       <span>{title}</span>
 
       {multiline ? (
-        <textarea
+        <AutoTextarea
           rows={3}
           value={value}
           onChange={(event) =>

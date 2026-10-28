@@ -49,9 +49,9 @@ export class InvoicesController {
   confirm(
     @Param('dealId') dealId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { actorId: string },
+    @Body() body: { actorId: string; number?: string; amount?: number },
   ) {
-    return this.invoices.confirm(dealId, invoiceId, body.actorId);
+    return this.invoices.confirm(dealId, invoiceId, body.actorId, body);
   }
 
   @Patch(':invoiceId/approve')

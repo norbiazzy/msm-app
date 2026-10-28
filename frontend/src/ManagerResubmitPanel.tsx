@@ -1,3 +1,4 @@
+import { AutoTextarea } from './AutoTextarea';
 import {
   useState,
 } from 'react';
@@ -210,7 +211,7 @@ export function ManagerResubmitPanel({
             : 'Общий комментарий'}
         </span>
 
-        <textarea
+        <AutoTextarea
           rows={4}
           value={description}
           disabled={saving}
